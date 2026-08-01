@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Draftroll browser integration fixture</title>
+    <script type="module" src="./host.ts"></script>
+  </head>
+  <body>
+    <main data-testid="host-app">
+      <section class="sheet">
+        <p class="eyebrow">Browser integration fixture</p>
+        <h1>Aria Stone · Character Sheet</h1>
+        <p>This surface belongs to the embedding application. Draftroll renders above it.</p>
+        <div class="actions">
+          <button data-testid="local-roll" type="button">Roll mixed dice</button>
+          <button data-testid="underlay-action" type="button">Underlying action</button>
+        </div>
+        <dl>
+          <div><dt>Status</dt><dd data-testid="status">Booting</dd></div>
+          <div><dt>Underlying clicks</dt><dd data-testid="click-count">0</dd></div>
+          <div><dt>Last total</dt><dd data-testid="last-total">—</dd></div>
+        </dl>
+        <section data-testid="text-results" aria-label="Dice results"></section>
+        <pre data-testid="state">{}</pre>
+      </section>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,77 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "draftroll-room",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-29",
+  "workers_dev": false,
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "DICE_ROOMS",
+        "class_name": "DiceRoomObject"
+      }
+    ]
+  },
+  "exports": {
+    "DiceRoomObject": {
+      "type": "durable-object",
+      "storage": "sqlite"
+    }
+  },
+  "env": {
+    "staging": {
+      "name": "draftroll-room-staging",
+      "workers_dev": true,
+      "vars": {
+        "DRAFTROLL_ENV": "staging",
+        "ALLOWED_ORIGINS": "https://staging-app.example.com",
+        "ALLOW_ANONYMOUS": "false",
+        "EVENT_BUFFER_LIMIT": "500",
+        "ROOM_POLICY_PRESET": "moderated-public-room",
+        "ROOM_TOKEN_ISSUER": "https://staging-app.example.com",
+        "ROOM_TOKEN_AUDIENCE": "draftroll-room-staging",
+        "ROOM_TOKEN_REQUIRE_JTI": "true"
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "draftroll-staging",
+          "database_id": "REPLACE_WITH_STAGING_D1_DATABASE_ID",
+          "migrations_dir": "migrations"
+        }
+      ]
+    },
+    "production": {
+      "name": "draftroll-room-production",
+      "workers_dev": false,
+      "routes": [
+        {
+          "pattern": "dice.example.com/*",
+          "zone_name": "example.com"
+        }
+      ],
+      "vars": {
+        "DRAFTROLL_ENV": "production",
+        "ALLOWED_ORIGINS": "https://app.example.com",
+        "ALLOW_ANONYMOUS": "false",
+        "EVENT_BUFFER_LIMIT": "1000",
+        "ROOM_POLICY_PRESET": "moderated-public-room",
+        "ROOM_TOKEN_ISSUER": "https://app.example.com",
+        "ROOM_TOKEN_AUDIENCE": "draftroll-room-production",
+        "ROOM_TOKEN_REQUIRE_JTI": "true"
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "draftroll-production",
+          "database_id": "REPLACE_WITH_PRODUCTION_D1_DATABASE_ID",
+          "migrations_dir": "migrations"
+        }
+      ]
+    }
+  }
+}

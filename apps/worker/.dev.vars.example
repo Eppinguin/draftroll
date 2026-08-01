@@ -1,0 +1,6 @@
+# Copy to apps/worker/.dev.vars for local secure-token testing only.
+# Never commit real secrets.
+ROOM_TOKEN_KEYS={"local-2026-01":"replace-with-at-least-32-random-characters"}
+ROOM_TOKEN_ISSUER=http://localhost:5173
+ROOM_TOKEN_AUDIENCE=draftroll-room-local
+ROOM_TOKEN_REQUIRE_JTI=true

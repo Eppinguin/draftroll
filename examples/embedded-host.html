@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Draftroll embedded host example</title>
+    <style>
+      :root { font-family: Inter, system-ui, sans-serif; color: #172033; background: #eef2f8; }
+      body { margin: 0; min-height: 100vh; }
+      main { max-width: 920px; margin: 0 auto; padding: 64px 24px; }
+      .site-card { border: 1px solid #cad2e0; border-radius: 18px; padding: 24px; background: white; box-shadow: 0 12px 34px rgba(22,32,51,.08); }
+      .actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 18px 0; }
+      button { border: 0; border-radius: 10px; padding: 11px 15px; font: inherit; cursor: pointer; background: #253a68; color: white; }
+      button.secondary { background: #5d687f; }
+      code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      pre { min-height: 100px; overflow: auto; padding: 14px; border-radius: 12px; color: #dfe8ff; background: #10172a; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="site-card">
+        <p>This content belongs to the host website. Draftroll is mounted as a transparent layer above it.</p>
+        <h1>Character attack</h1>
+        <div class="actions">
+          <button id="attack" type="button">Roll 2d20, keep highest</button>
+          <button id="mixed-themes" type="button">Roll with three themes</button>
+          <button id="correct-log" class="secondary" type="button">Correct first die, log only</button>
+          <button id="replace-formula" class="secondary" type="button">Replace formula and roll again</button>
+          <button id="clear" class="secondary" type="button">Clear overlay</button>
+        </div>
+        <pre id="output">Mounting Draftroll…</pre>
+      </section>
+    </main>
+    <script type="module" src="/examples/embedded-host.ts"></script>
+  </body>
+</html>

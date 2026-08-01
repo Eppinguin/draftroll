@@ -1,0 +1,23 @@
+{
+  "name": "@draftroll/client",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@draftroll/protocol": "workspace:*",
+    "@draftroll/errors": "workspace:*"
+  },
+  "files": [
+    "dist"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "prepack": "node ../../scripts/build-packages.mjs"
+  }
+}

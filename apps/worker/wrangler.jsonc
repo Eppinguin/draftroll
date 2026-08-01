@@ -1,0 +1,38 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "draftroll-room",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-29",
+  "workers_dev": true,
+  "observability": {
+    "enabled": true
+  },
+  "vars": {
+    "DRAFTROLL_ENV": "local",
+    "ALLOWED_ORIGINS": "http://localhost:5173,http://127.0.0.1:5173,http://127.0.0.1:4173",
+    "ALLOW_ANONYMOUS": "true",
+    "EVENT_BUFFER_LIMIT": "200",
+    "ROOM_POLICY_PRESET": "open-table"
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "DICE_ROOMS",
+        "class_name": "DiceRoomObject"
+      }
+    ]
+  },
+  "exports": {
+    "DiceRoomObject": {
+      "type": "durable-object",
+      "storage": "sqlite"
+    }
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "draftroll-local",
+      "migrations_dir": "migrations"
+    }
+  ]
+}

@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#e8dfcc" />
+    <meta name="description" content="Draftroll character-sheet integration playground." />
+    <title>Draftroll — Character Sheet Test Client</title>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="app-header">
+        <div>
+          <p class="overline">DRAFTROLL SDK TEST HOST</p>
+          <h1>Field Character Sheet</h1>
+        </div>
+        <div class="header-tools">
+          <div id="sdk-room-status" class="connection-pill" aria-live="polite">OFFLINE</div>
+          <p class="dismiss-hint">Completed dice dissolve on the next click anywhere.</p>
+        </div>
+      </header>
+
+      <main class="sheet-layout">
+        <section class="sheet-page character-column" aria-label="Character sheet">
+          <div class="sheet-title-row">
+            <div>
+              <p class="section-label">CHARACTER RECORD</p>
+              <h2>Adventurer</h2>
+            </div>
+            <span class="edition-mark">PLAYTEST</span>
+          </div>
+
+          <div class="identity-grid">
+            <label class="field field-wide">
+              <span>Character name</span>
+              <input id="sheet-character-name" value="Mara Voss" autocomplete="off" />
+            </label>
+            <label class="field">
+              <span>Class</span>
+              <input id="sheet-character-class" value="Ranger" autocomplete="off" />
+            </label>
+            <label class="field field-small">
+              <span>Level</span>
+              <input id="sheet-character-level" type="number" min="1" value="5" />
+            </label>
+          </div>
+
+          <div class="rule"><span>Abilities</span></div>
+          <div class="ability-grid" aria-label="Ability checks">
+            <button type="button" class="ability formula-preset" data-formula="1d20+3" data-action="Strength check"><span>STR</span><strong>16</strong><small>+3</small></button>
+            <button type="button" class="ability formula-preset" data-formula="1d20+4" data-action="Dexterity check"><span>DEX</span><strong>18</strong><small>+4</small></button>
+            <button type="button" class="ability formula-preset" data-formula="1d20+2" data-action="Constitution check"><span>CON</span><strong>14</strong><small>+2</small></button>
+            <button type="button" class="ability formula-preset" data-formula="1d20+1" data-action="Intelligence check"><span>INT</span><strong>12</strong><small>+1</small></button>
+            <button type="button" class="ability formula-preset" data-formula="1d20+3" data-action="Wisdom check"><span>WIS</span><strong>16</strong><small>+3</small></button>
+            <button type="button" class="ability formula-preset" data-formula="1d20" data-action="Charisma check"><span>CHA</span><strong>10</strong><small>+0</small></button>
+          </div>
+
+          <div class="rule"><span>Actions</span></div>
+          <div class="action-list">
+            <button type="button" class="action formula-preset" data-formula="1d20+7" data-action="Longbow attack">
+              <span><strong>Longbow</strong><small>Ranged attack</small></span><code>1d20+7</code>
+            </button>
+            <button type="button" class="action formula-preset" data-formula="1d8+4" data-action="Longbow damage">
+              <span><strong>Longbow damage</strong><small>Piercing</small></span><code>1d8+4</code>
+            </button>
+            <button type="button" class="action formula-preset" data-formula="1d20+7+1d4" data-action="Blessed attack">
+              <span><strong>Blessed shot</strong><small>Mixed physical dice</small></span><code>1d20+7+1d4</code>
+            </button>
+            <button type="button" class="action formula-preset" data-formula="2d6+1d8+3" data-action="Mixed damage">
+              <span><strong>Mixed damage</strong><small>One synchronized throw</small></span><code>2d6+1d8+3</code>
+            </button>
+            <button type="button" class="action formula-preset" data-formula="1d20+1d2+1dF+1d9+1d100" data-action="Universal visual test">
+              <span><strong>Universal pool</strong><small>Physical dice + visual fallbacks</small></span><code>1d20+1d2+1dF+1d9+1d100</code>
+            </button>
+          </div>
+
+          <div class="rule"><span>Notes</span></div>
+          <textarea class="notes" aria-label="Character notes">Hunter's Mark active. Longbow uses the Wyrmfire theme.</textarea>
+        </section>
+
+        <section class="sheet-page roller-column" aria-label="Draftroll roller and room controls">
+          <div class="sheet-title-row">
+            <div>
+              <p class="section-label">DICE & ROOM</p>
+              <h2>Roll over the sheet</h2>
+            </div>
+            <span id="sdk-overlay-status" class="edition-mark">LOADING RENDERER</span>
+          </div>
+
+          <div class="room-box">
+            <label class="field">
+              <span>Wrangler server</span>
+              <input id="sdk-room-server" value="http://127.0.0.1:8787" spellcheck="false" />
+            </label>
+            <label class="field">
+              <span>Room ID</span>
+              <input id="sdk-room-id" value="local-table" spellcheck="false" />
+            </label>
+            <label class="field">
+              <span>Room password <small>(optional)</small></span>
+              <input id="sdk-room-password" type="password" autocomplete="current-password" />
+            </label>
+            <button id="sdk-room-connect" class="button secondary" type="button">Connect room</button>
+          </div>
+
+          <div class="roller-box">
+            <div class="two-fields">
+              <label class="field">
+                <span>Roll label</span>
+                <input id="sdk-action-name" value="Longbow attack" autocomplete="off" />
+              </label>
+              <label class="field">
+                <span>Character / roller</span>
+                <input id="sdk-roll-name" value="Mara Voss" autocomplete="off" />
+              </label>
+            </div>
+            <label class="field field-wide formula-field">
+              <span>Dice formula</span>
+              <input id="sdk-expression" value="1d20+7" spellcheck="false" />
+            </label>
+
+            <section class="fixed-results-panel" aria-label="Predetermined result tester">
+              <label class="fixed-results-toggle">
+                <input id="sdk-fixed-enabled" type="checkbox" />
+                <span>Use predetermined results</span>
+              </label>
+              <div class="fixed-results-controls">
+                <label class="field">
+                  <span>Values in roll order</span>
+                  <input id="sdk-fixed-results" value="20" placeholder="20, 6, 3" spellcheck="false" />
+                </label>
+                <button id="sdk-fixed-example" class="button text" type="button">Match formula</button>
+              </div>
+              <p id="sdk-fixed-hint" class="fixed-results-hint">Enable to make the physical dice land on these exact values.</p>
+            </section>
+
+            <label class="field">
+              <span>Default theme</span>
+              <select id="sdk-theme">
+                <option value="dragon">Wyrmfire</option>
+                <option value="celestial">Sunforged</option>
+                <option value="tempest">Stormbound</option>
+                <option value="frost">Glacier Heart</option>
+                <option value="nebula">Astral Void</option>
+                <option value="ember">Phoenix Forge</option>
+                <option value="necrotic">Gravebound</option>
+                <option value="wildwood">Verdant Oath</option>
+                <option value="test-obsidian">Obsidian Test (runtime)</option>
+              </select>
+            </label>
+            <div class="roller-actions">
+              <button id="sdk-room-roll" data-draftroll-preserve-table class="button primary" type="button" disabled>Roll in room</button>
+              <button id="sdk-roll" data-draftroll-preserve-table class="button secondary" type="button">Local preview</button>
+              <button id="sdk-update-roll" class="button secondary" type="button" disabled>Update + roll</button>
+              <button id="sdk-update-log" class="button text" type="button" disabled>Update log only</button>
+              <button id="sdk-clear-table" class="button text" type="button">Clear table</button>
+            </div>
+          </div>
+
+          <details class="table-test-panel" open>
+            <summary>Simultaneous table-roll tester</summary>
+            <p class="table-test-copy">Use 0–140 ms for one fully dynamic simultaneous throw. Larger delays add the second handful while the first roll is already moving or settled.</p>
+            <div class="two-fields">
+              <label class="field">
+                <span>Second roller</span>
+                <input id="sdk-second-roll-name" value="Tomas Reed" autocomplete="off" />
+              </label>
+              <label class="field">
+                <span>Second roll label</span>
+                <input id="sdk-second-action-name" value="Damage roll" autocomplete="off" />
+              </label>
+            </div>
+            <div class="table-test-grid">
+              <label class="field formula-field">
+                <span>Second formula</span>
+                <input id="sdk-second-expression" value="2d6" spellcheck="false" />
+              </label>
+              <label class="field">
+                <span>Second fixed values</span>
+                <input id="sdk-second-fixed-results" value="6, 5" spellcheck="false" />
+              </label>
+              <label class="field field-small">
+                <span>Delay (ms)</span>
+                <input id="sdk-second-delay" type="number" min="0" max="3000" step="50" value="80" />
+              </label>
+            </div>
+            <div class="roller-actions">
+              <button id="sdk-stage-two-rolls" data-draftroll-preserve-table class="button primary" type="button">Roll two people on one table</button>
+              <span id="sdk-table-test-status" class="table-test-status" aria-live="polite">Ready</span>
+            </div>
+          </details>
+
+          <section class="dice-log-section" aria-label="Dice log">
+            <div class="log-header">
+              <div>
+                <p class="section-label">DICE LOG</p>
+                <h3>Room history and revisions</h3>
+              </div>
+              <button id="sdk-refresh-log" class="button text" type="button">Refresh</button>
+            </div>
+            <div id="sdk-dice-log" class="dice-log" aria-live="polite">
+              <div class="empty-log">No rolls yet. Connect and roll a formula.</div>
+            </div>
+          </section>
+
+          <details class="debug-output">
+            <summary>Normalized SDK event</summary>
+            <pre id="sdk-output" aria-live="polite">The renderer is loading.</pre>
+          </details>
+        </section>
+      </main>
+    </div>
+    <script type="module" src="/src/character-client.ts"></script>
+  </body>
+</html>

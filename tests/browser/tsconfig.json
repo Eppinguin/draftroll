@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "types": ["node", "@playwright/test"],
+    "noEmit": true
+  },
+  "include": [
+    "../../playwright.config.ts",
+    "fixtures/**/*.ts",
+    "specs/**/*.ts",
+    "support/**/*.ts",
+    "vite.config.ts"
+  ]
+}

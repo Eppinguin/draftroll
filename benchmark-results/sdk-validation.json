@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-07-31T13:56:34.835Z",
+  "runtime": {
+    "node": "v22.16.0",
+    "platform": "linux",
+    "arch": "x64"
+  },
+  "methodology": {
+    "iterations": 500,
+    "warmupIterations": 100,
+    "clock": "node:perf_hooks.performance.now"
+  },
+  "operations": {
+    "parse": {
+      "count": 500,
+      "totalMs": 21.698565,
+      "meanMs": 0.043397,
+      "p50Ms": 0.01792,
+      "p95Ms": 0.049101,
+      "p99Ms": 0.266274,
+      "maxMs": 4.494442
+    },
+    "validate": {
+      "count": 500,
+      "totalMs": 25.395461,
+      "meanMs": 0.050791,
+      "p50Ms": 0.035785,
+      "p95Ms": 0.074696,
+      "p99Ms": 0.373038,
+      "maxMs": 3.704664
+    },
+    "evaluate": {
+      "count": 500,
+      "totalMs": 33.175504,
+      "meanMs": 0.066351,
+      "p50Ms": 0.048679,
+      "p95Ms": 0.125808,
+      "p99Ms": 0.340279,
+      "maxMs": 1.360304
+    },
+    "update": {
+      "count": 500,
+      "totalMs": 111.0915,
+      "meanMs": 0.222183,
+      "p50Ms": 0.155861,
+      "p95Ms": 0.428756,
+      "p99Ms": 0.708768,
+      "maxMs": 3.92584
+    }
+  },
+  "themeCache": {
+    "firstLoadMs": 4.021738,
+    "cachedLoadMs": 2.723808,
+    "upstreamThemeCalls": 1,
+    "upstreamAssetCalls": 1,
+    "cacheHitVerified": true
+  },
+  "notes": [
+    "These are local CPU/API measurements, not network or WebGL measurements.",
+    "Compare reports only when Node version, hardware, power state, and benchmark arguments are controlled."
+  ]
+}

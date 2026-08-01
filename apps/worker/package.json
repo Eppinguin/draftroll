@@ -1,0 +1,29 @@
+{
+  "name": "@draftroll/worker",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --config wrangler.jsonc --local --ip 127.0.0.1 --port 8787",
+    "deploy": "wrangler deploy --config wrangler.jsonc",
+    "types": "wrangler types --config wrangler.jsonc",
+    "check": "pnpm types && tsc -p tsconfig.json --noEmit",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local --config wrangler.jsonc",
+    "db:migrate:remote": "wrangler d1 migrations apply DB --remote --config wrangler.jsonc",
+    "db:reset:local": "node scripts/reset-local-state.mjs && pnpm db:migrate:local",
+    "db:history:local": "wrangler d1 execute DB --local --config wrangler.jsonc --command \"SELECT roll_id, room_id, sequence, revision, authority, total, created_at, updated_at FROM roll_history ORDER BY COALESCE(updated_at, created_at) DESC LIMIT 20\"",
+    "deploy:staging": "wrangler deploy --config wrangler.deploy.jsonc --env staging",
+    "deploy:production": "wrangler deploy --config wrangler.deploy.jsonc --env production",
+    "db:migrate:staging": "wrangler d1 migrations apply DB --remote --config wrangler.deploy.jsonc --env staging",
+    "db:migrate:production": "wrangler d1 migrations apply DB --remote --config wrangler.deploy.jsonc --env production"
+  },
+  "dependencies": {
+    "@draftroll/core": "workspace:*",
+    "@draftroll/protocol": "workspace:*",
+    "@draftroll/server": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3",
+    "wrangler": "^4.114.0"
+  }
+}
