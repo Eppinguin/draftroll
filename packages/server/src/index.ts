@@ -407,7 +407,18 @@ async function sign(value: string, secret: string): Promise<ArrayBuffer> {
 
 async function verifySignature(value: string, signature: Uint8Array, secret: string): Promise<boolean> {
   const key = await importHmacKey(secret, ['verify']);
-  return crypto.subtle.verify('HMAC', key, signature, new TextEncoder().encode(value));
+  return crypto.subtle.verify(
+    'HMAC',
+    key,
+    copyToArrayBuffer(signature),
+    new TextEncoder().encode(value),
+  );
+}
+
+function copyToArrayBuffer(value: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(value.byteLength);
+  copy.set(value);
+  return copy.buffer;
 }
 
 function importHmacKey(secret: string, usages: KeyUsage[]): Promise<CryptoKey> {

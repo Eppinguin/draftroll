@@ -41,3 +41,7 @@ pnpm check:docs:structure
 ```
 
 The structural mode still requires TypeScript, and it does not replace the normal parser-backed check in CI or release validation.
+
+## Integration with repository checks
+
+`pnpm check` runs Oxlint and Oxfmt verification before TSDoc and TypeScript validation. Documentation comments must therefore be both valid TSDoc and correctly formatted. See `docs/CODE_QUALITY.md` for the complete quality-gate policy.

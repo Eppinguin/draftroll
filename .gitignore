@@ -2,3 +2,7 @@ node_modules/
 apps/worker/.wrangler/
 dist/
 .dev.vars
+.release-build/
+test-results/browser-artifacts/
+playwright-report/
+dist-browser/

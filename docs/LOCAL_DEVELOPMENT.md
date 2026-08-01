@@ -25,6 +25,18 @@ All unpublished internal packages use `workspace:*`, so pnpm links them locally.
 
 The first successful install creates `pnpm-lock.yaml`. Commit that file once dependencies resolve on your machine.
 
+## Run the required quality gates
+
+Run these commands from the repository root:
+
+```bash
+pnpm lint
+pnpm format:check
+pnpm check
+```
+
+Use `pnpm lint:fix` for safe Oxlint fixes and `pnpm format` to apply Oxfmt. `pnpm check` also runs TSDoc validation and all TypeScript checks. See `docs/CODE_QUALITY.md` for the complete policy.
+
 ## Test completed-roll revisions without Wrangler
 
 Run the deterministic SDK/core revision test:

@@ -41,6 +41,7 @@ Draftroll currently provides:
 - conditional browser/headless SDK entry points plus TypeScript-AST import-graph regression tests that keep WebGL and physics-renderer code out of server-safe package graphs
 - generated ESM/declaration builds, workspace-local dependency linking, and offline staged-tarball smoke tests for every public package
 - TSDoc package documentation, explicit release tags, public class/member guidance, parser-backed checks, and declaration-preservation tests
+- strict Oxlint syntax/type-aware analysis, deterministic Oxfmt formatting, editor integration, and configuration regression checks
 
 - stable shared errors and AbortSignal cancellation across public packages
 - generic React, Vue, and Svelte bindings plus production-oriented generic examples

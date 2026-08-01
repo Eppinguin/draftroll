@@ -330,6 +330,16 @@ pnpm dev:stack
 
 See `docs/LOCAL_DEVELOPMENT.md` for the full local workflow.
 
+## Quality gates
+
+```bash
+pnpm lint
+pnpm format:check
+pnpm check
+```
+
+Oxlint runs strict syntax and type-aware rules with warnings treated as failures. Oxfmt is the formatting source of truth, and TypeScript remains the authoritative compiler check. See `docs/CODE_QUALITY.md` for rule scope, generated-file policy, editor setup, and dependency-update guidance.
+
 ## Production build
 
 ```bash
