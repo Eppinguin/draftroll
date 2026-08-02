@@ -19,7 +19,6 @@ import {
   type BulkRollUpdatedEvent,
   type ClientToServerEvent,
   type NormalizedRollResult,
-  type ProjectedRollVisibility,
   type RollAuditDetails,
   type RollErrorEvent,
   type RollStartEvent,
@@ -31,7 +30,6 @@ import {
   type RoomParticipant,
   type RoomPermission,
   type RoomPolicy,
-  type RoomPolicyPatch,
   type RoomPolicyPreset,
   type RoomPolicyUpdatedEvent,
   type RoomReplayEvent,
@@ -780,7 +778,7 @@ export class DiceRoomObject {
       const passwordProtected = Boolean(await this.state.storage.get<StoredRoomPassword>(ROOM_PASSWORD_STORAGE_KEY));
       const migrated = {
         ...stored,
-        access: { ...(stored.access ?? {}), passwordProtected },
+        access: { ...stored.access, passwordProtected },
         rateLimits: {
           ...stored.rateLimits,
           passwordAttemptsPerMinutePerIp: (stored.rateLimits as Partial<RoomPolicy['rateLimits']>).passwordAttemptsPerMinutePerIp ?? 10,
@@ -1297,7 +1295,7 @@ export class DiceRoomObject {
       );
       const payload = verified.payload;
       const permissions = uniqueStrings(payload.permissions ?? [])
-        .filter((permission): permission is RoomPermission => ROOM_PERMISSIONS.has(permission as RoomPermission));
+        .filter(isRoomPermission);
       const updated: ConnectionAttachment = {
         ...participant,
         participantId: payload.participantId,
@@ -1753,7 +1751,8 @@ export class DiceRoomObject {
     const latest = await this.getEventSequence();
     const events = (query.results ?? []).flatMap((row) => {
       try {
-        const internal = JSON.parse(row.event_json) as InternalRoomEvent;
+        // Deserializes rows this Durable Object previously serialized itself.
+        const internal: InternalRoomEvent = JSON.parse(row.event_json);
         if (internal.type === 'bulk_rolls_updated') return [];
         const projected = projectInternalEvent(internal, participant, true);
         return projected ? [projected] : [];
@@ -1804,10 +1803,9 @@ export class DiceRoomObject {
     return {
       roomId,
       rollId,
-      revisions: (query.results ?? []).map((row) => ({
-        ...projectStoredRoll(revisionRowToStoredRoll(row), participant),
-        recordedAt: row.recorded_at,
-      })),
+      // `projectStoredRoll` returns a freshly projected object per row.
+      revisions: (query.results ?? []).map((row) =>
+        Object.assign(projectStoredRoll(revisionRowToStoredRoll(row), participant), { recordedAt: row.recorded_at })),
     };
   }
 
@@ -2061,7 +2059,7 @@ export class DiceRoomObject {
 
   private async findDuplicateRequest(sessionId: string, requestId: string): Promise<InternalRoomEvent | null> {
     const entries = await this.state.storage.get<RequestCacheEntry[]>('requestCache') ?? [];
-    const match = [...entries].reverse().find((entry) => entry.key === `${sessionId}:${requestId}`);
+    const match = entries.toReversed().find((entry) => entry.key === `${sessionId}:${requestId}`);
     if (match) {
       const buffered = (await this.getEventBuffer()).find((event) => event.eventSequence === match.eventSequence);
       if (buffered) return buffered;
@@ -2084,7 +2082,9 @@ export class DiceRoomObject {
     const serialized = eventQuery.results?.[0]?.event_json;
     if (!serialized) return null;
     try {
-      return JSON.parse(serialized) as InternalRoomEvent;
+      // Deserializes storage this Durable Object previously serialized itself.
+      const parsed: InternalRoomEvent = JSON.parse(serialized);
+      return parsed;
     } catch {
       return null;
     }
@@ -2294,7 +2294,8 @@ function projectStoredRoll(record: StoredRoll, participant: ConnectionAttachment
 
 function createSummary(result: NormalizedRollResult, actor: RoomActor) {
   return {
-    rollId: result.rollId as string,
+    // Stored rolls always carry an id; fall back rather than emitting `undefined`.
+    rollId: result.rollId ?? '',
     sequence: result.sequence ?? 0,
     revision: result.revision ?? 0,
     name: result.name,
@@ -2474,7 +2475,7 @@ async function authorizeRequest(
   const name = cleanName(payload?.name ?? url.searchParams.get('name')) ?? 'Anonymous';
   const roles = uniqueStrings(payload?.roles ?? []);
   const permissions = payload
-    ? uniqueStrings(payload.permissions ?? []).filter((permission): permission is RoomPermission => ROOM_PERMISSIONS.has(permission as RoomPermission))
+    ? uniqueStrings(payload.permissions ?? []).filter(isRoomPermission)
     : authorizationComplete ? [...DEFAULT_ANONYMOUS_PERMISSIONS] : [];
   const queryMetadata = safeJsonParse(url.searchParams.get('participantMetadata') ?? '');
   const metadata = payload?.metadata ?? (isRecord(queryMetadata) ? queryMetadata : undefined);
@@ -2678,12 +2679,21 @@ function sendEvent(socket: WebSocket, event: ServerToClientEvent): void {
   socket.send(payload);
 }
 
+/** The Workers runtime augments WebSocket with hibernation attachment helpers. */
+interface HibernatableWebSocket extends WebSocket {
+  serializeAttachment(value: unknown): void;
+  deserializeAttachment(): unknown;
+}
+
 function serializeAttachment(socket: WebSocket, participant: ConnectionAttachment): void {
-  (socket as WebSocket & { serializeAttachment(value: unknown): void }).serializeAttachment(participant);
+  // The Workers runtime provides these methods; the standard WebSocket type omits them.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+  (socket as HibernatableWebSocket).serializeAttachment(participant);
 }
 
 function deserializeAttachment(socket: WebSocket): ConnectionAttachment | null {
-  const value = (socket as WebSocket & { deserializeAttachment<T>(): T | null }).deserializeAttachment<unknown>();
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+  const value = (socket as HibernatableWebSocket).deserializeAttachment();
   if (!isRecord(value)
     || typeof value.roomId !== 'string'
     || typeof value.participantId !== 'string'
@@ -2691,6 +2701,9 @@ function deserializeAttachment(socket: WebSocket): ConnectionAttachment | null {
     || typeof value.name !== 'string') return null;
   const connectedAt = typeof value.connectedAt === 'string' ? value.connectedAt : new Date().toISOString();
   return {
+    // The guards above establish every required participant field; the spread carries
+    // the remaining optional state that hibernation round-tripped.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion
     ...(value as unknown as RoomParticipant),
     roomId: value.roomId,
     connectedAt,
@@ -2808,6 +2821,16 @@ function assertRoomPassword(password: string): void {
   }
 }
 
+/**
+ * Copies into a freshly allocated `ArrayBuffer` so Web Crypto receives a `BufferSource`
+ * that is provably not backed by a `SharedArrayBuffer`.
+ */
+function copyToArrayBuffer(value: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(value.byteLength);
+  copy.set(value);
+  return copy.buffer;
+}
+
 async function deriveRoomPasswordHash(password: string, salt: Uint8Array, iterations: number): Promise<Uint8Array> {
   const key = await crypto.subtle.importKey(
     'raw',
@@ -2817,7 +2840,7 @@ async function deriveRoomPasswordHash(password: string, salt: Uint8Array, iterat
     ['deriveBits'],
   );
   const bits = await crypto.subtle.deriveBits(
-    { name: 'PBKDF2', hash: 'SHA-256', salt, iterations },
+    { name: 'PBKDF2', hash: 'SHA-256', salt: copyToArrayBuffer(salt), iterations },
     key,
     256,
   );
@@ -2841,10 +2864,6 @@ function base64UrlToBytes(value: string): Uint8Array {
   const padded = value.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(value.length / 4) * 4, '=');
   const binary = atob(padded);
   return Uint8Array.from(binary, (character) => character.charCodeAt(0));
-}
-
-function logPersistenceError(error: unknown): void {
-  console.error('Failed to persist Draftroll history', error);
 }
 
 function roomIdFromUrl(url: URL): string {
@@ -2872,8 +2891,8 @@ function safeJsonParse(value: string): unknown {
 function isOriginAllowed(request: Request, env: Env): boolean {
   const origin = request.headers.get('Origin');
   if (!origin) return true;
-  const allowed = env.ALLOWED_ORIGINS.split(',').map((item) => item.trim()).filter(Boolean);
-  return allowed.includes('*') || allowed.includes(origin);
+  const allowed = new Set(env.ALLOWED_ORIGINS.split(',').map((item) => item.trim()).filter(Boolean));
+  return allowed.has('*') || allowed.has(origin);
 }
 
 function rateLimitedResponse(error: unknown): Response {
@@ -2918,8 +2937,8 @@ function corsHeaders(request: Request, env: Env): Headers {
   });
 
   const origin = request.headers.get('Origin');
-  const allowed = env.ALLOWED_ORIGINS.split(',').map((item) => item.trim()).filter(Boolean);
-  if (origin && (allowed.includes('*') || allowed.includes(origin))) {
+  const allowed = new Set(env.ALLOWED_ORIGINS.split(',').map((item) => item.trim()).filter(Boolean));
+  if (origin && (allowed.has('*') || allowed.has(origin))) {
     headers.set('access-control-allow-origin', origin);
   }
   return headers;
@@ -2965,6 +2984,11 @@ function cleanName(value: string | null | undefined): string | null {
 function bearerToken(value: string | null): string | null {
   const match = /^Bearer\s+(.+)$/i.exec(value ?? '');
   return match?.[1] ?? null;
+}
+
+/** Type predicate narrowing an untrusted string to a known room permission. */
+function isRoomPermission(value: string): value is RoomPermission {
+  return (ROOM_PERMISSIONS as ReadonlySet<string>).has(value);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

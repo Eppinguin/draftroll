@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { readFileSync, realpathSync, statSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { readFileSync, statSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { loadTypeScript } from './lib/load-typescript.mjs';
 
 const root = resolve(import.meta.dirname, '..');
 const examples = {
@@ -36,9 +35,8 @@ for (const marker of [
 for (const forbidden of ['Draftsheet', '@draftsheet/', 'campaignId:', 'characterId:']) {
   assert.equal(combined.includes(forbidden), false, `examples contain product-specific assumption: ${forbidden}`);
 }
-const tscExecutable = realpathSync(execFileSync('which', ['tsc'], { encoding: 'utf8' }).trim());
-const ts = await import(pathToFileURL(resolve(dirname(tscExecutable), '../lib/typescript.js')).href);
-for (const file of sourceFiles.filter((file) => /\.(?:ts|tsx)$/.test(file))) {
+const ts = loadTypeScript();
+for (const file of sourceFiles.filter((candidate) => /\.(?:ts|tsx)$/.test(candidate))) {
   const result = ts.transpileModule(readFileSync(file, 'utf8'), {
     fileName: file, reportDiagnostics: true,
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, jsx: ts.JsxEmit.ReactJSX, isolatedModules: true },

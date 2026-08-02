@@ -200,7 +200,7 @@ export function negotiateProtocolVersion(value: unknown): DecodeResult<typeof DR
 export function decodeRollVisibility(value: unknown, options: DecodeOptions = {}): DecodeResult<RollVisibility> {
   const context = createContext({ rejectUnknownFields: true, ...options });
   validateRollVisibility(value, '$', context);
-  return context.result(value as RollVisibility, 'Roll visibility is invalid');
+  return context.result<RollVisibility>(value, 'Roll visibility is invalid');
 }
 
 /**
@@ -211,7 +211,7 @@ export function decodeRollVisibility(value: unknown, options: DecodeOptions = {}
 export function decodeRoomPolicy(value: unknown, options: DecodeOptions = {}): DecodeResult<RoomPolicy> {
   const context = createContext({ rejectUnknownFields: true, ...options });
   validateRoomPolicy(value, '$', context, false);
-  return context.result(value as RoomPolicy, 'Room policy is invalid');
+  return context.result<RoomPolicy>(value, 'Room policy is invalid');
 }
 
 /**
@@ -222,7 +222,7 @@ export function decodeRoomPolicy(value: unknown, options: DecodeOptions = {}): D
 export function decodeRoomPolicyPatch(value: unknown, options: DecodeOptions = {}): DecodeResult<RoomPolicyPatch> {
   const context = createContext({ rejectUnknownFields: true, ...options });
   validateRoomPolicy(value, '$', context, true);
-  return context.result(value as RoomPolicyPatch, 'Room policy patch is invalid');
+  return context.result<RoomPolicyPatch>(value, 'Room policy patch is invalid');
 }
 
 /**
@@ -239,7 +239,7 @@ export function decodeParticipantIdentityInput(value: unknown, options: DecodeOp
     if (value.name !== undefined) readString(value.name, '$.name', context, { maximum: 200 });
     validateOptionalMetadata(value.metadata, '$.metadata', context);
   }
-  return context.result(value as ParticipantIdentityInput, 'Participant identity is invalid');
+  return context.result<ParticipantIdentityInput>(value, 'Participant identity is invalid');
 }
 
 /**
@@ -283,7 +283,7 @@ export function decodeRoomCapabilityTokenPayload(value: unknown, options: Decode
       context.add(issue('invalid_value', '$.iat', 'Token issued-at time must not be after expiration', '<= $.exp', value.iat));
     }
   }
-  return context.result(value as RoomCapabilityTokenPayload, 'Room capability token payload is invalid');
+  return context.result<RoomCapabilityTokenPayload>(value, 'Room capability token payload is invalid');
 }
 
 /**
@@ -295,7 +295,7 @@ export function decodeCustomDiceDefinitions(value: unknown, options: DecodeOptio
   const context = createContext({ rejectUnknownFields: true, ...options });
   const candidate = structuredCloneIfObject(value);
   validateCustomDice(candidate, '$', context);
-  return context.result(candidate as CustomDiceDefinition[], 'Invalid custom dice definitions');
+  return context.result<CustomDiceDefinition[]>(candidate, 'Invalid custom dice definitions');
 }
 
 /**
@@ -306,7 +306,7 @@ export function decodeCustomDiceDefinitions(value: unknown, options: DecodeOptio
 export function decodeRollInput(value: unknown, options: DecodeOptions = {}): DecodeResult<RollInput> {
   const context = createContext({ rejectUnknownFields: true, ...options });
   validateRollInput(value, '$', context);
-  return context.result(value as RollInput, 'Roll input is invalid');
+  return context.result<RollInput>(value, 'Roll input is invalid');
 }
 
 /**
@@ -317,7 +317,7 @@ export function decodeRollInput(value: unknown, options: DecodeOptions = {}): De
 export function decodeRollUpdateInput(value: unknown, options: DecodeOptions = {}): DecodeResult<RollUpdateInput> {
   const context = createContext({ rejectUnknownFields: true, ...options });
   validateRollUpdate(value, '$', context);
-  return context.result(value as RollUpdateInput, 'Roll update is invalid');
+  return context.result<RollUpdateInput>(value, 'Roll update is invalid');
 }
 
 /**
@@ -332,7 +332,7 @@ export function decodeNormalizedRollResult(value: unknown, options: DecodeOption
   }
   const context = createContext({ rejectUnknownFields: true, ...options });
   validateNormalizedResult(cloned, '$', context);
-  return context.result(cloned as NormalizedRollResult, 'Normalized roll result is invalid');
+  return context.result<NormalizedRollResult>(cloned, 'Normalized roll result is invalid');
 }
 
 /**
@@ -361,7 +361,7 @@ export function migrateNormalizedRollResult(value: unknown): NormalizedRollResul
 export function decodeClientToServerEvent(value: unknown, options: DecodeOptions = {}): DecodeResult<ClientToServerEvent> {
   const context = createContext({ rejectUnknownFields: true, ...options });
   validateClientEvent(value, '$', context);
-  return context.result(value as ClientToServerEvent, 'Client room event is invalid');
+  return context.result<ClientToServerEvent>(value, 'Client room event is invalid');
 }
 
 /**
@@ -373,7 +373,7 @@ export function decodeServerToClientEvent(value: unknown, options: DecodeOptions
   const cloned = structuredCloneIfObject(value);
   const context = createContext({ rejectUnknownFields: true, ...options });
   validateServerEvent(cloned, '$', context);
-  return context.result(cloned as ServerToClientEvent, 'Server room event is invalid');
+  return context.result<ServerToClientEvent>(cloned, 'Server room event is invalid');
 }
 
 /**
@@ -428,7 +428,14 @@ interface ValidationContext {
   readonly limits: RuntimeValidationLimits;
   readonly rejectUnknownFields: boolean;
   add(issue: RuntimeValidationIssue): void;
-  result<T>(data: T, message: string): DecodeResult<T>;
+  /**
+   * Produces the decode result for a validated value.
+   *
+   * The caller passes the still-`unknown` input: this returns the typed success
+   * branch only when the preceding `validate*` pass recorded no issues, so the
+   * single narrowing below is the one place that relationship is asserted.
+   */
+  result<T>(data: unknown, message: string): DecodeResult<T>;
 }
 
 function createContext(options: DecodeOptions): ValidationContext {
@@ -441,8 +448,12 @@ function createContext(options: DecodeOptions): ValidationContext {
     add(problem) {
       if (issues.length < 100) issues.push(problem);
     },
-    result<T>(data: T, message: string): DecodeResult<T> {
-      return issues.length ? failure(message, issues) : { success: true, data };
+    result<T>(data: unknown, message: string): DecodeResult<T> {
+      // Safe by construction: the success branch is only reachable once the
+      // matching `validate*` call has confirmed the shape of `data`. This is the
+      // single trusted narrowing point for every `decode*` entry point.
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+      return issues.length ? failure(message, issues) : { success: true, data: data as T };
     },
   };
 }
@@ -544,6 +555,9 @@ function validateClientEvent(value: unknown, path: string, context: ValidationCo
       if (value.roundTripMs !== undefined) readRange(value.roundTripMs, `${path}.roundTripMs`, context, 0, 60_000);
       if (value.clockUncertaintyMs !== undefined) readRange(value.clockUncertaintyMs, `${path}.clockUncertaintyMs`, context, 0, 30_000);
       return;
+    case undefined:
+      // `readString` already recorded the missing/invalid-type issue.
+      return;
     default:
       context.add(issue('invalid_value', `${path}.type`, 'Unsupported client event type', 'known client event type', type));
   }
@@ -621,6 +635,9 @@ function validateServerEvent(value: unknown, path: string, context: ValidationCo
       if (value.supportedProtocolVersions !== undefined) validateNumberArray(value.supportedProtocolVersions, `${path}.supportedProtocolVersions`, context, 16);
       readOptionalNonNegativeInteger(value.retryAfterMs, `${path}.retryAfterMs`, context);
       readOptionalIdentifier(value.limit, `${path}.limit`, context);
+      return;
+    case undefined:
+      // `readString` already recorded the missing/invalid-type issue.
       return;
     default:
       context.add(issue('invalid_value', `${path}.type`, 'Unsupported server event type', 'known server event type', type));
@@ -779,7 +796,7 @@ function validateRoomPolicy(value: unknown, path: string, context: ValidationCon
     const allowed = patch
       ? ['open-table', 'private-gm-table', 'moderated-public-room']
       : ['open-table', 'private-gm-table', 'moderated-public-room', 'custom'];
-    if (!allowed.includes(String(value.preset))) context.add(issue('invalid_value', `${path}.preset`, 'Unknown room policy preset', allowed.join(' | '), value.preset));
+    if (!isOneOf(value.preset, allowed)) context.add(issue('invalid_value', `${path}.preset`, 'Unknown room policy preset', allowed.join(' | '), value.preset));
   } else if (!patch) {
     context.add(issue('missing_field', `${path}.preset`, 'Room policy preset is required', 'room policy preset', value.preset));
   }
@@ -806,7 +823,7 @@ function validatePolicyRenderer(value: unknown, path: string, context: Validatio
   if (!expectRecord(value, path, context)) return;
   unknownFields(value, ['defaultThemeId', 'performanceProfile', 'concurrentTableRolls', 'maximumConcurrentVisuals', 'autoClearMs', 'reducedMotion', 'fallbackOnly', 'requireRendererReady', 'requireThemesReady', 'readinessTimeoutMs', 'physicsPreset'], path, context);
   if (value.defaultThemeId !== undefined) readIdentifier(value.defaultThemeId, `${path}.defaultThemeId`, context, true);
-  if (value.performanceProfile !== undefined && !['auto', 'battery', 'quality'].includes(String(value.performanceProfile))) {
+  if (value.performanceProfile !== undefined && !isOneOf(value.performanceProfile, ['auto', 'battery', 'quality'])) {
     context.add(issue('invalid_value', `${path}.performanceProfile`, 'Unknown renderer performance profile', 'auto | battery | quality', value.performanceProfile));
   }
   if (value.concurrentTableRolls !== undefined) readBoolean(value.concurrentTableRolls, `${path}.concurrentTableRolls`, context, true);
@@ -817,7 +834,7 @@ function validatePolicyRenderer(value: unknown, path: string, context: Validatio
   if (value.requireRendererReady !== undefined) readBoolean(value.requireRendererReady, `${path}.requireRendererReady`, context, true);
   if (value.requireThemesReady !== undefined) readBoolean(value.requireThemesReady, `${path}.requireThemesReady`, context, true);
   if (value.readinessTimeoutMs !== undefined) readBoundedInteger(value.readinessTimeoutMs, `${path}.readinessTimeoutMs`, context, 0, 30_000);
-  if (value.physicsPreset !== undefined && !['standard', 'compact', 'heavy', 'low-gravity'].includes(String(value.physicsPreset))) {
+  if (value.physicsPreset !== undefined && !isOneOf(value.physicsPreset, ['standard', 'compact', 'heavy', 'low-gravity'])) {
     context.add(issue('invalid_value', `${path}.physicsPreset`, 'Unknown room physics preset', 'standard | compact | heavy | low-gravity', value.physicsPreset));
   }
 }
@@ -936,7 +953,7 @@ function validateEvaluateInput(value: Record<string, unknown>, path: string, con
   if (value.dialect !== undefined && value.dialect !== 'd20' && value.dialect !== 'draftroll') {
     context.add(issue('invalid_value', `${path}.dialect`, 'Unknown dice dialect', 'd20 | draftroll', value.dialect));
   }
-  if (value.advantage !== undefined && !['none', 'advantage', 'disadvantage'].includes(String(value.advantage))) {
+  if (value.advantage !== undefined && !isOneOf(value.advantage, ['none', 'advantage', 'disadvantage'])) {
     context.add(issue('invalid_value', `${path}.advantage`, 'Unknown advantage mode', 'none | advantage | disadvantage', value.advantage));
   }
   if (value.allowComments !== undefined) readBoolean(value.allowComments, `${path}.allowComments`, context);
@@ -999,7 +1016,7 @@ function validateNormalizedResult(value: unknown, path: string, context: Validat
   readOptionalNonNegativeInteger(value.sequence, `${path}.sequence`, context);
   readOptionalNonNegativeInteger(value.revision, `${path}.revision`, context);
   readOptionalIsoDate(value.updatedAt, `${path}.updatedAt`, context);
-  if (!['local', 'server', 'external'].includes(String(value.authority))) {
+  if (!isOneOf(value.authority, ['local', 'server', 'external'])) {
     context.add(issue('invalid_value', `${path}.authority`, 'Unknown roll authority', 'local | server | external', value.authority));
   }
   if (value.name !== undefined) readString(value.name, `${path}.name`, context, { maximum: 200 });
@@ -1011,13 +1028,13 @@ function validateNormalizedResult(value: unknown, path: string, context: Validat
   if (value.modifier !== undefined) readFiniteNumber(value.modifier, `${path}.modifier`, context, true);
   readNullableText(value.annotation, `${path}.annotation`, context);
   readNullableText(value.comment, `${path}.comment`, context);
-  if (value.critical !== undefined && !['none', 'critical-success', 'critical-failure'].includes(String(value.critical))) {
+  if (value.critical !== undefined && !isOneOf(value.critical, ['none', 'critical-success', 'critical-failure'])) {
     context.add(issue('invalid_value', `${path}.critical`, 'Unknown critical state', 'none | critical-success | critical-failure', value.critical));
   }
   if (value.dialect !== undefined && value.dialect !== 'd20' && value.dialect !== 'draftroll') {
     context.add(issue('invalid_value', `${path}.dialect`, 'Unknown dice dialect', 'd20 | draftroll', value.dialect));
   }
-  if (value.advantage !== undefined && !['none', 'advantage', 'disadvantage'].includes(String(value.advantage))) {
+  if (value.advantage !== undefined && !isOneOf(value.advantage, ['none', 'advantage', 'disadvantage'])) {
     context.add(issue('invalid_value', `${path}.advantage`, 'Unknown advantage mode', 'none | advantage | disadvantage', value.advantage));
   }
   if (value.tree !== undefined) validateTree(value.tree, `${path}.tree`, context, 0);
@@ -1044,7 +1061,7 @@ function validateNormalizedDie(value: unknown, path: string, context: Validation
   if (value.appearance !== undefined) validateAppearance(value.appearance, `${path}.appearance`, context);
   if (value.physics !== undefined) validatePhysicsProperties(value.physics, `${path}.physics`, context);
   readOptionalNonNegativeInteger(value.sourceRollIndex, `${path}.sourceRollIndex`, context);
-  if (value.generatedBy !== undefined && !['initial', 'reroll', 'reroll-add', 'explosion', 'external'].includes(String(value.generatedBy))) {
+  if (value.generatedBy !== undefined && !isOneOf(value.generatedBy, ['initial', 'reroll', 'reroll-add', 'explosion', 'external'])) {
     context.add(issue('invalid_value', `${path}.generatedBy`, 'Unknown die generation source', 'known generatedBy value', value.generatedBy));
   }
   readOptionalIdentifier(value.generatedFromDieId, `${path}.generatedFromDieId`, context);
@@ -1059,7 +1076,7 @@ function validateOperation(value: unknown, path: string, context: ValidationCont
   const supportedTypes = ['keep', 'drop', 'keep-highest', 'keep-lowest', 'drop-highest', 'drop-lowest', 'reroll', 'reroll-once', 'reroll-add', 'explode', 'minimum', 'maximum', 'success-count'];
   if (type !== undefined && !supportedTypes.includes(type)) context.add(issue('invalid_value', `${path}.type`, 'Unknown roll operation', supportedTypes.join(' | '), type));
   readOptionalNonNegativeInteger(value.count, `${path}.count`, context);
-  if (value.comparator !== undefined && !['=', '==', '!=', '<', '<=', '>', '>='].includes(String(value.comparator))) {
+  if (value.comparator !== undefined && !isOneOf(value.comparator, ['=', '==', '!=', '<', '<=', '>', '>='])) {
     context.add(issue('invalid_value', `${path}.comparator`, 'Unknown comparator', '= | == | != | < | <= | > | >=', value.comparator));
   }
   if (value.target !== undefined) readFiniteNumber(value.target, `${path}.target`, context, true);
@@ -1124,7 +1141,7 @@ function validatePlannedDie(value: unknown, path: string, context: ValidationCon
   if (value.physics !== undefined && value.physics !== null) validatePhysicsProperties(value.physics, `${path}.physics`, context);
   if (external) {
     readOptionalNonNegativeInteger(value.sourceRollIndex, `${path}.sourceRollIndex`, context);
-    if (value.generatedBy !== undefined && !['initial', 'reroll', 'reroll-add', 'explosion', 'external'].includes(String(value.generatedBy))) {
+    if (value.generatedBy !== undefined && !isOneOf(value.generatedBy, ['initial', 'reroll', 'reroll-add', 'explosion', 'external'])) {
       context.add(issue('invalid_value', `${path}.generatedBy`, 'Unknown die generation source', 'known generatedBy value', value.generatedBy));
     }
     readOptionalIdentifier(value.generatedFromDieId, `${path}.generatedFromDieId`, context);
@@ -1491,6 +1508,17 @@ function unknownFields(value: Record<string, unknown>, allowed: readonly string[
   for (const key of Object.keys(value)) {
     if (!allowedSet.has(key)) context.add(issue('unknown_field', `${path}.${key}`, `Unknown field '${key}'`, allowed.join(', '), key));
   }
+}
+
+/**
+ * Reports whether an untrusted value is one of the allowed string literals.
+ *
+ * Compares only genuine strings: coercing with `String()` first would let a
+ * non-string (an object with a crafted `toString`, for instance) satisfy the
+ * check, and would stringify objects to a useless `[object Object]`.
+ */
+function isOneOf(value: unknown, allowed: readonly string[]): boolean {
+  return typeof value === 'string' && allowed.includes(value);
 }
 
 function readString(

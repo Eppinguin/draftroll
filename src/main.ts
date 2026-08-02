@@ -196,13 +196,15 @@ declare global {
       playReplay: (replay: RollReplay, options?: DiceReplayOptions) => Promise<DraftrollRollCompletion>;
       dismiss: (options?: DiceDismissOptions) => Promise<void>;
       clear: () => void;
-      pause: () => void;
-      resume: () => void;
+      // These mirror `DraftrollBridge`, whose contract allows either a sync or async
+      // implementation. Consumers such as the overlay bridge must be free to await them.
+      pause: () => void | Promise<void>;
+      resume: () => void | Promise<void>;
       screenshot: () => Promise<string>;
-      configureCamera: (options: RendererCameraOptions) => void;
-      resetCamera: () => void;
+      configureCamera: (options: RendererCameraOptions) => void | Promise<void>;
+      resetCamera: () => void | Promise<void>;
       preview: (options?: Omit<RendererPreviewOptions, 'signal'>) => Promise<DraftrollRollCompletion>;
-      configureInteractions: (options: RendererInteractionOptions) => void;
+      configureInteractions: (options: RendererInteractionOptions) => void | Promise<void>;
       getPerformanceSnapshot: () => DicePerformanceSnapshot;
     };
   }
@@ -260,6 +262,10 @@ interface RollPlan {
   diagnostics?: RollPlanDiagnostics;
 }
 
+// The caller names the expected element type; `querySelector` forwards it. The generic is
+// only used in the return position, so this stays an assertion the DOM cannot verify --
+// the missing-element check below is what turns a silent null into a loud failure.
+// oxlint-disable-next-line typescript/no-unnecessary-type-parameters
 function mustElement<T extends Element>(selector: string, root: ParentNode = document): T {
   const element = root.querySelector<T>(selector);
   if (!element) throw new Error(`Required UI element is missing: ${selector}`);
@@ -1252,9 +1258,11 @@ function prepareTargets(): boolean {
   }
 
   const validOutcomes = new Set<EffectOutcome>(['positive', 'neutral', 'negative', 'none']);
+  // Defensive copy: callers own `queuedFallbacks`, so these must not be mutated in place.
+  // oxlint-disable-next-line oxc/no-map-spread
   const fallbacks = (queuedFallbacks ?? []).map((fallback) => ({
     ...fallback,
-    theme: THEME_MANIFESTS[fallback.theme as ThemeName] ? fallback.theme : selectedTheme,
+    theme: THEME_MANIFESTS[fallback.theme] ? fallback.theme : selectedTheme,
     outcome: validOutcomes.has(fallback.outcome) ? fallback.outcome : 'neutral',
     metadata: fallback.metadata ? { ...fallback.metadata } : undefined,
   }));
@@ -1617,7 +1625,7 @@ function createHandCluster(
     // half a second, but no inactive stack is ever visible.
     const ordered = result
       .map((spawn, index) => ({ index, key: spawn.position.x * 0.72 - spawn.position.z * 0.28 + spawn.position.y * 0.08 }))
-      .sort((left, right) => left.key - right.key);
+      .toSorted((left, right) => left.key - right.key);
     const waveSize = count >= 24 ? 7 : 6;
     const waveInterval = count >= 24 ? 0.105 : 0.115;
     ordered.forEach((entry, rank) => {
@@ -1666,10 +1674,10 @@ function createHandTargets(
       const relative = new THREE.Vector2(spawn.position.x, spawn.position.z).sub(handCenter);
       return { index, key: relative.dot(side) + spawn.scatterKey * 0.75 };
     })
-    .sort((a, b) => a.key - b.key);
+    .toSorted((a, b) => a.key - b.key);
   const targetOrder = localCloud
     .map((target, index) => ({ index, key: target.x + (random() - 0.5) * 0.7 }))
-    .sort((a, b) => a.key - b.key);
+    .toSorted((a, b) => a.key - b.key);
 
   // A few neighbour swaps emulate dice sliding between fingers and remove the
   // last visual trace of a perfect fan, while avoiding violent full-width
@@ -1897,6 +1905,20 @@ function appendFrame(buffer: number[], bodies: CANNON.Body[]): void {
   }
 }
 
+/** Jaccard-style overlap of two sorted contact-index lists, used to detect settled dice. */
+function contactSimilarity(a: number[], b: number[]): number {
+  if (a.length === 0 && b.length === 0) return 1;
+  let left = 0;
+  let right = 0;
+  let intersection = 0;
+  while (left < a.length && right < b.length) {
+    if (a[left] === b[right]) { intersection += 1; left += 1; right += 1; }
+    else if (a[left] < b[right]) left += 1;
+    else right += 1;
+  }
+  return intersection / Math.max(1, Math.max(a.length, b.length));
+}
+
 function buildRollPlanSync(states: LaunchState[]): RollPlan {
   const planner = new CANNON.World({ gravity: new CANNON.Vec3(0, -PHYSICS_PRESETS[activePhysicsPreset].gravity, 0) });
   configureWorld(planner);
@@ -1955,19 +1977,7 @@ function buildRollPlanSync(states: LaunchState[]): RollPlan {
       if (a === undefined || b === undefined) continue;
       keys.push(Math.min(a, b) * 128 + Math.max(a, b));
     }
-    return Array.from(new Set(keys)).sort((a, b) => a - b);
-  };
-  const contactSimilarity = (a: number[], b: number[]): number => {
-    if (a.length === 0 && b.length === 0) return 1;
-    let left = 0;
-    let right = 0;
-    let intersection = 0;
-    while (left < a.length && right < b.length) {
-      if (a[left] === b[right]) { intersection += 1; left += 1; right += 1; }
-      else if (a[left] < b[right]) left += 1;
-      else right += 1;
-    }
-    return intersection / Math.max(1, Math.max(a.length, b.length));
+    return Array.from(new Set(keys)).toSorted((a, b) => a - b);
   };
   const stablePositions = new Float32Array(plannerDice.length * 3);
   const copyStablePositions = (): void => plannerDice.forEach((body, index) => {
@@ -2124,15 +2134,14 @@ function getRollWorker(): Worker | null {
     if (!pending) return;
     pendingPlans.delete(response.id);
     const impactData = new Float32Array(response.impacts);
-    const impacts: RollImpact[] = new Array(Math.floor(impactData.length / 3));
-    for (let index = 0; index < impacts.length; index += 1) {
+    const impacts: RollImpact[] = Array.from({ length: Math.floor(impactData.length / 3) }, (_, index) => {
       const offset = index * 3;
-      impacts[index] = {
+      return {
         time: impactData[offset],
         dieIndex: Math.round(impactData[offset + 1]),
         strength: impactData[offset + 2],
       };
-    }
+    });
     pending.resolve({
       step: response.step,
       frameCount: response.frameCount,
@@ -2409,7 +2418,7 @@ function createEffectTimeline(plan: RollPlan, outcomes: EffectOutcome[]): RollRe
   outcomes.forEach((outcome, dieIndex) => {
     events.push({ time: settleTimes[dieIndex] ?? plan.duration, type: 'result', dieIndex, outcome });
   });
-  return events.sort((a, b) => a.time - b.time || a.dieIndex - b.dieIndex);
+  return events.toSorted((a, b) => a.time - b.time || a.dieIndex - b.dieIndex);
 }
 
 function captureReplay(plan: RollPlan): void {
@@ -2542,6 +2551,8 @@ function playRecordedReplay(replay: RollReplay, options: DiceReplayOptions = {})
   if (isRolling || isPlanning || replay.formatVersion !== 1) return Promise.reject(new Error('Renderer is busy or replay format is unsupported'));
   rebuildScreenBounds();
   applyRendererResolution();
+  // Defensive copy of the caller-supplied replay payload.
+  // oxlint-disable-next-line oxc/no-map-spread
   const replayFallbacks = (replay.fallbacks ?? []).map((fallback) => ({
     ...fallback,
     metadata: fallback.metadata ? { ...fallback.metadata } : undefined,
@@ -2696,14 +2707,14 @@ function normalizeAdditivePhysicalRequest(request: DiceRollRequest): AdditivePhy
   const rawResults = request.results;
   const results = rawResults === undefined
     ? []
-    : (Array.isArray(rawResults) ? rawResults : [rawResults]).map((value) => Math.round(Number(value)));
+    : (Array.isArray(rawResults) ? rawResults : [rawResults]).map((value) => Math.round(value));
   if (results.some((value) => !Number.isFinite(value))) return null;
   const fallbacks = request.fallbacks?.map((fallback) => ({
     ...fallback,
     metadata: fallback.metadata ? { ...fallback.metadata } : undefined,
   })) ?? [];
   if (results.length === 0 && fallbacks.length === 0) return null;
-  const context = { ...(request.context ?? {}) };
+  const context = { ...request.context };
   const seed = String(request.seed ?? `table-add:${Date.now()}`);
   const defaultVisualPrefix = typeof context.rollId === 'string' ? `${context.rollId}:` : `${seed}:`;
   const visualOrder = normalizeVisualOrder(request.visualOrder ?? null, results.length, fallbacks.length, defaultVisualPrefix);
@@ -3350,7 +3361,7 @@ function playSettledOutcomeEffects(plan: RollPlan, currentTime: number): void {
       const visual = fallbackVisuals[index];
       if (!spec || !visual) return;
       effects.playOutcome(
-        spec.theme as ThemeName,
+        spec.theme,
         spec.outcome,
         visual.getWorldPosition().setY(0.05),
         {
@@ -3590,7 +3601,7 @@ window.draftrollDice = {
       queuedOutcomes = request.outcomes === undefined
         ? null
         : Array.isArray(request.outcomes) ? request.outcomes.slice() : [request.outcomes];
-      queuedContext = { ...(request.context ?? {}) };
+      queuedContext = { ...request.context };
       queuedSeed = request.seed ?? null;
       queuedThemes = request.themes ?? null;
       queuedKinds = request.kinds ?? null;
@@ -3654,6 +3665,8 @@ window.draftrollDice = {
   setDie: (kind) => selectKind(kind),
   setQuantity: (count) => updateQuantity(count),
   setTheme: (theme) => selectTheme(theme),
+  // Deep copy so callers cannot mutate the shared THEME_MANIFESTS module state.
+  // oxlint-disable-next-line oxc/no-map-spread
   getThemes: () => Object.values(THEME_MANIFESTS).map((manifest) => ({ ...manifest, capabilities: { ...manifest.capabilities }, surfaceAudio: { ...manifest.surfaceAudio, pitchRange: [...manifest.surfaceAudio.pitchRange] as [number, number] } })),
   getThemeManifest: (theme) => {
     const manifest = THEME_MANIFESTS[theme];
@@ -3686,9 +3699,9 @@ window.draftrollDice = {
   },
   configure: (config) => {
     if (config.outcomeResolver !== undefined) outcomeResolver = config.outcomeResolver;
-    if (config.neutralEffects !== undefined) neutralEffects = Boolean(config.neutralEffects);
+    if (config.neutralEffects !== undefined) neutralEffects = config.neutralEffects;
     if (config.maxHeroEffects !== undefined) maxHeroEffects = THREE.MathUtils.clamp(Math.round(config.maxHeroEffects), 0, 30);
-    if (config.adaptiveQuality !== undefined) adaptiveQuality = Boolean(config.adaptiveQuality);
+    if (config.adaptiveQuality !== undefined) adaptiveQuality = config.adaptiveQuality;
     if (config.performanceProfile !== undefined) performanceProfile = config.performanceProfile;
     if (config.maximumPixelRatio !== undefined) configuredMaximumPixelRatio = THREE.MathUtils.clamp(config.maximumPixelRatio, 0.65, 2);
     if (config.activeFramesPerSecond !== undefined) configuredActiveFramesPerSecond = THREE.MathUtils.clamp(Math.round(config.activeFramesPerSecond), 15, 60);
@@ -3731,7 +3744,7 @@ window.draftrollDice = {
     if (typeof options.yaw === 'number' && Number.isFinite(options.yaw)) configuredCameraYaw = THREE.MathUtils.clamp(options.yaw, -Math.PI, Math.PI);
     if (typeof options.pitch === 'number' && Number.isFinite(options.pitch)) configuredCameraPitch = THREE.MathUtils.clamp(options.pitch, 0, Math.PI / 6);
     if (typeof options.zoom === 'number' && Number.isFinite(options.zoom)) configuredCameraZoom = THREE.MathUtils.clamp(options.zoom, 0.65, 1.8);
-    if (options.autoRotate !== undefined) cameraAutoRotate = Boolean(options.autoRotate);
+    if (options.autoRotate !== undefined) cameraAutoRotate = options.autoRotate;
     requestRender();
   },
   resetCamera: () => {

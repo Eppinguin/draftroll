@@ -190,7 +190,7 @@ function visualBounds(kind: DraftrollFallbackKind): {
 }
 
 function normalizeTheme(theme: string): ThemeName {
-  return Object.prototype.hasOwnProperty.call(THEMES, theme) ? theme as ThemeName : 'dragon';
+  return Object.prototype.hasOwnProperty.call(THEMES, theme) ? theme : 'dragon';
 }
 
 function truncate(value: string, maximum: number): string {

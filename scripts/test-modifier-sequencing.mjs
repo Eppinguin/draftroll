@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { runTsc } from './lib/load-typescript.mjs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -31,12 +31,12 @@ try {
       strict: true,
       skipLibCheck: true,
       esModuleInterop: true,
-      lib: ['ES2022', 'DOM', 'DOM.Iterable'],
+      lib: ['ES2023', 'DOM', 'DOM.Iterable'],
     },
     include: [join(projectRoot, 'packages/**/*.ts')],
   }, null, 2));
 
-  const compile = spawnSync('tsc', ['-p', configPath], { cwd: projectRoot, encoding: 'utf8' });
+  const compile = runTsc(['-p', configPath], { cwd: projectRoot });
   if (compile.status !== 0) {
     process.stderr.write(compile.stdout);
     process.stderr.write(compile.stderr);
@@ -122,7 +122,7 @@ try {
   const bridge = {
     roll(request) {
       calls.push(request);
-      return new Promise((resolve) => pending.push(() => resolve({ results: request.results ?? [], total: 0, replay: { stage: calls.length } })));
+      return new Promise((settle) => pending.push(() => settle({ results: request.results ?? [], total: 0, replay: { stage: calls.length } })));
     },
     setDie() {},
     setQuantity(count) { quantityCalls.push(count); },
@@ -351,7 +351,7 @@ try {
 async function waitFor(predicate) {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     if (predicate()) return;
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((settle) => setTimeout(settle, 0));
   }
   throw new Error('Timed out waiting for test condition');
 }

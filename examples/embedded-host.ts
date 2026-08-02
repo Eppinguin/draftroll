@@ -15,22 +15,34 @@ let current: SdkRollResponse | null = null;
 
 showMessage('Draftroll mounted. Create a roll, then revise it with or without animation.');
 
-document.querySelector('#attack')?.addEventListener('click', async () => {
+/** Runs an async click handler, reporting failures instead of leaving a floating promise. */
+function onClick(selector: string, handler: () => Promise<void>): void {
+  document.querySelector(selector)?.addEventListener('click', () => {
+    handler().catch((error: unknown) => {
+      showMessage(`Request failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  });
+}
+
+onClick('#attack', async () => {
   current = draftroll.roll('2d20kh1+5 [Attack]', {
     themes: ['dragon', 'frost'],
   });
   await showPresentation(current);
 });
 
-document.querySelector('#mixed-themes')?.addEventListener('click', async () => {
+onClick('#mixed-themes', async () => {
   current = draftroll.roll('3d6+2 [Damage]', {
     themes: ['tempest', 'ember', 'wildwood'],
   });
   await showPresentation(current);
 });
 
-document.querySelector('#correct-log')?.addEventListener('click', async () => {
-  if (!current) return showMessage('Create a roll before updating it.');
+onClick('#correct-log', async () => {
+  if (!current) {
+    showMessage('Create a roll before updating it.');
+    return;
+  }
   current = current.update({
     dice: [{ id: current.result.dice[0].id, result: maximumFor(current.result.dice[0].type), themeId: 'ember' }],
     annotation: 'Corrected by the host application',
@@ -40,8 +52,11 @@ document.querySelector('#correct-log')?.addEventListener('click', async () => {
   await showPresentation(current);
 });
 
-document.querySelector('#replace-formula')?.addEventListener('click', async () => {
-  if (!current) return showMessage('Create a roll before replacing its formula.');
+onClick('#replace-formula', async () => {
+  if (!current) {
+    showMessage('Create a roll before replacing its formula.');
+    return;
+  }
   current = current.update({
     expression: '3d20kh1+7 [Revised attack]',
   }, {

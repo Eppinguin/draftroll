@@ -333,7 +333,7 @@ export interface RollLiteralTreeNode extends RollTreeNodeBase {
 export interface RollDieTreeNode extends RollTreeNodeBase {
   kind: 'die';
   dieId: string;
-  sides: number | 'F' | string;
+  sides: number | 'F' | (string & {});
   generatedBy: NonNullable<NormalizedDieResult['generatedBy']>;
 }
 
@@ -345,7 +345,7 @@ export interface RollDieTreeNode extends RollTreeNodeBase {
 export interface RollDiceTreeNode extends RollTreeNodeBase {
   kind: 'dice';
   count: number;
-  sides: number | 'F';
+  sides: number | 'F' | (string & {});
   percentile?: boolean;
   children: RollDieTreeNode[];
 }

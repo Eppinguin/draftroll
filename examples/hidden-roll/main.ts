@@ -1,4 +1,4 @@
-import { DraftrollSession, type DraftrollRoomRoll } from '@draftroll/sdk/browser';
+import { DraftrollSession, type DraftrollRoomRoll } from '../../packages/sdk/src/browser';
 
 const session = new DraftrollSession();
 let latest: DraftrollRoomRoll | null = null;
@@ -17,7 +17,11 @@ document.querySelector('#connect')?.addEventListener('click', () => {
     autoPresent: false,
   });
 });
-document.querySelector('#hidden')?.addEventListener('click', async () => {
-  latest = await session.roll('1d20', { visibility: { type: 'roller' } });
+document.querySelector('#hidden')?.addEventListener('click', () => {
+  void session.roll('1d20', { visibility: { type: 'roller' } }).then((roll) => {
+    latest = roll;
+  }, (error: unknown) => {
+    report({ error: error instanceof Error ? error.message : String(error) });
+  });
 });
 document.querySelector('#reveal')?.addEventListener('click', () => { if (latest) void latest.reveal({ audit: { reason: 'Example reveal' } }); });

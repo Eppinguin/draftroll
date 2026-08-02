@@ -1,17 +1,15 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { dirname, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
+import { loadTypeScript } from './lib/load-typescript.mjs';
 
 const root = resolve(import.meta.dirname, '..');
 const temp = await mkdtemp(join(tmpdir(), 'draftroll-settlement-effects-'));
 
 try {
-  const tscExecutable = realpathSync(execFileSync('which', ['tsc'], { encoding: 'utf8' }).trim());
-  const ts = await import(pathToFileURL(resolve(dirname(tscExecutable), '../lib/typescript.js')).href);
+  const ts = loadTypeScript();
   const source = await readFile(join(root, 'src/settlement.ts'), 'utf8');
   const transpiled = ts.transpileModule(source, {
     fileName: 'settlement.ts',

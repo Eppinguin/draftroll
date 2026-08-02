@@ -92,7 +92,7 @@ export function consumeSettledVisualIndexes(
   const indexes: number[] = [];
   for (let index = 0; index < visualIds.length; index += 1) {
     const id = visualIds[index];
-    const settleTime = Number(settleTimes[index]);
+    const settleTime = settleTimes[index];
     if (!Number.isFinite(settleTime) || settleTime > currentTime + 1e-6 || consumed.has(id)) continue;
     consumed.add(id);
     indexes.push(index);

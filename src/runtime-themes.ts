@@ -38,7 +38,7 @@ export async function installRuntimeThemeBundle(bundle: RuntimeThemeBundle): Pro
     manifest,
     textures: new Map(),
     meshes: new Map(),
-    effects: manifest.effects as ThemeEffectSlots | undefined,
+    effects: manifest.effects,
   };
 
   await loadThemeTextures(bundle, resources);
@@ -269,7 +269,7 @@ async function parseMesh(data: ArrayBuffer, mimeType: string, maximumVertices: n
   let input: ArrayBuffer | string;
   if (mimeType.includes('json')) {
     const text = new TextDecoder().decode(data);
-    const document = JSON.parse(text) as { buffers?: Array<{ uri?: string }>; images?: Array<{ uri?: string }> };
+    const document: { buffers?: Array<{ uri?: string }>; images?: Array<{ uri?: string }> } = JSON.parse(text);
     const externalReferences = [
       ...(document.buffers ?? []).map((entry) => entry.uri),
       ...(document.images ?? []).map((entry) => entry.uri),
@@ -312,7 +312,7 @@ function disposeResources(resources: RuntimeThemeResources): void {
 
 function mergeMaterial(base?: ThemeMaterialDefinition, override?: ThemeMaterialDefinition): ThemeMaterialDefinition | undefined {
   if (!base && !override) return undefined;
-  return { ...(base ?? {}), ...(override ?? {}) };
+  return { ...base, ...override };
 }
 
 function cloneAsset(bundle: RuntimeThemeBundle, reference?: string): ArrayBuffer | undefined {
@@ -327,16 +327,14 @@ function readAudioProfile(value: unknown): ThemeSurfaceAudio {
     weight: 1,
     brightness: 0.5,
   };
-  if (!value || typeof value !== 'object') return fallback;
-  const record = value as Record<string, unknown>;
+  if (!isRecord(value)) return fallback;
+  const record = value;
   const impactSets = new Set<ThemeSurfaceAudio['impactSet']>(['stone', 'metal', 'crystal', 'resin', 'wood', 'bone']);
   const pitch = Array.isArray(record.pitchRange) && record.pitchRange.length === 2
     ? record.pitchRange.map(Number)
     : fallback.pitchRange;
   return {
-    impactSet: impactSets.has(record.impactSet as ThemeSurfaceAudio['impactSet'])
-      ? record.impactSet as ThemeSurfaceAudio['impactSet']
-      : fallback.impactSet,
+    impactSet: isImpactSet(record.impactSet, impactSets) ? record.impactSet : fallback.impactSet,
     pitchRange: [readFinite(pitch[0], fallback.pitchRange[0]), readFinite(pitch[1], fallback.pitchRange[1])],
     resonance: readFinite(record.resonance, fallback.resonance),
     weight: readFinite(record.weight, fallback.weight),
@@ -354,6 +352,19 @@ function parseColor(value: unknown, fallback: number): number {
 
 function readNumber(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+/** Narrows an unknown value to an indexable object without asserting a shape. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+/** Type predicate narrowing an untrusted value to a known impact-set identifier. */
+function isImpactSet(
+  value: unknown,
+  allowed: ReadonlySet<ThemeSurfaceAudio['impactSet']>,
+): value is ThemeSurfaceAudio['impactSet'] {
+  return typeof value === 'string' && allowed.has(value as ThemeSurfaceAudio['impactSet']);
 }
 
 function readFinite(value: unknown, fallback: number): number {

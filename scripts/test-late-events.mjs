@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { runTsc } from './lib/load-typescript.mjs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -21,12 +21,12 @@ try {
       strict: true,
       skipLibCheck: true,
       esModuleInterop: true,
-      lib: ['ES2022', 'DOM', 'DOM.Iterable'],
+      lib: ['ES2023', 'DOM', 'DOM.Iterable'],
     },
     include: [join(projectRoot, 'packages/**/*.ts')],
   }, null, 2));
 
-  const compile = spawnSync('tsc', ['-p', configPath], { cwd: projectRoot, encoding: 'utf8' });
+  const compile = runTsc(['-p', configPath], { cwd: projectRoot });
   if (compile.status !== 0) {
     process.stderr.write(compile.stdout);
     process.stderr.write(compile.stderr);

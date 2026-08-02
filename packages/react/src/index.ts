@@ -83,7 +83,8 @@ export function createDraftrollReactBindings(React: DraftrollReactRuntime): Draf
 
   function DraftrollProvider(props: DraftrollProviderProps): unknown {
     React.useEffect(() => {
-      if (!props.disposeOnUnmount) return;
+      // Returning `undefined` tells React there is no cleanup for this effect.
+      if (!props.disposeOnUnmount) return undefined;
       return () => { void props.session.dispose(); };
     }, [props.session, props.disposeOnUnmount]);
     return React.createElement(DraftrollContext.Provider, { value: props.session }, props.children);
@@ -115,9 +116,11 @@ export function createDraftrollReactBindings(React: DraftrollReactRuntime): Draf
   };
 }
 
-function createSessionSubscription(session: DraftrollSession): { subscribe(notify: () => void): () => void } {
+function createSessionSubscription(session: DraftrollSession): { subscribe(this: void, notify: () => void): () => void } {
   return {
-    subscribe(notify) {
+    // `this: void` documents and enforces that the method is safe to pass unbound,
+    // which `useSyncExternalStore` requires.
+    subscribe(this: void, notify) {
       const unsubscribers = [
         session.on('state', notify),
         session.on('rendererChanged', notify),

@@ -309,9 +309,9 @@ export class Draftroll {
    */
   on<K extends DraftrollEventName>(event: K, handler: (payload: DraftrollEventMap[K]) => void): () => void {
     const set = this.handlers.get(event) ?? new Set<(event: never) => void>();
-    set.add(handler as (event: never) => void);
+    set.add(handler);
     this.handlers.set(event, set);
-    return () => set.delete(handler as (event: never) => void);
+    return () => set.delete(handler);
   }
 
   /**
@@ -654,7 +654,7 @@ export class Draftroll {
   ): NonNullable<DiceRenderer[K]> {
     const method = this.currentRenderer?.[capability];
     if (typeof method !== 'function') {
-      throw new DraftrollError(DRAFTROLL_ERROR_CODES.rendererUnavailable, `The active renderer does not support ${String(capability)}`, {
+      throw new DraftrollError(DRAFTROLL_ERROR_CODES.rendererUnavailable, `The active renderer does not support ${capability}`, {
         package: 'sdk', recoverable: true, details: { capability },
       });
     }
@@ -756,7 +756,7 @@ export class Draftroll {
       update: (update, options) => this.updateRoll(identified, update, options),
       updateLog: (update, options) => this.updateRoll(identified, update, { ...options, mode: 'log-only' }),
       animateUpdate: (update, options) => this.updateRoll(identified, update, { ...options, mode: 'animate' }),
-      setDieResult: (dieId, result, options) => this.updateRoll(identified, { dice: [{ id: dieId, result }] }, options),
+      setDieResult: (dieId, dieResult, options) => this.updateRoll(identified, { dice: [{ id: dieId, result: dieResult }] }, options),
       setFormula: (expression, options) => this.updateRoll(identified, { expression }, options),
     };
     if (eventName) this.emit(eventName, response);
@@ -990,9 +990,9 @@ export class DraftrollRoomSession {
     handler: (payload: DraftrollRoomSessionEventMap[K]) => void,
   ): () => void {
     const set = this.handlers.get(event) ?? new Set<(payload: never) => void>();
-    set.add(handler as (payload: never) => void);
+    set.add(handler);
     this.handlers.set(event, set);
-    return () => set.delete(handler as (payload: never) => void);
+    return () => set.delete(handler);
   }
 
   /**
@@ -1584,9 +1584,9 @@ export class DraftrollSession {
     handler: (payload: DraftrollSessionEventMap[K]) => void,
   ): () => void {
     const set = this.handlers.get(event) ?? new Set<(payload: never) => void>();
-    set.add(handler as (payload: never) => void);
+    set.add(handler);
     this.handlers.set(event, set);
-    return () => set.delete(handler as (payload: never) => void);
+    return () => set.delete(handler);
   }
 
   /**
@@ -1836,7 +1836,13 @@ export class DraftrollSession {
       this.emit('state', this.snapshot);
       this.handlers.clear();
     }
-    if (cleanupError) throw cleanupError;
+    // Rethrow the original failure verbatim when it is already an Error so callers keep
+    // the stack and identity; non-Error throwables are wrapped to preserve `cause`.
+    if (cleanupError !== undefined) {
+      throw cleanupError instanceof Error
+        ? cleanupError
+        : new Error(`Renderer cleanup failed: ${describeThrowable(cleanupError)}`, { cause: cleanupError });
+    }
   }
 
   private bindRoom(room: DraftrollRoomSession): void {
@@ -2047,6 +2053,24 @@ function collectCausalDieIds(
     }
   }
   return affected;
+}
+
+/**
+ * Renders an arbitrary thrown value for an error message.
+ *
+ * Plain `String(value)` collapses objects to a useless `[object Object]`, which
+ * hides the very detail the message exists to convey.
+ */
+function describeThrowable(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'object' && value !== null) {
+    try {
+      return JSON.stringify(value) ?? Object.prototype.toString.call(value);
+    } catch {
+      return Object.prototype.toString.call(value);
+    }
+  }
+  return String(value);
 }
 
 function allocatePresentationDieId(base: string, used: Set<string>): string {

@@ -220,7 +220,7 @@ export async function verifyRoomCapabilityTokenDetailed(
     signaturePart = parts[1]!;
     signingInput = payloadPart;
   } else {
-    const parsedHeader = decodeJson(parts[0]!);
+    const parsedHeader = decodeJson(parts[0]);
     if (!isRoomTokenHeader(parsedHeader)) {
       return invalid('unsupported_token_header', 'The room capability token header is invalid or unsupported');
     }
@@ -373,9 +373,14 @@ function isSigningKey(value: unknown): value is RoomTokenSigningKey {
   return Boolean(value && typeof value === 'object' && 'id' in value && 'secret' in value);
 }
 
+/** Narrows an unknown value to an indexable object without asserting a shape. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
 function isRoomTokenHeader(value: unknown): value is RoomTokenHeader {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const record = value as Record<string, unknown>;
+  if (!isRecord(value) || Array.isArray(value)) return false;
+  const record = value;
   const allowed = new Set(['typ', 'alg', 'version', 'kid']);
   if (Object.keys(record).some((key) => !allowed.has(key))) return false;
   return record.typ === DRAFTROLL_ROOM_TOKEN_TYPE
@@ -435,7 +440,7 @@ function encodeJson(value: unknown): string {
   return base64UrlEncode(new TextEncoder().encode(JSON.stringify(value)));
 }
 
-function decodeJson(value: string): unknown | null {
+function decodeJson(value: string): unknown {
   try {
     return JSON.parse(new TextDecoder().decode(base64UrlDecode(value)));
   } catch {

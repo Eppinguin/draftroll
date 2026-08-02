@@ -51,7 +51,8 @@ export interface EffectQualityConfig {
 }
 
 interface ParticleBurst {
-  points: THREE.Points;
+  /** Parameterized so the position attribute and material need no narrowing. */
+  points: THREE.Points<THREE.BufferGeometry, THREE.PointsMaterial>;
   velocities: Float32Array;
   life: number;
   duration: number;
@@ -59,7 +60,8 @@ interface ParticleBurst {
 }
 
 interface AnimatedMesh {
-  mesh: THREE.Mesh;
+  /** Parameterized so material properties need no narrowing at animation time. */
+  mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
   life: number;
   duration: number;
   startScale: number;
@@ -68,7 +70,8 @@ interface AnimatedMesh {
 }
 
 interface AnimatedLine {
-  line: THREE.Line | THREE.LineSegments;
+  line: THREE.Line<THREE.BufferGeometry, THREE.LineBasicMaterial>
+    | THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial>;
   life: number;
   duration: number;
 }
@@ -94,8 +97,8 @@ interface DragonAnimation {
   head: THREE.Object3D;
   leftWing: THREE.Object3D;
   rightWing: THREE.Object3D;
-  wingMembraneLeft: THREE.Mesh;
-  wingMembraneRight: THREE.Mesh;
+  wingMembraneLeft: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
+  wingMembraneRight: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
   light: THREE.PointLight;
   fireOrigin: THREE.Object3D;
   fireDirection: THREE.Vector3;
@@ -151,7 +154,7 @@ interface LightningBatchRequest {
 }
 
 interface AnimatedRingBatch {
-  mesh: THREE.InstancedMesh;
+  mesh: THREE.InstancedMesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
   centers: Float32Array;
   life: number;
   duration: number;
@@ -349,7 +352,12 @@ function createDragonModel(color = 0x7d1a0d): Omit<DragonAnimation, 'life' | 'du
   wingPivotRight.position.z = -0.19;
   wingPivotRight.scale.z = -1;
   root.add(wingPivotRight);
-  const wingMembraneRight = wingPivotRight.children.find((child): child is THREE.Mesh => child instanceof THREE.Mesh && child.geometry instanceof THREE.ShapeGeometry) ?? wingMembraneLeft.clone();
+  const wingMembraneRight = wingPivotRight.children.find(
+    (child): child is THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> =>
+      child instanceof THREE.Mesh
+      && child.geometry instanceof THREE.ShapeGeometry
+      && child.material instanceof THREE.MeshStandardMaterial,
+  ) ?? wingMembraneLeft.clone();
 
   const tailFin = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.28, 4), new THREE.MeshStandardMaterial({ color: 0xd5933d, emissive: 0x73280c, emissiveIntensity: 0.25, roughness: 0.54 }));
   tailFin.position.set(-1.02, 0.11, 0.55);
@@ -380,7 +388,7 @@ function motifGeometry(kind: MotifKind): THREE.BufferGeometry {
     case 'leaf': return new THREE.SphereGeometry(0.055, 7, 5);
     case 'star': return new THREE.OctahedronGeometry(0.055, 0);
     case 'bone': return new THREE.CylinderGeometry(0.022, 0.028, 0.14, 5);
-    default: return new THREE.SphereGeometry(0.04, 7, 6);
+    case 'orb': return new THREE.SphereGeometry(0.04, 7, 6);
   }
 }
 
@@ -1317,7 +1325,7 @@ export class DraftrollEffects {
     for (let i = this.bursts.length - 1; i >= 0; i -= 1) {
       const burst = this.bursts[i];
       burst.life -= dt;
-      const positions = burst.points.geometry.getAttribute('position') as THREE.BufferAttribute;
+      const positions = burst.points.geometry.getAttribute('position');
       for (let j = 0; j < positions.count; j += 1) {
         const index = j * 3;
         burst.velocities[index + 1] -= burst.gravity * dt;
@@ -1326,12 +1334,11 @@ export class DraftrollEffects {
         positions.array[index + 2] += burst.velocities[index + 2] * dt;
       }
       positions.needsUpdate = true;
-      const material = burst.points.material as THREE.PointsMaterial;
-      material.opacity = Math.max(0, burst.life / burst.duration);
+      burst.points.material.opacity = Math.max(0, burst.life / burst.duration);
       if (burst.life <= 0) {
         this.scene.remove(burst.points);
         burst.points.geometry.dispose();
-        material.dispose();
+        burst.points.material.dispose();
         this.bursts.splice(i, 1);
       }
     }
@@ -1344,12 +1351,11 @@ export class DraftrollEffects {
       const scale = THREE.MathUtils.lerp(animation.startScale, animation.endScale, eased);
       animation.mesh.scale.setScalar(scale);
       animation.mesh.rotation.z += animation.spin * dt;
-      const material = animation.mesh.material as THREE.MeshBasicMaterial;
-      material.opacity = Math.sin(Math.min(1, progress) * Math.PI) * (1 - progress * 0.35);
+      animation.mesh.material.opacity = Math.sin(Math.min(1, progress) * Math.PI) * (1 - progress * 0.35);
       if (animation.life <= 0) {
         this.scene.remove(animation.mesh);
         animation.mesh.geometry.dispose();
-        material.dispose();
+        animation.mesh.material.dispose();
         this.meshes.splice(i, 1);
       }
     }
@@ -1361,8 +1367,7 @@ export class DraftrollEffects {
       const progress = THREE.MathUtils.clamp(1 - animation.life / animation.duration, 0, 1);
       const eased = 1 - Math.pow(1 - progress, 3);
       const scale = THREE.MathUtils.lerp(animation.startScale, animation.endScale, eased);
-      const material = animation.mesh.material as THREE.MeshBasicMaterial;
-      material.opacity = Math.sin(Math.min(1, progress) * Math.PI) * (1 - progress * 0.35);
+      animation.mesh.material.opacity = Math.sin(Math.min(1, progress) * Math.PI) * (1 - progress * 0.35);
       for (let instance = 0; instance < animation.mesh.count; instance += 1) {
         this.batchDummy.position.set(animation.centers[instance * 3], animation.centers[instance * 3 + 1], animation.centers[instance * 3 + 2]);
         this.batchDummy.rotation.set(-Math.PI / 2, animation.rotation, 0);
@@ -1374,7 +1379,7 @@ export class DraftrollEffects {
       if (animation.life <= 0) {
         this.scene.remove(animation.mesh);
         animation.mesh.geometry.dispose();
-        material.dispose();
+        animation.mesh.material.dispose();
         this.ringBatches.splice(i, 1);
       }
     }
@@ -1382,12 +1387,11 @@ export class DraftrollEffects {
     for (let i = this.lines.length - 1; i >= 0; i -= 1) {
       const animation = this.lines[i];
       animation.life -= dt;
-      const material = animation.line.material as THREE.LineBasicMaterial;
-      material.opacity = Math.max(0, animation.life / animation.duration) * (Math.random() > 0.25 ? 1 : 0.18);
+      animation.line.material.opacity = Math.max(0, animation.life / animation.duration) * (Math.random() > 0.25 ? 1 : 0.18);
       if (animation.life <= 0) {
         this.scene.remove(animation.line);
         animation.line.geometry.dispose();
-        material.dispose();
+        animation.line.material.dispose();
         this.lines.splice(i, 1);
       }
     }
@@ -1435,8 +1439,8 @@ export class DraftrollEffects {
       dragon.leftWing.rotation.y = 0.22 + flap * 0.08;
       dragon.rightWing.rotation.z = 0.35 + flap * 0.35;
       dragon.rightWing.rotation.y = -0.22 - flap * 0.08;
-      (dragon.wingMembraneLeft.material as THREE.MeshStandardMaterial).opacity = 0.82 + Math.abs(flap) * 0.1;
-      (dragon.wingMembraneRight.material as THREE.MeshStandardMaterial).opacity = 0.82 + Math.abs(flap) * 0.1;
+      dragon.wingMembraneLeft.material.opacity = 0.82 + Math.abs(flap) * 0.1;
+      dragon.wingMembraneRight.material.opacity = 0.82 + Math.abs(flap) * 0.1;
       dragon.light.intensity = easedAppear * (progress > 0.35 && progress < 0.75 ? 3.8 : 1.6);
 
       if (progress > 0.24 && progress < 0.78 && dragon.fireTimer > 0.06) {

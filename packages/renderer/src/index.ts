@@ -205,7 +205,7 @@ export interface RendererPlayOptions {
 export interface RendererCompletion {
   results: Array<number | string>;
   total: number;
-  replay: unknown | null;
+  replay: unknown;
   /** How this presentation was committed to the visible table. */
   presentationMode?: 'replace' | 'add';
 }
@@ -587,7 +587,7 @@ export class DraftrollRenderer implements DiceRenderer {
     this.maximumThemeTotalBytes = options.maximumThemeTotalBytes ?? 24 * 1024 * 1024;
     this.onThemeLoad = options.onThemeLoad;
     this.strictThemes = options.strictThemes ?? false;
-    this.tableDefaults = { mode: 'queue', batchWindowMs: 140, maximumConcurrentRolls: 6, maximumConcurrentVisuals: this.maximumDice, ...(options.table ?? {}) };
+    this.tableDefaults = { mode: 'queue', batchWindowMs: 140, maximumConcurrentRolls: 6, maximumConcurrentVisuals: this.maximumDice, ...options.table };
     if (options.performance) this.bridge.configure?.(options.performance);
     this.bridge.getThemes().forEach((theme) => this.installedThemes.add(theme.id));
   }
@@ -600,9 +600,9 @@ export class DraftrollRenderer implements DiceRenderer {
     handler: (payload: RendererLifecycleEventMap[K]) => void,
   ): () => void {
     const handlers = this.lifecycleHandlers.get(event) ?? new Set<(payload: never) => void>();
-    handlers.add(handler as (payload: never) => void);
+    handlers.add(handler);
     this.lifecycleHandlers.set(event, handlers);
-    return () => handlers.delete(handler as (payload: never) => void);
+    return () => handlers.delete(handler);
   }
 
   /**
@@ -735,7 +735,7 @@ export class DraftrollRenderer implements DiceRenderer {
       };
       preparedStages.push(await this.prepareRoll(result, {
         ...stageOptions,
-        table: { ...(options.table ?? {}), mode: 'queue' },
+        table: { ...options.table, mode: 'queue' },
       }, {
         dieIds: stage.dieIds,
         tableMode: stageIndex === 0
@@ -751,7 +751,7 @@ export class DraftrollRenderer implements DiceRenderer {
       }));
     }
 
-    let replay: unknown | null = null;
+    let replay: unknown = null;
     let presentationMode: RendererCompletion['presentationMode'];
     for (let stageIndex = 0; stageIndex < preparedStages.length; stageIndex += 1) {
       throwIfAborted(options.signal, 'Renderer modifier sequence');
@@ -844,7 +844,7 @@ export class DraftrollRenderer implements DiceRenderer {
       visualOrder.push({ kind: 'fallback', index: 0, dieId: fallbacks[0].id });
     }
 
-    const requestedTable = { ...this.tableDefaults, ...(options.table ?? {}) };
+    const requestedTable = { ...this.tableDefaults, ...options.table };
     const table = {
       ...requestedTable,
       mode: requestedTable.mode === 'concurrent' ? 'concurrent' as const : 'queue' as const,
@@ -961,7 +961,7 @@ export class DraftrollRenderer implements DiceRenderer {
         physicalKinds.push(visual.kind);
         themes.push(visual.theme);
         outcomes.push(visual.outcome);
-        physics.push({ ...(visual.physics ?? {}) });
+        physics.push({ ...visual.physics });
       });
       entry.fallbacks.forEach((fallback) => fallbacks.push({ ...fallback }));
       entry.visualOrder.forEach((visual) => visualOrder.push(visual.kind === 'physical'
@@ -1457,7 +1457,7 @@ function resolveModifierPresentationStages(
     grouped.set(depth, group);
   }
   return [...grouped.entries()]
-    .sort(([left], [right]) => left - right)
+    .toSorted(([left], [right]) => left - right)
     .map(([, dice]) => ({
       dieIds: dice.map((die) => die.id),
       generatedBy: stageGenerationSource(dice),
@@ -1467,7 +1467,7 @@ function resolveModifierPresentationStages(
 function stageGenerationSource(dice: readonly NormalizedDieResult[]): ModifierPresentationStage['generatedBy'] {
   const sources = new Set(dice.map((die) => die.generatedBy ?? 'initial'));
   return sources.size === 1
-    ? [...sources][0] as ModifierPresentationStage['generatedBy']
+    ? [...sources][0]
     : 'mixed';
 }
 
@@ -1499,8 +1499,8 @@ function createFallbackVisual(
     theme,
     outcome,
     metadata: {
-      ...(definition?.metadata ?? {}),
-      ...(die.metadata ?? {}),
+      ...definition?.metadata,
+      ...die.metadata,
       ...(die.faceMetadata ? { faceMetadata: die.faceMetadata } : {}),
       ...(die.faceIndex !== undefined ? { faceIndex: die.faceIndex } : {}),
     },

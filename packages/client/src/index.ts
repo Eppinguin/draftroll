@@ -309,9 +309,9 @@ export class DiceRoom {
    */
   on<K extends keyof DiceRoomEvents>(event: K, handler: EventHandler<DiceRoomEvents[K]>): () => void {
     const set = this.handlers.get(event) ?? new Set<EventHandler<never>>();
-    set.add(handler as EventHandler<never>);
+    set.add(handler);
     this.handlers.set(event, set);
-    return () => set.delete(handler as EventHandler<never>);
+    return () => set.delete(handler);
   }
 
   /**
@@ -844,7 +844,7 @@ export class DiceRoom {
       this.roomPolicyRevision = event.policyRevision;
       this.emit('roomState', event);
       this.metricsState.replayedEvents += event.recentEvents.length;
-      for (const replayed of [...event.recentEvents].sort((left, right) => left.eventSequence - right.eventSequence)) {
+      for (const replayed of event.recentEvents.toSorted((left, right) => left.eventSequence - right.eventSequence)) {
         if (replayed.type === 'room_policy_updated') {
           this.processRoomPolicyEvent({ ...replayed, replayed: true, elapsedMs: 0 });
         } else if (replayed.type === 'room_token_revoked') {
@@ -1080,14 +1080,14 @@ export class DiceRoom {
         this.pendingRequests.delete(requestId);
         cleanupAbort();
         this.metricsState.requestsAborted += 1;
-        this.recordRequestFailure({ startedAt } as PendingRequest, DRAFTROLL_ERROR_CODES.aborted, false);
+        this.recordRequestFailure({ startedAt }, DRAFTROLL_ERROR_CODES.aborted, false);
         reject(new DraftrollAbortError(`Room request '${requestId}'`, signal?.reason));
       };
       const timeout = setTimeout(() => {
         this.pendingRequests.delete(requestId);
         cleanupAbort();
         this.metricsState.requestsTimedOut += 1;
-        this.recordRequestFailure({ startedAt } as PendingRequest, DRAFTROLL_ERROR_CODES.roomRequestTimeout, false);
+        this.recordRequestFailure({ startedAt }, DRAFTROLL_ERROR_CODES.roomRequestTimeout, false);
         reject(new DiceRoomConnectionError(DRAFTROLL_ERROR_CODES.roomRequestTimeout, `Room request '${requestId}' timed out`, true));
       }, this.options.requestTimeoutMs);
       signal?.addEventListener('abort', handleAbort, { once: true });
@@ -1176,16 +1176,15 @@ export class DiceRoom {
         }
       }
       const events = payload.events ?? [];
-      const hasCursorMetadata = Number.isSafeInteger(payload.nextAfterEventSequence);
-      const hasLatestMetadata = Number.isSafeInteger(payload.latestEventSequence);
-      const nextCursor = hasCursorMetadata
-        ? Math.max(cursor, payload.nextAfterEventSequence as number)
-        : Math.max(cursor, ...(events.map((event) => (
-            event && typeof event === 'object' && Number.isSafeInteger((event as { eventSequence?: unknown }).eventSequence)
-              ? Number((event as { eventSequence: number }).eventSequence)
-              : cursor
-          ))));
-      const latest = hasLatestMetadata ? payload.latestEventSequence as number : nextCursor;
+      const nextCursor = isSafeInteger(payload.nextAfterEventSequence)
+        ? Math.max(cursor, payload.nextAfterEventSequence)
+        : Math.max(cursor, ...events.map((event) => {
+            const sequence: unknown = isRecord(event) ? event.eventSequence : undefined;
+            return isSafeInteger(sequence) ? sequence : cursor;
+          }));
+      const latestMetadata = isSafeInteger(payload.latestEventSequence) ? payload.latestEventSequence : undefined;
+      const hasLatestMetadata = latestMetadata !== undefined;
+      const latest = latestMetadata ?? nextCursor;
       // Older compatible endpoints may not include pagination metadata. In that
       // case, a full page means there may be another page; one final empty page
       // safely confirms completion without advancing past unprocessed events.
@@ -1491,4 +1490,14 @@ function createId(prefix: string): string {
 
 function asError(value: unknown): Error {
   return value instanceof Error ? value : new Error(String(value));
+}
+
+/** Narrowing counterpart to `Number.isSafeInteger`, which does not narrow on its own. */
+function isSafeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value);
+}
+
+/** Narrows an unknown value to an indexable object without asserting a shape. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }

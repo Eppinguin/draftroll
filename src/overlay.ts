@@ -149,7 +149,9 @@ async function handleCommand(message: DraftrollHostMessage, event: MessageEvent)
       return;
     }
 
-    if (message.type !== 'play') throw new Error(`Unsupported overlay message type: ${message.type}`);
+    // `message.type` narrows to `never` here; stringify defensively for the runtime case
+    // where a host posts a message type this build does not know about.
+    if (message.type !== 'play') throw new Error(`Unsupported overlay message type: ${String(message.type)}`);
 
     const outcomeById = new Map<string, DraftrollEffectOutcome>();
     message.result.dice.forEach((die, index) => {
@@ -199,8 +201,10 @@ function complete(requestId: string): Extract<DraftrollOverlayMessage, { type: '
 
 function respond(event: MessageEvent, message: DraftrollOverlayMessage): void {
   const target = event.source;
-  if (!target || typeof (target as Window).postMessage !== 'function') return;
-  (target as Window).postMessage(message, event.origin === 'null' ? '*' : event.origin);
+  // `MessageEventSource` also covers MessagePort and ServiceWorker, whose postMessage
+  // signatures differ; only a Window accepts a target origin.
+  if (target === null || !(target instanceof Window)) return;
+  target.postMessage(message, event.origin === 'null' ? '*' : event.origin);
 }
 
 function postToParent(message: DraftrollOverlayMessage): void {

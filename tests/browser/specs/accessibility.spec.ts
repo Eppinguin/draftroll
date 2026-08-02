@@ -4,6 +4,8 @@ import { waitForFixture } from '../support/fixture';
 test('accessible text fallback works with reduced motion and no WebGL', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.addInitScript(() => {
+    // Saved for restoration; deliberately referenced unbound and reassigned to the prototype.
+    // oxlint-disable-next-line typescript/unbound-method
     const original = HTMLCanvasElement.prototype.getContext;
     HTMLCanvasElement.prototype.getContext = function getContext(type: string, ...args: unknown[]) {
       if (type === 'webgl' || type === 'webgl2' || type === 'experimental-webgl') return null;

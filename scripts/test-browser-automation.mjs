@@ -1,7 +1,6 @@
-import { execFileSync } from 'node:child_process';
-import { readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { loadTypeScript } from './lib/load-typescript.mjs';
 
 const root = resolve(import.meta.dirname, '..');
 const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
@@ -32,9 +31,7 @@ for (const marker of ['cross-origin overlay', 'roller-only values', 'catches up 
   assert(combinedSpecs.includes(marker), `browser suite is missing coverage: ${marker}`);
 }
 
-const tscExecutable = realpathSync(execFileSync('which', ['tsc'], { encoding: 'utf8' }).trim());
-const typescriptModule = resolve(dirname(tscExecutable), '../lib/typescript.js');
-const ts = await import(pathToFileURL(typescriptModule).href);
+const ts = loadTypeScript();
 const sources = [
   join(root, 'playwright.config.ts'),
   join(root, 'tests/browser/vite.config.ts'),

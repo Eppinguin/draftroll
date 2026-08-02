@@ -1,13 +1,10 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, extname, join, normalize, relative, resolve, sep } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { loadTypeScript } from './lib/load-typescript.mjs';
 
 const root = resolve(import.meta.dirname, '..');
-const tscExecutable = realpathSync(execFileSync('which', ['tsc'], { encoding: 'utf8' }).trim());
-const typescriptModule = resolve(dirname(tscExecutable), '../lib/typescript.js');
-const ts = await import(pathToFileURL(typescriptModule).href);
+const ts = loadTypeScript();
 const workspacePackages = loadWorkspacePackages();
 const sdkManifest = readJson('packages/sdk/package.json');
 
@@ -161,8 +158,8 @@ function analyzeEntry(entry, policy) {
 
   return {
     entry,
-    files: [...visited].map(relativePath).sort(),
-    dynamicImports: [...dynamicImports].sort(),
+    files: [...visited].map(relativePath).toSorted((left, right) => left.localeCompare(right)),
+    dynamicImports: [...dynamicImports].toSorted((left, right) => left.localeCompare(right)),
   };
 }
 

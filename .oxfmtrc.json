@@ -1,0 +1,21 @@
+{
+  "printWidth": 100,
+  "tabWidth": 2,
+  "useTabs": false,
+  "semi": true,
+  "singleQuote": true,
+  "trailingComma": "all",
+  "endOfLine": "lf",
+  "ignorePatterns": [
+    "packages/*/dist/**",
+    "apps/worker/worker-configuration.d.ts",
+    "benchmark-results/**",
+    "pnpm-lock.yaml",
+    "dist/**",
+    "dist-browser/**",
+    "dist-overlay/**",
+    ".release-build/**",
+    "playwright-report/**",
+    "test-results/**"
+  ]
+}

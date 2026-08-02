@@ -95,6 +95,7 @@ export function connectionRecommendations(input: {
       ];
     case 'origin_not_allowed':
       return [{ code: 'check-origin', message: 'Ask the host to allow this browser origin.', action: 'manual' }];
+    case undefined:
     default:
       if (input.closeCode === 1006) {
         return [

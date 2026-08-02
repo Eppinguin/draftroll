@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { runTsc } from './lib/load-typescript.mjs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+
+const encodeSegment = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
+const decodeSegment = (value) => JSON.parse(Buffer.from(value, 'base64url').toString('utf8'));
 
 const projectRoot = resolve(new URL('..', import.meta.url).pathname);
 const tempRoot = await mkdtemp(join(tmpdir(), 'draftroll-token-security-'));
@@ -22,7 +25,7 @@ try {
       strict: true,
       skipLibCheck: true,
       esModuleInterop: true,
-      lib: ['ES2022', 'DOM', 'DOM.Iterable'],
+      lib: ['ES2023', 'DOM', 'DOM.Iterable'],
     },
     include: [
       join(projectRoot, 'packages/protocol/**/*.ts'),
@@ -30,7 +33,7 @@ try {
     ],
   }, null, 2));
 
-  const compile = spawnSync('tsc', ['-p', configPath], { cwd: projectRoot, encoding: 'utf8' });
+  const compile = runTsc(['-p', configPath], { cwd: projectRoot });
   if (compile.status !== 0) {
     process.stderr.write(compile.stdout);
     process.stderr.write(compile.stderr);
@@ -85,8 +88,6 @@ try {
     roomId: 'secure-table', now, issuer: 'https://app.example.test', audience: 'draftroll-room',
   }));
 
-  const encodeSegment = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
-  const decodeSegment = (value) => JSON.parse(Buffer.from(value, 'base64url').toString('utf8'));
   const [encodedHeader, encodedPayload, encodedSignature] = token.split('.');
 
   const escalatedPayload = decodeSegment(encodedPayload);

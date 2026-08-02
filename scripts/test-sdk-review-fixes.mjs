@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { runTsc } from './lib/load-typescript.mjs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -21,10 +21,10 @@ class SequenceRng {
 }
 
 const deferred = () => {
-  let resolve;
-  let reject;
-  const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
-  return { promise, resolve, reject };
+  let settle;
+  let fail;
+  const promise = new Promise((res, rej) => { settle = res; fail = rej; });
+  return { promise, resolve: settle, reject: fail };
 };
 
 try {
@@ -38,11 +38,11 @@ try {
       strict: true,
       skipLibCheck: true,
       esModuleInterop: true,
-      lib: ['ES2022', 'DOM', 'DOM.Iterable'],
+      lib: ['ES2023', 'DOM', 'DOM.Iterable'],
     },
     include: [join(projectRoot, 'packages/**/*.ts')],
   }, null, 2));
-  const compile = spawnSync('tsc', ['-p', configPath], { cwd: projectRoot, encoding: 'utf8' });
+  const compile = runTsc(['-p', configPath], { cwd: projectRoot });
   if (compile.status !== 0) {
     process.stderr.write(compile.stdout);
     process.stderr.write(compile.stderr);
@@ -115,7 +115,7 @@ try {
   process.on('unhandledRejection', onUnhandled);
   await assert.rejects(disconnected.roll('1d6'), /not connected/i);
   assert.equal(disconnected.pendingRequests.size, 0);
-  await new Promise((resolve) => setTimeout(resolve, 15));
+  await new Promise((settle) => setTimeout(settle, 15));
   process.off('unhandledRejection', onUnhandled);
   assert.equal(unhandled, 0);
 
@@ -179,7 +179,7 @@ try {
   failingDraftroll.on('error', ({ error }) => errors.push(error));
   const failedPresentation = failingDraftroll.roll('1d1');
   await assert.rejects(failedPresentation.wait(), /renderer exploded|Renderer operation/);
-  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((settle) => setTimeout(settle, 0));
   assert.equal(errors.length, 1);
   assert.equal(errors[0].code, 'renderer_operation_failed');
 
@@ -270,13 +270,17 @@ try {
   const roomSession = await DraftrollRoomSession.connect(roomDraftroll, {
     url: 'ws://example.test/rooms/room', roomId: 'room', WebSocketImpl: MockWebSocket, reconnect: false, clockSyncSamples: 1,
   });
+  /** @type {Promise<unknown> | undefined} */
   let listenerWait;
   roomSession.on('roll', (roll) => { listenerWait = roll.wait(); });
   const roomRollPromise = roomSession.roll('1d1');
-  while (!listenerWait) await new Promise((resolve) => setTimeout(resolve, 0));
+  // `listenerWait` is assigned by the 'roll' event handler above, which the rule cannot see.
+  // oxlint-disable-next-line eslint/no-unmodified-loop-condition
+  while (!listenerWait) await new Promise((settle) => setTimeout(settle, 0));
   let settled = false;
-  listenerWait.then(() => { settled = true; });
-  await new Promise((resolve) => setTimeout(resolve, 0));
+  // Deliberately unawaited: this probes whether the wait promise has settled yet.
+  void listenerWait.then(() => { settled = true; });
+  await new Promise((settle) => setTimeout(settle, 0));
   assert.equal(settled, false);
   presentationGate.resolve();
   await listenerWait;

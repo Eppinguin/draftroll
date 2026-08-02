@@ -19,7 +19,7 @@ export const DRAFTROLL_THEME_SCHEMA_VERSION = 1 as const;
  *
  * @public
  */
-export type ThemeDieType = 'd2' | 'd4' | 'd6' | 'd8' | 'd10' | 'd10x' | 'd12' | 'd20' | 'd100' | 'dF' | string;
+export type ThemeDieType = 'd2' | 'd4' | 'd6' | 'd8' | 'd10' | 'd10x' | 'd12' | 'd20' | 'd100' | 'dF' | (string & {});
 /**
  * Semantic outcome slots available to a theme.
  *
@@ -147,7 +147,7 @@ export interface DiceTheme {
   id: string;
   name: string;
   version: string;
-  renderer?: 'draftroll' | string;
+  renderer?: 'draftroll' | (string & {});
   description?: string;
   author?: string;
   previews?: Partial<Record<ThemeDieType | 'default', string>>;
@@ -276,6 +276,9 @@ export function decodeDiceTheme(value: unknown): DiceTheme {
   const id = readIdentifier(value.id, 'id');
   const name = readText(value.name, 'name', 120);
   const version = readText(value.version, 'version', 64);
+  // Trusted narrowing point: the field checks above and the per-section validation
+  // below establish the manifest shape before it is returned to callers.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion
   const theme = structuredClone(value) as unknown as DiceTheme;
   theme.id = id;
   theme.name = name;

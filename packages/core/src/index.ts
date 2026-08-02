@@ -249,7 +249,7 @@ export class DiceEngine {
     if (!allowComments && this.cacheSize > 0) {
       this.parseCache.set(cacheKey, structuredClone(parsed));
       if (this.parseCache.size > this.cacheSize) {
-        const oldest = this.parseCache.keys().next().value as string | undefined;
+        const oldest = this.parseCache.keys().next().value;
         if (oldest !== undefined) this.parseCache.delete(oldest);
       }
     }
@@ -602,10 +602,10 @@ export class DiceEngine {
       if (!plannedIds.has(dieId)) throw new Error(`Cannot reroll unknown die '${dieId}'`);
     }
 
-    const operations = previous.operations.map(toStructuredOperation).map((operation) => ({
-      ...operation,
-      dice: operation.dice?.filter((dieId) => !removed.has(dieId)),
-    }));
+    // `toStructuredOperation` already returns a fresh object, so it is safe to
+    // assign the filtered dice in place rather than allocating a second copy.
+    const operations = previous.operations.map(toStructuredOperation).map((operation) =>
+      Object.assign(operation, { dice: operation.dice?.filter((dieId) => !removed.has(dieId)) }));
     const modifier = update.modifier === undefined ? previous.modifier : update.modifier ?? undefined;
     const themeId = nullableValue(update.themeId, previous.themeId);
     const metadata = { ...previous.metadata, ...update.metadata, ...options.metadata };

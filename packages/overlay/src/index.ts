@@ -443,9 +443,9 @@ export class DraftrollOverlayRenderer implements DiceRenderer {
    */
   on<K extends RendererLifecycleEventName>(event: K, handler: (payload: RendererLifecycleEventMap[K]) => void): () => void {
     const handlers = this.lifecycleHandlers.get(event) ?? new Set<(payload: never) => void>();
-    handlers.add(handler as (payload: never) => void);
+    handlers.add(handler);
     this.lifecycleHandlers.set(event, handlers);
-    return () => handlers.delete(handler as (payload: never) => void);
+    return () => handlers.delete(handler);
   }
 
   /**
@@ -1025,20 +1025,24 @@ export class DraftrollResultPanel {
       button.type = 'button';
       button.textContent = 'Reroll';
       button.setAttribute('aria-label', `Reroll ${die.type} showing ${String(die.result)}`);
-      button.addEventListener('click', async () => {
-        if (!this.rerollHandler) return;
-        button.disabled = true;
-        button.textContent = 'Rolling…';
-        try {
-          await this.rerollHandler({ result, dieId: die.id });
-        } catch (error) {
-          this.showError(asError(error).message);
-        } finally {
-          if (button.isConnected) {
-            button.disabled = false;
-            button.textContent = 'Reroll';
+      // The async body handles all of its own failures, so the listener deliberately
+      // discards the resulting promise rather than surfacing it to the DOM.
+      button.addEventListener('click', () => {
+        void (async () => {
+          if (!this.rerollHandler) return;
+          button.disabled = true;
+          button.textContent = 'Rolling…';
+          try {
+            await this.rerollHandler({ result, dieId: die.id });
+          } catch (error) {
+            this.showError(asError(error).message);
+          } finally {
+            if (button.isConnected) {
+              button.disabled = false;
+              button.textContent = 'Reroll';
+            }
           }
-        }
+        })();
       });
       meta.append(button);
     }

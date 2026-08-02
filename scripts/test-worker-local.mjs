@@ -28,6 +28,8 @@ const stopServer = async () => {
     });
   } else {
     try {
+      if (server.pid === undefined) throw new Error('Worker process has no pid');
+      // Negative pid signals the whole process group spawned with `detached`.
       process.kill(-server.pid, 'SIGTERM');
     } catch {
       server.kill('SIGTERM');
@@ -49,7 +51,10 @@ async function runCommand(args) {
   await new Promise((resolve, reject) => {
     const child = spawn(pnpmCommand, args, { cwd: process.cwd(), env: process.env, stdio: 'inherit' });
     child.on('error', reject);
-    child.on('exit', (code) => code === 0 ? resolve() : reject(new Error(`pnpm ${args.join(' ')} exited with code ${code}`)));
+    child.on('exit', (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`pnpm ${args.join(' ')} exited with code ${code}`));
+    });
   });
 }
 

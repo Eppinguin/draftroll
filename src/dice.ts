@@ -185,7 +185,7 @@ function getLogicalFaceTemplate(kind: DieKind): LogicalFace[] {
       center: group.vertices.reduce((sum, vertex) => sum.add(vertex), new THREE.Vector3()).multiplyScalar(1 / group.vertices.length),
       vertices: group.vertices,
     }))
-    .sort((a, b) => {
+    .toSorted((a, b) => {
       const ay = Math.atan2(a.normal.z, a.normal.x);
       const by = Math.atan2(b.normal.z, b.normal.x);
       if (Math.abs(a.normal.y - b.normal.y) > 0.05) return b.normal.y - a.normal.y;
@@ -194,6 +194,8 @@ function getLogicalFaceTemplate(kind: DieKind): LogicalFace[] {
 
   if (sorted.length !== expected) console.warn(`Expected ${expected} faces for ${kind}, found ${sorted.length}.`);
   const values = kind === 'd4' ? [1, 2, 3, 4] : VALUE_ORDERS[kind];
+  // Copies cached geometry faces; mutating them would corrupt `logicalFaceCache`.
+  // oxlint-disable-next-line oxc/no-map-spread
   const faces = sorted.slice(0, expected).map((face, index) => ({ ...face, value: values[index] ?? index + 1 }));
   logicalFaceCache.set(kind, faces);
   return faces;
@@ -211,7 +213,7 @@ function cloneLogicalFaces(kind: DieKind): LogicalFace[] {
 function getUniqueVertices(faces: LogicalFace[]): THREE.Vector3[] {
   const vertices: THREE.Vector3[] = [];
   faces.forEach((face) => face.vertices.forEach((vertex) => pushUniqueVertex(vertices, vertex)));
-  return vertices.sort((a, b) => {
+  return vertices.toSorted((a, b) => {
     if (Math.abs(a.y - b.y) > 1e-5) return b.y - a.y;
     const angleA = Math.atan2(a.z, a.x);
     const angleB = Math.atan2(b.z, b.x);
@@ -827,19 +829,21 @@ function createSurface(theme: ThemeName, palette: ThemePalette): SurfaceSet {
 }
 
 const SURFACE_VARIANT_COUNT = 12;
+/** Van der Corput radical inverse, the basis of the low-discrepancy variant offsets below. */
+function radicalInverse(value: number, base: number): number {
+  let result = 0;
+  let fraction = 1 / base;
+  let current = value;
+  while (current > 0) {
+    result += (current % base) * fraction;
+    current = Math.floor(current / base);
+    fraction /= base;
+  }
+  return result;
+}
+
 const SURFACE_VARIANT_OFFSETS = Array.from({ length: SURFACE_VARIANT_COUNT }, (_value, index) => {
   // A low-discrepancy sequence gives visibly different crops without clustering.
-  const radicalInverse = (value: number, base: number): number => {
-    let result = 0;
-    let fraction = 1 / base;
-    let current = value;
-    while (current > 0) {
-      result += (current % base) * fraction;
-      current = Math.floor(current / base);
-      fraction /= base;
-    }
-    return result;
-  };
   return new THREE.Vector2(radicalInverse(index + 1, 2), radicalInverse(index + 1, 3));
 });
 
@@ -1018,7 +1022,7 @@ function createDragonAdornment(kind: DieKind, faces: LogicalFace[]): THREE.Group
   });
   const ornaments = new THREE.InstancedMesh(cone, ornamentMaterial, 8);
   const dummy = new THREE.Object3D();
-  const upperFaces = [...faces].sort((a, b) => b.normal.y - a.normal.y).slice(0, 6);
+  const upperFaces = faces.toSorted((a, b) => b.normal.y - a.normal.y).slice(0, 6);
   upperFaces.forEach((face, index) => {
     dummy.position.copy(face.center).addScaledVector(face.normal, 0.2);
     dummy.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), face.normal);
@@ -1026,7 +1030,7 @@ function createDragonAdornment(kind: DieKind, faces: LogicalFace[]): THREE.Group
     dummy.updateMatrix();
     ornaments.setMatrixAt(index, dummy.matrix);
   });
-  const hornBases = [...faces].sort((a, b) => b.center.z - a.center.z).slice(0, 2);
+  const hornBases = faces.toSorted((a, b) => b.center.z - a.center.z).slice(0, 2);
   hornBases.forEach((face, index) => {
     dummy.position.copy(face.center).add(new THREE.Vector3(index === 0 ? -0.13 : 0.13, 0.18, 0.05));
     dummy.rotation.set(Math.PI * 0.12, 0, index === 0 ? Math.PI * 0.22 : -Math.PI * 0.22);
@@ -1191,8 +1195,10 @@ export class DieInstance {
   }
 
   private refreshLabels(): void {
-    const uv = this.labels.geometry.getAttribute('uv') as THREE.BufferAttribute;
-    const array = uv.array as Float32Array;
+    const uv = this.labels.geometry.getAttribute('uv');
+    // The label geometry is built locally with a Float32 uv attribute.
+    if (!(uv instanceof THREE.BufferAttribute) || !(uv.array instanceof Float32Array)) return;
+    const array = uv.array;
     for (const binding of this.labelBindings) {
       const value = binding.vertexIndex !== undefined
         ? this.d4VertexValues[binding.vertexIndex] ?? 1

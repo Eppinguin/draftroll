@@ -1,5 +1,5 @@
 import { performance } from 'node:perf_hooks';
-import { spawnSync } from 'node:child_process';
+import { runTsc } from './lib/load-typescript.mjs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -17,11 +17,11 @@ try {
   await writeFile(config, JSON.stringify({
     compilerOptions: {
       target: 'ES2022', module: 'CommonJS', moduleResolution: 'Node', rootDir: join(root, 'packages'), outDir: out,
-      strict: true, skipLibCheck: true, esModuleInterop: true, lib: ['ES2022', 'DOM', 'DOM.Iterable'],
+      strict: true, skipLibCheck: true, esModuleInterop: true, lib: ['ES2023', 'DOM', 'DOM.Iterable'],
     },
     include: [join(root, 'packages/**/*.ts')],
   }, null, 2));
-  const compile = spawnSync('tsc', ['-p', config], { cwd: root, encoding: 'utf8' });
+  const compile = runTsc(['-p', config], { cwd: root });
   if (compile.status !== 0) throw new Error(`${compile.stdout}\n${compile.stderr}`);
   await writeFile(join(out, 'package.json'), '{"type":"commonjs"}\n');
 

@@ -1,21 +1,9 @@
 import { readFile, readdir } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createRequire } from 'node:module';
-import { execFileSync } from 'node:child_process';
-import { realpathSync } from 'node:fs';
+import { loadTypeScript } from './lib/load-typescript.mjs';
 
-const require = createRequire(import.meta.url);
-let ts;
-try {
-  ts = require('typescript');
-} catch {
-  const locator = process.platform === 'win32' ? 'where' : 'which';
-  const located = execFileSync(locator, ['tsc'], { encoding: 'utf8' }).split(/\r?\n/).find(Boolean);
-  if (!located) throw new Error('TypeScript is required for TSDoc validation');
-  const tscPath = realpathSync(located.trim());
-  ts = require(resolve(dirname(tscPath), '../lib/typescript.js'));
-}
+const ts = loadTypeScript();
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const structureOnly = process.argv.includes('--structure-only');
 const packagesRoot = join(root, 'packages');

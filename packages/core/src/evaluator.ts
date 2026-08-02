@@ -59,6 +59,16 @@ interface SelectableItem {
   die?: NormalizedDieResult;
 }
 
+/**
+ * A selectable produced by `createDieItem`, which always carries a concrete die and
+ * its matching die tree node. Naming the narrower shape lets callers push into
+ * `NormalizedDieResult[]` and die-node arrays without asserting.
+ */
+interface DieSelectableItem extends SelectableItem {
+  tree: Extract<RollTreeNode, { kind: 'die' }>;
+  die: NormalizedDieResult;
+}
+
 interface StructuredOperationState {
   generatedDice: number;
   rerolls: number;
@@ -477,8 +487,8 @@ function evaluateDice(
   const selection: SelectableItem[] = [];
   for (let count = 0; count < node.count; count += 1) {
     const item = createDieItem(node.sides, rng, state, limits, themeId, state.nextSourceRollIndex++, 'initial', node.annotations);
-    dice.push(item.die as NormalizedDieResult);
-    children.push(item.tree as Extract<RollTreeNode, { kind: 'die' }>);
+    dice.push(item.die);
+    children.push(item.tree);
     selection.push(item);
   }
 
@@ -622,12 +632,11 @@ function applySetOperations(
   }
 }
 
-function appendDieItem(result: NodeEvaluation, item: SelectableItem): void {
-  if (!item.die) return;
+function appendDieItem(result: NodeEvaluation, item: DieSelectableItem): void {
   result.dice.push(item.die);
   result.selection?.push(item);
   if (result.tree.kind === 'dice') {
-    result.tree.children.push(item.tree as Extract<RollTreeNode, { kind: 'die' }>);
+    result.tree.children.push(item.tree);
     result.tree.diceIds.push(item.die.id);
   }
 }
@@ -642,7 +651,7 @@ function createDieItem(
   generatedBy: NonNullable<NormalizedDieResult['generatedBy']>,
   annotations: readonly string[],
   generatedFromDieId?: string,
-): SelectableItem {
+): DieSelectableItem {
   state.generatedDice += 1;
   if (state.generatedDice > limits.maxGeneratedDice) throw new DiceLimitError(`Generated dice exceed ${limits.maxGeneratedDice}`);
   const id = `die_${state.nextDieId++}`;
@@ -732,7 +741,7 @@ function selectItems(items: readonly SelectableItem[], selector: SetSelector): S
   const active = items.filter((item) => item.isKept());
   if (selector.type === 'highest' || selector.type === 'lowest') {
     const count = Math.max(0, Math.trunc(selector.target));
-    const sorted = [...active].sort((left, right) => left.value() - right.value());
+    const sorted = active.toSorted((left, right) => left.value() - right.value());
     return selector.type === 'highest' ? sorted.slice(Math.max(0, sorted.length - count)) : sorted.slice(0, count);
   }
   return active.filter((item) => matchesSelector(item.value(), selector));
@@ -930,7 +939,7 @@ function numericResult(result: number | string): number {
 interface ResolvedStructuredDie {
   result: number | string;
   numericValue: number;
-  sides: number | 'F' | string;
+  sides: number | 'F' | (string & {});
   customDiceId?: string;
   faceIndex?: number;
   faceLabel?: string;
@@ -1133,7 +1142,7 @@ function selectStructuredDice(
   const active = dice.filter((die) => die.kept);
   if (selector.type === 'highest' || selector.type === 'lowest') {
     const count = Math.max(0, Math.trunc(selector.target));
-    const sorted = [...active].sort((left, right) => numericDieResult(left) - numericDieResult(right));
+    const sorted = active.toSorted((left, right) => numericDieResult(left) - numericDieResult(right));
     return selector.type === 'highest'
       ? sorted.slice(Math.max(0, sorted.length - count))
       : sorted.slice(0, count);
@@ -1205,12 +1214,12 @@ function applyStructuredKeepDrop(
   })).filter(({ die }) => die.kept);
   let selected: typeof items;
   if (selector.type === 'highest' || selector.type === 'lowest') {
-    const sorted = [...items].sort((a, b) => a.value - b.value);
+    const sorted = items.toSorted((a, b) => a.value - b.value);
     selected = selector.type === 'highest'
       ? sorted.slice(Math.max(0, sorted.length - Math.trunc(selector.target)))
       : sorted.slice(0, Math.trunc(selector.target));
   } else {
-    selected = items.filter((item) => matchesSelector(item.value, selector as SetSelector));
+    selected = items.filter((item) => matchesSelector(item.value, selector));
   }
   const selectedIds = new Set(selected.map((item) => item.die.id));
   for (const { die } of items) die.kept = type === 'keep' ? selectedIds.has(die.id) : !selectedIds.has(die.id);

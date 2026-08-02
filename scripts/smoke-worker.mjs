@@ -246,7 +246,11 @@ async function poll(operation, timeoutMs, intervalMs = 100) {
     } catch (error) { lastError = error; }
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
-  if (lastError) throw lastError;
+  if (lastError !== undefined) {
+    throw lastError instanceof Error
+      ? lastError
+      : new Error(typeof lastError === 'string' ? lastError : JSON.stringify(lastError), { cause: lastError });
+  }
   throw new Error(`Condition was not met within ${timeoutMs}ms`);
 }
 

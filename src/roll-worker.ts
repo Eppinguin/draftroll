@@ -66,9 +66,11 @@ let currentActiveFlags: boolean[] = [];
 function configureWorld(world: CANNON.World): void {
   world.allowSleep = true;
   world.broadphase = new CANNON.SAPBroadphase(world);
-  const solver = world.solver as CANNON.GSSolver;
-  solver.iterations = 32;
-  solver.tolerance = 0.00025;
+  const solver = world.solver;
+  if (solver instanceof CANNON.GSSolver) {
+    solver.iterations = 32;
+    solver.tolerance = 0.00025;
+  }
   world.addContactMaterial(new CANNON.ContactMaterial(diceMaterial, tableMaterial, {
     friction: 0.28,
     restitution: 0.24,
@@ -145,8 +147,10 @@ function ensurePlanner(kinds: readonly DieKind[], boundsX: number, boundsZ: numb
     && cache.count === kinds.length
     && Math.abs(cache.boundsX - boundsX) < 1e-4
     && Math.abs(cache.boundsZ - boundsZ) < 1e-4;
-  if (!valid) cache = createPlanner(kinds, boundsX, boundsZ);
-  return cache as PlannerCache;
+  if (valid && cache) return cache;
+  const created = createPlanner(kinds, boundsX, boundsZ);
+  cache = created;
+  return created;
 }
 
 function activateBody(body: CANNON.Body, launch: Float32Array, index: number): void {

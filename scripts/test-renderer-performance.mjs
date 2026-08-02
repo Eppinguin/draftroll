@@ -2,16 +2,13 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { execFileSync } from 'node:child_process';
-import { realpathSync } from 'node:fs';
+import { loadTypeScript } from './lib/load-typescript.mjs';
 
 const root = resolve(import.meta.dirname, '..');
 const temp = await mkdtemp(join(tmpdir(), 'draftroll-performance-'));
 try {
-  const tscExecutable = realpathSync(execFileSync('which', ['tsc'], { encoding: 'utf8' }).trim());
-  const ts = await import(pathToFileURL(resolve(dirname(tscExecutable), '../lib/typescript.js')).href);
+  const ts = loadTypeScript();
   const performanceSource = await readFile(join(root, 'packages/renderer/src/performance.ts'), 'utf8');
   const transpiled = ts.transpileModule(performanceSource, {
     fileName: 'performance.ts',

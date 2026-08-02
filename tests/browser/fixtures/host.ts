@@ -270,7 +270,7 @@ function recordRoomEvent(event: {
 }
 
 function syncParticipants(): void {
-  state.participants = roomSession?.room.participants.map((participant) => participant.name).sort() ?? [];
+  state.participants = roomSession?.room.participants.map((participant) => participant.name).toSorted((left, right) => left.localeCompare(right)) ?? [];
   renderState();
 }
 

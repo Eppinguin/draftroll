@@ -38,8 +38,8 @@ test('roller-only values never reach another participant and reveal updates the 
   const revealed = await alice.evaluate(() => window.__draftrollTest.revealLast());
   expect(revealed.rollId).toBe(created.rollId);
   expect(revealed.revision).toBe(1);
-  await expect.poll(() => getState(bob).then((state) => [...state.roomEvents].reverse().find((event) => event.rollId === created.rollId)?.total)).toBe(created.total);
-  const visible = [...(await getState(bob)).roomEvents].reverse().find((event) => event.rollId === created.rollId);
+  await expect.poll(() => getState(bob).then((state) => state.roomEvents.toReversed().find((event) => event.rollId === created.rollId)?.total)).toBe(created.total);
+  const visible = (await getState(bob)).roomEvents.toReversed().find((event) => event.rollId === created.rollId);
   expect(visible).toMatchObject({ hidden: false, revision: 1 });
 
   await aliceContext.close();
@@ -72,7 +72,7 @@ test('HTTP state, D1 history, durable events, and revisions never expose roller-
       stateResponse.json(), historyResponse.json(), eventsResponse.json(), revisionsResponse.json(),
     ]);
     return {
-      stateRoll: [...(state.recentRolls ?? [])].reverse().find((event: { rollId?: string }) => event.rollId === created.rollId),
+      stateRoll: (state.recentRolls ?? []).toReversed().find((event: { rollId?: string }) => event.rollId === created.rollId),
       historyRoll: (history.rolls ?? []).find((roll: { rollId?: string }) => roll.rollId === created.rollId),
       durableEvent: (events.events ?? []).find((event: { rollId?: string }) => event.rollId === created.rollId),
       revision: (revisions.revisions ?? []).find((item: { rollId?: string }) => item.rollId === created.rollId),

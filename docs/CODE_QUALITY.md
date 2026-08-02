@@ -23,6 +23,16 @@ Type-aware linting is enabled through `oxlint-tsgolint`. It catches defects that
 
 Pedantic, restriction, and nursery categories are not enabled globally. Pedantic rules can be intentionally opinionated, restriction rules encode project-specific policy rather than universal correctness, and nursery rules are explicitly unstable. Adopt rules from these categories individually after reviewing their impact and adding a regression test.
 
+### Deliberately disabled rules
+
+`eslint/no-await-in-loop` is off. Draftroll's async loops are sequential by design, and `Promise.all()` would change behaviour rather than only improving throughput: D1 retry backoff and readiness polling depend on iteration order, theme asset loading enforces a cumulative byte budget that must be checked between fetches, clock synchronisation samples must not overlap, token verification breaks early on the first matching key, and renderer warmup mutates shared bridge state one theme at a time.
+
+`eslint/no-underscore-dangle` allows `__draftrollTest` and `_defaultValue`. The first is the browser test harness's deliberate global bridge; the second belongs to a local React context stub used in a test double.
+
+`promise/always-return` is off. Draftroll bridges promises to callback APIs (abort-signal races, overlay mount handshakes, socket reconnect state), where the `then` handler exists to settle an outer promise or perform a side effect. Returning a value from those handlers would be meaningless, and the floating-promise defects the rule is meant to approximate are already caught by `typescript/no-floating-promises`, which stays on as an error.
+
+`typescript/consistent-return` is off because `tsc` already enforces the same property more precisely. The rule fires on `switch` statements that are exhaustive over a union and therefore need no trailing `return`; TypeScript rejects a genuinely missing return path with TS2366 ("Function lacks ending return statement"), so the compiler gate covers the real defect without flagging exhaustive dispatch in the parser, evaluator, and AST helpers.
+
 Do not suppress a rule for an entire file when a narrower expression or line disable is sufficient. Every disable must include a concrete explanation, and obsolete disables fail validation.
 
 ## Oxfmt policy

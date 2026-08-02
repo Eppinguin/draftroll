@@ -20,6 +20,30 @@ interface HistoryResponse {
 
 type LogAction = 'select' | 'reroll-all' | 'reroll-die' | 'load';
 
+const tableOptions = (
+  groupId: string,
+  actorLabel: string,
+  rollLabel: string,
+): RendererPlayOptions['table'] => ({
+  mode: 'concurrent',
+  groupId,
+  actorLabel,
+  rollLabel,
+  batchWindowMs: 140,
+  maximumConcurrentRolls: 6,
+  maximumConcurrentVisuals: 30,
+});
+
+const logButton = (label: string, action: LogAction, rollId: string, dieId?: string): HTMLButtonElement => {
+  const element = document.createElement('button');
+  element.type = 'button';
+  element.textContent = label;
+  element.dataset.action = action;
+  element.dataset.rollId = rollId;
+  if (dieId) element.dataset.dieId = dieId;
+  return element;
+};
+
 export async function initSdkDemo(): Promise<void> {
   const expressionInput = requireElement<HTMLInputElement>('#sdk-expression');
   const themeInput = requireElement<HTMLSelectElement>('#sdk-theme');
@@ -164,19 +188,6 @@ export async function initSdkDemo(): Promise<void> {
   });
 
 
-  const tableOptions = (
-    groupId: string,
-    actorLabel: string,
-    rollLabel: string,
-  ): RendererPlayOptions['table'] => ({
-    mode: 'concurrent',
-    groupId,
-    actorLabel,
-    rollLabel,
-    batchWindowMs: 140,
-    maximumConcurrentRolls: 6,
-    maximumConcurrentVisuals: 30,
-  });
 
   const buildFixedDisplayInput = (
     expression: string,
@@ -275,7 +286,8 @@ export async function initSdkDemo(): Promise<void> {
 
   const populateEditor = (result: NormalizedRollResult) => {
     selectedRollId = result.rollId ?? null;
-    rollNameInput.value = result.name ?? String(result.metadata?.characterName ?? characterNameInput.value);
+    rollNameInput.value = result.name
+      ?? (typeof result.metadata?.characterName === 'string' ? result.metadata.characterName : characterNameInput.value);
     characterNameInput.value = rollNameInput.value;
     actionNameInput.value = typeof result.metadata?.actionName === 'string' ? result.metadata.actionName : result.annotation ?? 'Roll';
     expressionInput.value = result.expression ?? expressionInput.value;
@@ -284,15 +296,6 @@ export async function initSdkDemo(): Promise<void> {
     renderLog();
   };
 
-  const logButton = (label: string, action: LogAction, rollId: string, dieId?: string): HTMLButtonElement => {
-    const element = document.createElement('button');
-    element.type = 'button';
-    element.textContent = label;
-    element.dataset.action = action;
-    element.dataset.rollId = rollId;
-    if (dieId) element.dataset.dieId = dieId;
-    return element;
-  };
 
   const renderLog = () => {
     logElement.replaceChildren();
@@ -440,7 +443,7 @@ export async function initSdkDemo(): Promise<void> {
       .map((entry) => decodeNormalizedRollResult(entry.result, { allowLegacyResults: true }))
       .filter((decoded) => decoded.success)
       .map((decoded) => decoded.data);
-    for (const result of results.reverse()) upsertLog(result, false);
+    for (const result of results.toReversed()) upsertLog(result, false);
     renderLog();
   };
 
@@ -772,6 +775,9 @@ export async function initSdkDemo(): Promise<void> {
   renderLog();
 }
 
+// Mirrors `mustElement` in src/main.ts: the generic forwards to `querySelector` and is
+// only used in the return position.
+// oxlint-disable-next-line typescript/no-unnecessary-type-parameters
 function requireElement<T extends Element>(selector: string): T {
   const element = document.querySelector<T>(selector);
   if (!element) throw new Error(`Required character-sheet element is missing: ${selector}`);
