@@ -3,11 +3,7 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "lib": [
-      "ES2023",
-      "DOM",
-      "DOM.Iterable"
-    ],
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "rootDir": "packages",
     "outDir": ".release-build",
     "declaration": true,
@@ -23,10 +19,6 @@
     "noFallthroughCasesInSwitch": true,
     "types": []
   },
-  "include": [
-    "packages/**/*.ts"
-  ],
-  "exclude": [
-    "packages/*/dist"
-  ]
+  "include": ["packages/**/*.ts"],
+  "exclude": ["packages/*/dist"]
 }

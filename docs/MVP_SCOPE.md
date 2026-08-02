@@ -25,12 +25,16 @@ Local Wrangler development enables unsigned anonymous participants. They can cre
 A public deployment should disable unsigned anonymous access and use short-lived, room-scoped capability tokens issued by the embedding application's backend. Tokens grant roles and permissions without creating a Draftroll account database.
 
 ```ts
-const token = await createRoomCapabilityToken({
-  roomId,
-  participantId,
-  roles: ['player'],
-  permissions: createDefaultParticipantPermissions(),
-}, secret, { expiresInSeconds: 3600 });
+const token = await createRoomCapabilityToken(
+  {
+    roomId,
+    participantId,
+    roles: ['player'],
+    permissions: createDefaultParticipantPermissions(),
+  },
+  secret,
+  { expiresInSeconds: 3600 },
+);
 ```
 
 ## Implemented MVP priorities

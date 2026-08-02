@@ -31,7 +31,7 @@ export const DICE_DIAGNOSTIC_CODES = {
  *
  * @public
  */
-export type DiceDiagnosticCode = typeof DICE_DIAGNOSTIC_CODES[keyof typeof DICE_DIAGNOSTIC_CODES];
+export type DiceDiagnosticCode = (typeof DICE_DIAGNOSTIC_CODES)[keyof typeof DICE_DIAGNOSTIC_CODES];
 
 /**
  * One-based line and column plus zero-based source offset.
@@ -102,7 +102,11 @@ export interface DiceDiagnosticSuggestionSpec {
  *
  * @public
  */
-export function createDiceSourceRange(source: string, startOffset: number, endOffset = startOffset): DiceSourceRange {
+export function createDiceSourceRange(
+  source: string,
+  startOffset: number,
+  endOffset = startOffset,
+): DiceSourceRange {
   const start = Math.max(0, Math.trunc(startOffset));
   const end = Math.max(start, Math.trunc(endOffset));
   return {
@@ -134,7 +138,13 @@ export function createDiceDiagnostic(
       ...(suggestion.replacement === undefined ? {} : { replacement: suggestion.replacement }),
       ...(suggestion.startOffset === undefined
         ? {}
-        : { range: createDiceSourceRange(source, suggestion.startOffset, suggestion.endOffset ?? suggestion.startOffset) }),
+        : {
+            range: createDiceSourceRange(
+              source,
+              suggestion.startOffset,
+              suggestion.endOffset ?? suggestion.startOffset,
+            ),
+          }),
     })),
   };
 }
@@ -147,7 +157,13 @@ export function createDiceDiagnostic(
 export function diceDiagnosticFromError(error: unknown, source = ''): DiceDiagnostic {
   if (hasDiceDiagnostic(error)) return error.diagnostic;
   const message = error instanceof Error ? error.message : String(error);
-  return createDiceDiagnostic(source, DICE_DIAGNOSTIC_CODES.unknownError, message, 0, source.length);
+  return createDiceDiagnostic(
+    source,
+    DICE_DIAGNOSTIC_CODES.unknownError,
+    message,
+    0,
+    source.length,
+  );
 }
 
 function hasDiceDiagnostic(value: unknown): value is { diagnostic: DiceDiagnostic } {
@@ -155,10 +171,12 @@ function hasDiceDiagnostic(value: unknown): value is { diagnostic: DiceDiagnosti
   const diagnostic = (value as { diagnostic?: unknown }).diagnostic;
   if (!diagnostic || typeof diagnostic !== 'object') return false;
   const candidate = diagnostic as Partial<DiceDiagnostic>;
-  return typeof candidate.code === 'string'
-    && candidate.severity === 'error'
-    && typeof candidate.message === 'string'
-    && Boolean(candidate.range);
+  return (
+    typeof candidate.code === 'string' &&
+    candidate.severity === 'error' &&
+    typeof candidate.message === 'string' &&
+    Boolean(candidate.range)
+  );
 }
 
 function sourcePositionAt(source: string, offset: number): DiceSourcePosition {

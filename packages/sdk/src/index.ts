@@ -60,10 +60,7 @@ import type {
   RendererPreviewOptions,
   RendererPerformanceOptions,
 } from '../../renderer/src/index';
-import type {
-  DraftrollOverlayOptions,
-  RerollDieRequest,
-} from '../../overlay/src/index';
+import type { DraftrollOverlayOptions, RerollDieRequest } from '../../overlay/src/index';
 import {
   DRAFTROLL_ERROR_CODES,
   DraftrollError,
@@ -106,7 +103,6 @@ export interface SdkRollOptions extends Omit<RollOptions, 'customDice'> {
   themes?: DiceThemeSelection;
 }
 
-
 /**
  * Expression-based request accepted by the SDK.
  *
@@ -121,7 +117,8 @@ export interface DraftrollRollRequest extends SdkRollOptions {
  *
  * @public
  */
-export interface DraftrollStructuredRequest extends Omit<EvaluateRollInput, 'mode' | 'expression' | 'dice' | 'operations'>, SdkRollOptions {
+export interface DraftrollStructuredRequest
+  extends Omit<EvaluateRollInput, 'mode' | 'expression' | 'dice' | 'operations'>, SdkRollOptions {
   dice: PlannedDie[];
   operations?: StructuredRollOperation[];
 }
@@ -193,8 +190,15 @@ export interface SdkRollResponse {
   rerollDice: (dieIds: readonly string[], options?: SdkRerollOptions) => SdkRollResponse;
   update: (update: RollUpdateInput, options?: SdkUpdateOptions) => SdkRollResponse;
   updateLog: (update: RollUpdateInput, options?: Omit<SdkUpdateOptions, 'mode'>) => SdkRollResponse;
-  animateUpdate: (update: RollUpdateInput, options?: Omit<SdkUpdateOptions, 'mode'>) => SdkRollResponse;
-  setDieResult: (dieId: string, result: number | string, options?: SdkUpdateOptions) => SdkRollResponse;
+  animateUpdate: (
+    update: RollUpdateInput,
+    options?: Omit<SdkUpdateOptions, 'mode'>,
+  ) => SdkRollResponse;
+  setDieResult: (
+    dieId: string,
+    result: number | string,
+    options?: SdkUpdateOptions,
+  ) => SdkRollResponse;
   setFormula: (expression: string, options?: SdkUpdateOptions) => SdkRollResponse;
 }
 
@@ -284,13 +288,18 @@ export class Draftroll {
   }
 
   private bindInteractiveRenderer(
-    renderer: DiceRenderer | undefined,
+    renderer:
+      | (DiceRenderer & {
+          setRerollHandler?: (
+            handler: ((request: RerollDieRequest) => Promise<void>) | null,
+          ) => void;
+        })
+      | undefined,
     handler: ((request: RerollDieRequest) => Promise<void>) | null,
   ): void {
-    const interactive = renderer as DiceRenderer & {
-      setRerollHandler?: (handler: ((request: RerollDieRequest) => Promise<void>) | null) => void;
-    };
-    interactive?.setRerollHandler?.(handler);
+    // `setRerollHandler` is an optional renderer capability outside the `DiceRenderer` contract,
+    // declared on the parameter so the optional call needs no assertion.
+    renderer?.setRerollHandler?.(handler);
   }
 
   /** Mount a transparent renderer over the current website and return a ready SDK. */
@@ -300,14 +309,20 @@ export class Draftroll {
     const renderer = new DraftrollOverlayRenderer(options.overlay);
     await renderer.mount(options.signal);
     if (options.warmupThemes?.length) await renderer.warmup(options.warmupThemes, options.signal);
-    return new Draftroll({ engine: options.engine, instrumentation: options.instrumentation, renderer });
+    return new Draftroll({
+      engine: options.engine,
+      instrumentation: options.instrumentation,
+      renderer,
+    });
   }
-
 
   /**
    * Subscribes to an SDK event and returns an unsubscribe function.
    */
-  on<K extends DraftrollEventName>(event: K, handler: (payload: DraftrollEventMap[K]) => void): () => void {
+  on<K extends DraftrollEventName>(
+    event: K,
+    handler: (payload: DraftrollEventMap[K]) => void,
+  ): () => void {
     const set = this.handlers.get(event) ?? new Set<(event: never) => void>();
     set.add(handler);
     this.handlers.set(event, set);
@@ -317,12 +332,18 @@ export class Draftroll {
   /**
    * Validates a dice expression without throwing.
    */
-  validate(expression: string, options: Pick<SdkRollOptions, 'dialect' | 'allowComments' | 'instrumentation'> = {}) {
+  validate(
+    expression: string,
+    options: Pick<SdkRollOptions, 'dialect' | 'allowComments' | 'instrumentation'> = {},
+  ) {
     return this.engine.validate(expression, options);
   }
 
   /** Parse once and reuse the expression in hot game loops. */
-  compile(expression: string, options: Pick<SdkRollOptions, 'dialect' | 'allowComments' | 'instrumentation'> = {}): CompiledDiceExpression {
+  compile(
+    expression: string,
+    options: Pick<SdkRollOptions, 'dialect' | 'allowComments' | 'instrumentation'> = {},
+  ): CompiledDiceExpression {
     return this.engine.compile(expression, options);
   }
 
@@ -371,7 +392,10 @@ export class Draftroll {
   /**
    * Rolls an expression and returns a discriminated success or failure result.
    */
-  tryRoll(expression: string, options?: SdkRollOptions): { ok: true; roll: SdkRollResponse } | { ok: false; error: Error } {
+  tryRoll(
+    expression: string,
+    options?: SdkRollOptions,
+  ): { ok: true; roll: SdkRollResponse } | { ok: false; error: Error } {
     try {
       return { ok: true, roll: this.roll(expression, options) };
     } catch (error) {
@@ -390,7 +414,9 @@ export class Draftroll {
 
   /** Current revision of each roll, in creation order. Updating a roll replaces its log entry. */
   get rollLog(): readonly NormalizedRollResult[] {
-    return this.logOrder.map((rollId) => this.logById.get(rollId)).filter((result): result is NormalizedRollResult => Boolean(result));
+    return this.logOrder
+      .map((rollId) => this.logById.get(rollId))
+      .filter((result): result is NormalizedRollResult => Boolean(result));
   }
 
   /**
@@ -404,7 +430,6 @@ export class Draftroll {
   getRollRevisions(rollId: string): readonly NormalizedRollResult[] {
     return this.revisionsById.get(rollId) ?? [];
   }
-
 
   /**
    * Clears retained roll history without clearing the renderer.
@@ -428,15 +453,20 @@ export class Draftroll {
   /**
    * Evaluates a roll request and optionally presents it.
    */
-  roll(expressionOrRequest: string | DraftrollRollRequest, options: SdkRollOptions = {}): SdkRollResponse {
-    const expression = typeof expressionOrRequest === 'string' ? expressionOrRequest : expressionOrRequest.expression;
+  roll(
+    expressionOrRequest: string | DraftrollRollRequest,
+    options: SdkRollOptions = {},
+  ): SdkRollResponse {
+    const expression =
+      typeof expressionOrRequest === 'string'
+        ? expressionOrRequest
+        : expressionOrRequest.expression;
     const resolved = typeof expressionOrRequest === 'string' ? options : expressionOrRequest;
     const { render = true, renderer, themes, ...engineOptions } = resolved;
     const evaluated = this.engine.roll(expression, engineOptions);
     const result = this.ensureRollIdentity(applyDiceThemes(evaluated, themes));
     return this.createResponse(result, render ? 'animate' : 'none', renderer, 'roll');
   }
-
 
   /** Roll a structured pool without requiring dice notation. */
   rollDice(request: DraftrollStructuredRequest): SdkRollResponse {
@@ -452,18 +482,24 @@ export class Draftroll {
       authority,
       ...input
     } = request;
-    const evaluated = this.engine.evaluate({
-      ...input,
-      mode: 'evaluate',
-      dice,
-      operations,
-    }, { rng, instrumentation, resultOverrides, authority });
+    const evaluated = this.engine.evaluate(
+      {
+        ...input,
+        mode: 'evaluate',
+        dice,
+        operations,
+      },
+      { rng, instrumentation, resultOverrides, authority },
+    );
     const result = this.ensureRollIdentity(applyDiceThemes(evaluated, themes));
     return this.createResponse(result, render ? 'animate' : 'none', renderer, 'roll');
   }
 
   /** Evaluate any normalized evaluate input; useful for adapters and game engines. */
-  evaluate(input: Omit<EvaluateRollInput, 'mode'> | EvaluateRollInput, options: SdkRollOptions = {}): SdkRollResponse {
+  evaluate(
+    input: Omit<EvaluateRollInput, 'mode'> | EvaluateRollInput,
+    options: SdkRollOptions = {},
+  ): SdkRollResponse {
     const { render = true, renderer, themes, ...engineOptions } = options;
     const evaluated = this.engine.evaluate({ ...input, mode: 'evaluate' }, engineOptions);
     const result = this.ensureRollIdentity(applyDiceThemes(evaluated, themes));
@@ -473,7 +509,10 @@ export class Draftroll {
   /**
    * Normalizes and presents an external roll.
    */
-  display(input: Omit<DisplayRollInput, 'mode'> | DisplayRollInput, rendererOptions?: RendererPlayOptions): SdkRollResponse {
+  display(
+    input: Omit<DisplayRollInput, 'mode'> | DisplayRollInput,
+    rendererOptions?: RendererPlayOptions,
+  ): SdkRollResponse {
     const result = this.ensureRollIdentity(normalizeExternalRoll({ ...input, mode: 'display' }));
     return this.createResponse(result, 'animate', rendererOptions, 'display');
   }
@@ -560,13 +599,18 @@ export class Draftroll {
    * Revise a completed roll. Formula, dice, total, annotation, themes, and metadata
    * can change. The same rollId/log position is retained and revision increments.
    */
-  updateRoll(resultOrId: NormalizedRollResult | string, update: RollUpdateInput, options: SdkUpdateOptions = {}): SdkRollResponse {
+  updateRoll(
+    resultOrId: NormalizedRollResult | string,
+    update: RollUpdateInput,
+    options: SdkUpdateOptions = {},
+  ): SdkRollResponse {
     const previous = this.resolveResult(resultOrId);
     const { mode = 'log-only', renderer, themes, animateDice = 'all', ...engineOptions } = options;
     const revised = applyDiceThemes(this.engine.update(previous, update, engineOptions), themes);
-    const rendererOptions = mode === 'animate'
-      ? { ...renderer, dieIds: resolveAnimatedDieIds(previous, revised, animateDice) }
-      : renderer;
+    const rendererOptions =
+      mode === 'animate'
+        ? { ...renderer, dieIds: resolveAnimatedDieIds(previous, revised, animateDice) }
+        : renderer;
     return this.createResponse(revised, mode, rendererOptions, 'update');
   }
 
@@ -581,21 +625,34 @@ export class Draftroll {
   /**
    * Rerolls one die while retaining prior dice for presentation history.
    */
-  rerollDie(result: NormalizedRollResult, dieId: string, options: SdkRerollOptions = {}): SdkRollResponse {
+  rerollDie(
+    result: NormalizedRollResult,
+    dieId: string,
+    options: SdkRerollOptions = {},
+  ): SdkRollResponse {
     return this.rerollDice(result, [dieId], options);
   }
 
   /**
    * Rerolls selected dice while retaining prior dice for presentation history.
    */
-  rerollDice(result: NormalizedRollResult, dieIds: readonly string[], options: SdkRerollOptions = {}): SdkRollResponse {
+  rerollDice(
+    result: NormalizedRollResult,
+    dieIds: readonly string[],
+    options: SdkRerollOptions = {},
+  ): SdkRollResponse {
     const { render = true, renderer, themes, ...engineOptions } = options;
     const rerolled = this.engine.reroll(result, dieIds, engineOptions);
     const revised = applyDiceThemes(asRevision(result, rerolled), themes);
-    return this.createResponse(revised, render ? 'animate' : 'none', {
-      ...renderer,
-      dieIds: renderer?.dieIds ?? dieIds,
-    }, 'reroll');
+    return this.createResponse(
+      revised,
+      render ? 'animate' : 'none',
+      {
+        ...renderer,
+        dieIds: renderer?.dieIds ?? dieIds,
+      },
+      'reroll',
+    );
   }
 
   /**
@@ -608,10 +665,15 @@ export class Draftroll {
   /**
    * Binds an existing room client to this SDK.
    */
-  bindRoom(room: DiceRoom, options: Omit<RendererPlayOptions, 'startTime' | 'animationSeed'> = {}): () => void {
+  bindRoom(
+    room: DiceRoom,
+    options: Omit<RendererPlayOptions, 'startTime' | 'animationSeed'> = {},
+  ): () => void {
     if (!this.renderer) throw new Error('A renderer is required to bind a realtime room');
     const unbindStart = room.on('rollStart', (event) => this.renderSynchronized(event, options));
-    const unbindUpdate = room.on('rollUpdate', (event) => this.applySynchronizedUpdate(event, options));
+    const unbindUpdate = room.on('rollUpdate', (event) =>
+      this.applySynchronizedUpdate(event, options),
+    );
     return () => {
       unbindStart();
       unbindUpdate();
@@ -634,14 +696,19 @@ export class Draftroll {
       started = Promise.reject(error);
     }
     const normalizedPromise = started.catch((error) => {
-      const normalized = error instanceof DraftrollError
-        ? error
-        : new DraftrollError(DRAFTROLL_ERROR_CODES.rendererOperationFailed, `Renderer operation '${details.operation}' failed`, {
-            package: 'sdk',
-            recoverable: true,
-            details,
-            cause: error,
-          });
+      const normalized =
+        error instanceof DraftrollError
+          ? error
+          : new DraftrollError(
+              DRAFTROLL_ERROR_CODES.rendererOperationFailed,
+              `Renderer operation '${details.operation}' failed`,
+              {
+                package: 'sdk',
+                recoverable: true,
+                details,
+                cause: error,
+              },
+            );
       this.emit('error', { error: normalized });
       throw normalized;
     });
@@ -649,15 +716,34 @@ export class Draftroll {
     return normalizedPromise;
   }
 
-  private requireRendererCapability<K extends keyof Pick<DiceRenderer, 'pause' | 'resume' | 'screenshot' | 'configureCamera' | 'resetCamera' | 'preview' | 'configureInteractions'>>(
-    capability: K,
-  ): NonNullable<DiceRenderer[K]> {
+  private requireRendererCapability<
+    K extends keyof Pick<
+      DiceRenderer,
+      | 'pause'
+      | 'resume'
+      | 'screenshot'
+      | 'configureCamera'
+      | 'resetCamera'
+      | 'preview'
+      | 'configureInteractions'
+    >,
+  >(capability: K): NonNullable<DiceRenderer[K]> {
     const method = this.currentRenderer?.[capability];
     if (typeof method !== 'function') {
-      throw new DraftrollError(DRAFTROLL_ERROR_CODES.rendererUnavailable, `The active renderer does not support ${capability}`, {
-        package: 'sdk', recoverable: true, details: { capability },
-      });
+      throw new DraftrollError(
+        DRAFTROLL_ERROR_CODES.rendererUnavailable,
+        `The active renderer does not support ${capability}`,
+        {
+          package: 'sdk',
+          recoverable: true,
+          details: { capability },
+        },
+      );
     }
+    // `Function.bind` widens the generic member signature to its base call signature, so the
+    // key-specific type has to be restored. The guard above already established that
+    // `currentRenderer[K]` exists and is callable.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion
     return method.bind(this.currentRenderer) as NonNullable<DiceRenderer[K]>;
   }
 
@@ -672,31 +758,36 @@ export class Draftroll {
     const previous = identified.rollId ? this.logById.get(identified.rollId) : undefined;
     const rerolledDieIds = previous ? readRerolledDieIds(identified) : [];
     const previousPresentationDice = identified.rollId
-      ? this.presentationDiceById.get(identified.rollId) ?? previous?.dice
+      ? (this.presentationDiceById.get(identified.rollId) ?? previous?.dice)
       : previous?.dice;
-    const rerollPresentation = mode === 'animate'
-      && previous
-      && previousPresentationDice
-      && rerolledDieIds.length > 0
-      && rendererOptions?.preservePreviousDice !== false
-      ? createRerollPresentation(previous, previousPresentationDice, identified, rerolledDieIds)
-      : null;
+    const rerollPresentation =
+      mode === 'animate' &&
+      previous &&
+      previousPresentationDice &&
+      rerolledDieIds.length > 0 &&
+      rendererOptions?.preservePreviousDice !== false
+        ? createRerollPresentation(previous, previousPresentationDice, identified, rerolledDieIds)
+        : null;
     const presentationResult = rerollPresentation?.result ?? identified;
-    const effectiveRendererOptions = rerollPresentation ? {
-      ...rendererOptions,
-      dieIds: rerollPresentation.dieIds,
-      stateDieIds: rerollPresentation.stateDieIds,
-      preservePreviousDice: true,
-      replaceFallbackResult: identified,
-    } : rendererOptions;
+    const effectiveRendererOptions = rerollPresentation
+      ? {
+          ...rendererOptions,
+          dieIds: rerollPresentation.dieIds,
+          stateDieIds: rerollPresentation.stateDieIds,
+          preservePreviousDice: true,
+          replaceFallbackResult: identified,
+        }
+      : rendererOptions;
     this.storeResult(identified);
 
     const rollId = identified.rollId;
     const previousPresentationEntry = rollId ? this.presentationDiceById.get(rollId) : undefined;
-    const stagedPresentationEntry = mode === 'animate' && this.renderer && rollId
-      ? clonePresentationDice(rerollPresentation?.result.dice ?? identified.dice)
-      : undefined;
-    if (rollId && stagedPresentationEntry) this.presentationDiceById.set(rollId, stagedPresentationEntry);
+    const stagedPresentationEntry =
+      mode === 'animate' && this.renderer && rollId
+        ? clonePresentationDice(rerollPresentation?.result.dice ?? identified.dice)
+        : undefined;
+    if (rollId && stagedPresentationEntry)
+      this.presentationDiceById.set(rollId, stagedPresentationEntry);
 
     let rendering: Promise<RendererCompletion> | undefined;
     let presentation: Promise<RendererCompletion | void> | undefined;
@@ -708,22 +799,29 @@ export class Draftroll {
         ).then(
           (completion) => {
             if (
-              rollId
-              && stagedPresentationEntry
-              && this.presentationDiceById.get(rollId) === stagedPresentationEntry
-              && completion.presentationMode === 'replace'
+              rollId &&
+              stagedPresentationEntry &&
+              this.presentationDiceById.get(rollId) === stagedPresentationEntry &&
+              completion.presentationMode === 'replace'
             ) {
               this.presentationDiceById.set(rollId, clonePresentationDice(identified.dice));
             }
-            return rerollPresentation ? {
-              ...completion,
-              results: identified.dice.map((die) => die.result),
-              total: identified.total,
-            } : completion;
+            return rerollPresentation
+              ? {
+                  ...completion,
+                  results: identified.dice.map((die) => die.result),
+                  total: identified.total,
+                }
+              : completion;
           },
           (error) => {
-            if (rollId && stagedPresentationEntry && this.presentationDiceById.get(rollId) === stagedPresentationEntry) {
-              if (previousPresentationEntry) this.presentationDiceById.set(rollId, previousPresentationEntry);
+            if (
+              rollId &&
+              stagedPresentationEntry &&
+              this.presentationDiceById.get(rollId) === stagedPresentationEntry
+            ) {
+              if (previousPresentationEntry)
+                this.presentationDiceById.set(rollId, previousPresentationEntry);
               else this.presentationDiceById.delete(rollId);
             }
             throw error;
@@ -739,24 +837,35 @@ export class Draftroll {
     }
 
     const response: SdkRollResponse = {
-      id: identified.rollId as string,
+      id: identified.rollId,
       result: identified,
       total: identified.total,
       dice: identified.dice,
       rendering,
       presentation,
       wait: () => presentation ?? Promise.resolve(),
-      reroll: (options) => this.rerollDice(
-        identified,
-        identified.dice.filter((die) => die.generatedBy === 'initial' || die.generatedBy === 'external' || die.generatedBy === undefined).map((die) => die.id),
-        options,
-      ),
+      reroll: (options) =>
+        this.rerollDice(
+          identified,
+          identified.dice
+            .filter(
+              (die) =>
+                die.generatedBy === 'initial' ||
+                die.generatedBy === 'external' ||
+                die.generatedBy === undefined,
+            )
+            .map((die) => die.id),
+          options,
+        ),
       rerollDie: (dieId, options) => this.rerollDie(identified, dieId, options),
       rerollDice: (dieIds, options) => this.rerollDice(identified, dieIds, options),
       update: (update, options) => this.updateRoll(identified, update, options),
-      updateLog: (update, options) => this.updateRoll(identified, update, { ...options, mode: 'log-only' }),
-      animateUpdate: (update, options) => this.updateRoll(identified, update, { ...options, mode: 'animate' }),
-      setDieResult: (dieId, dieResult, options) => this.updateRoll(identified, { dice: [{ id: dieId, result: dieResult }] }, options),
+      updateLog: (update, options) =>
+        this.updateRoll(identified, update, { ...options, mode: 'log-only' }),
+      animateUpdate: (update, options) =>
+        this.updateRoll(identified, update, { ...options, mode: 'animate' }),
+      setDieResult: (dieId, dieResult, options) =>
+        this.updateRoll(identified, { dice: [{ id: dieId, result: dieResult }] }, options),
       setFormula: (expression, options) => this.updateRoll(identified, { expression }, options),
     };
     if (eventName) this.emit(eventName, response);
@@ -768,29 +877,40 @@ export class Draftroll {
     const result = this.ensureRollIdentity(event.result);
     this.storeResult(result);
     if (this.renderer) {
-      void this.observePresentation(() => this.renderer!.playRoll(result, {
-        ...options,
-        startTime: event.localStartTimeMs,
-        animationSeed: event.animationSeed,
-        elapsedMs: event.elapsedMs,
-        animationDurationMs: event.animationDurationMs,
-      }), { rollId: result.rollId, operation: 'synchronizedPlayRoll' });
+      void this.observePresentation(
+        () =>
+          this.renderer!.playRoll(result, {
+            ...options,
+            startTime: event.localStartTimeMs,
+            animationSeed: event.animationSeed,
+            elapsedMs: event.elapsedMs,
+            animationDurationMs: event.animationDurationMs,
+          }),
+        { rollId: result.rollId, operation: 'synchronizedPlayRoll' },
+      );
     }
   }
 
-  private applySynchronizedUpdate(event: SynchronizedRollUpdate, options: RendererPlayOptions): void {
+  private applySynchronizedUpdate(
+    event: SynchronizedRollUpdate,
+    options: RendererPlayOptions,
+  ): void {
     if (!event.result) return;
     const result = this.ensureRollIdentity(event.result);
     this.storeResult(result);
     if (event.animate) {
       if (this.renderer) {
-        void this.observePresentation(() => this.renderer!.playRoll(result, {
-          ...options,
-          startTime: event.localStartTimeMs,
-          animationSeed: event.animationSeed,
-          elapsedMs: event.elapsedMs,
-          animationDurationMs: event.animationDurationMs,
-        }), { rollId: result.rollId, operation: 'synchronizedUpdatePlayRoll' });
+        void this.observePresentation(
+          () =>
+            this.renderer!.playRoll(result, {
+              ...options,
+              startTime: event.localStartTimeMs,
+              animationSeed: event.animationSeed,
+              elapsedMs: event.elapsedMs,
+              animationDurationMs: event.animationDurationMs,
+            }),
+          { rollId: result.rollId, operation: 'synchronizedUpdatePlayRoll' },
+        );
       }
     } else {
       if (this.renderer?.updateResult) {
@@ -805,6 +925,10 @@ export class Draftroll {
   private emit<K extends DraftrollEventName>(event: K, payload: DraftrollEventMap[K]): void {
     for (const handler of this.handlers.get(event) ?? []) {
       try {
+        // Handlers are stored contravariantly at `never` so one map can hold every event's
+        // handler. `on` only ever files a handler under its own key, so widening back to this
+        // key's payload type restores the signature the caller registered.
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion
         (handler as (value: DraftrollEventMap[K]) => void)(payload);
       } catch {
         // Observer failures cannot alter roll state or renderer orchestration.
@@ -815,22 +939,31 @@ export class Draftroll {
   private resolveResult(resultOrId: NormalizedRollResult | string): NormalizedRollResult {
     if (typeof resultOrId !== 'string') return resultOrId;
     const result = this.logById.get(resultOrId);
-    if (!result) throw new DraftrollStateError(`Unknown Draftroll roll '${resultOrId}'`, { package: 'sdk' });
+    if (!result)
+      throw new DraftrollStateError(`Unknown Draftroll roll '${resultOrId}'`, { package: 'sdk' });
     return result;
   }
 
-  private ensureRollIdentity(result: NormalizedRollResult): NormalizedRollResult {
-    if (result.rollId) return { ...result, revision: result.revision ?? 0 };
+  // Both branches assign `rollId`, so callers can read it without re-checking.
+  private ensureRollIdentity(
+    result: NormalizedRollResult,
+  ): NormalizedRollResult & { rollId: string } {
+    const existingId = result.rollId;
+    if (existingId) return { ...result, rollId: existingId, revision: result.revision ?? 0 };
     this.localRollCounter += 1;
-    const randomId = typeof crypto !== 'undefined' && 'randomUUID' in crypto
-      ? crypto.randomUUID()
-      : `${Date.now().toString(36)}_${this.localRollCounter.toString(36)}`;
+    const randomId =
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : `${Date.now().toString(36)}_${this.localRollCounter.toString(36)}`;
     return { ...result, rollId: `local_${randomId}`, revision: result.revision ?? 0 };
   }
 
   private storeResult(result: NormalizedRollResult): void {
     const rollId = result.rollId;
-    if (!rollId) throw new DraftrollStateError('Draftroll result identity was not assigned', { package: 'sdk' });
+    if (!rollId)
+      throw new DraftrollStateError('Draftroll result identity was not assigned', {
+        package: 'sdk',
+      });
     if (!this.logById.has(rollId)) this.logOrder.push(rollId);
     this.logById.set(rollId, result);
     const revisions = this.revisionsById.get(rollId) ?? [];
@@ -843,7 +976,6 @@ export class Draftroll {
   }
 }
 
-
 /**
  * Configures a realtime SDK room session.
  *
@@ -855,7 +987,10 @@ export interface DraftrollRoomSessionOptions extends DiceRoomOptions {
   /** Merge nearby room rolls into one shared physical table throw. Defaults to true. */
   concurrentTableRolls?: boolean;
   /** Base renderer options merged with synchronized start timing and animation seeds. */
-  renderer?: Omit<RendererPlayOptions, 'startTime' | 'animationSeed' | 'elapsedMs' | 'animationDurationMs'>;
+  renderer?: Omit<
+    RendererPlayOptions,
+    'startTime' | 'animationSeed' | 'elapsedMs' | 'animationDurationMs'
+  >;
 }
 
 /**
@@ -870,7 +1005,14 @@ export interface DraftrollRoomRollUpdateOptions {
   expectedRevision?: number;
   signal?: AbortSignal;
   /** Retry once against the newest revision, or delegate merging to the caller. */
-  conflictStrategy?: 'reject' | 'retry-latest' | ((context: { current: DraftrollRoomRoll; update: RollUpdateInput; error: Error }) => RollUpdateInput | null | Promise<RollUpdateInput | null>);
+  conflictStrategy?:
+    | 'reject'
+    | 'retry-latest'
+    | ((context: {
+        current: DraftrollRoomRoll;
+        update: RollUpdateInput;
+        error: Error;
+      }) => RollUpdateInput | null | Promise<RollUpdateInput | null>);
   audit?: RollAuditDetails;
 }
 
@@ -933,9 +1075,15 @@ export type DraftrollRoomSessionEventName = keyof DraftrollRoomSessionEventMap;
 export class DraftrollRoomSession {
   readonly room: DiceRoom;
   readonly draftroll: Draftroll;
-  private readonly options: Required<Pick<DraftrollRoomSessionOptions, 'autoPresent' | 'concurrentTableRolls'>> & DraftrollRoomSessionOptions;
+  private readonly options: Required<
+    Pick<DraftrollRoomSessionOptions, 'autoPresent' | 'concurrentTableRolls'>
+  > &
+    DraftrollRoomSessionOptions;
   private readonly rolls = new Map<string, DraftrollRoomRoll>();
-  private readonly handlers = new Map<DraftrollRoomSessionEventName, Set<(payload: never) => void>>();
+  private readonly handlers = new Map<
+    DraftrollRoomSessionEventName,
+    Set<(payload: never) => void>
+  >();
   private readonly unsubscribers: Array<() => void> = [];
   private replayPresentationEventSequence: number | null = null;
 
@@ -977,7 +1125,10 @@ export class DraftrollRoomSession {
   /**
    * Connects the underlying room client and returns this session.
    */
-  static async connect(draftroll: Draftroll, options: DraftrollRoomSessionOptions): Promise<DraftrollRoomSession> {
+  static async connect(
+    draftroll: Draftroll,
+    options: DraftrollRoomSessionOptions,
+  ): Promise<DraftrollRoomSession> {
     const room = await DiceRoom.connect(options);
     return new DraftrollRoomSession(draftroll, room, options);
   }
@@ -1118,12 +1269,15 @@ export class DraftrollRoomSession {
     } catch (error) {
       const normalized = error instanceof Error ? error : new Error(String(error));
       const strategy = options.conflictStrategy ?? 'reject';
-      const isConflict = 'code' in normalized && (normalized as { code?: unknown }).code === DRAFTROLL_ERROR_CODES.revisionConflict;
+      const isConflict =
+        'code' in normalized &&
+        (normalized as { code?: unknown }).code === DRAFTROLL_ERROR_CODES.revisionConflict;
       if (!isConflict || strategy === 'reject') throw normalized;
       const latest = this.getRoll(roll.id) ?? roll;
-      const merged = strategy === 'retry-latest'
-        ? update
-        : await strategy({ current: latest, update, error: normalized });
+      const merged =
+        strategy === 'retry-latest'
+          ? update
+          : await strategy({ current: latest, update, error: normalized });
       if (!merged) throw normalized;
       const event = await this.room.updateRoll(roll.id, merged, {
         reroll: options.reroll,
@@ -1160,9 +1314,12 @@ export class DraftrollRoomSession {
     const rolls = items.map((item) => {
       const roll = this.getRoll(item.rollId);
       if (!roll) {
-        throw new DraftrollStateError(`Bulk update completed but roll '${item.rollId}' is not present in the session log`, {
-          details: { rollId: item.rollId, requestId: acknowledgement.requestId },
-        });
+        throw new DraftrollStateError(
+          `Bulk update completed but roll '${item.rollId}' is not present in the session log`,
+          {
+            details: { rollId: item.rollId, requestId: acknowledgement.requestId },
+          },
+        );
       }
       return roll;
     });
@@ -1194,7 +1351,9 @@ export class DraftrollRoomSession {
     });
   }
 
-  private receive(event: SynchronizedRollStart | SynchronizedRollUpdate | SynchronizedVisibilityUpdate): void {
+  private receive(
+    event: SynchronizedRollStart | SynchronizedRollUpdate | SynchronizedVisibilityUpdate,
+  ): void {
     const roll = this.upsert(event);
     if (!event.result) {
       this.emit('hiddenRoll', roll);
@@ -1202,33 +1361,38 @@ export class DraftrollRoomSession {
     }
 
     if (this.options.autoPresent) {
-      const animated = event.type === 'roll_start' || (event.type === 'roll_updated' && event.animate);
-      const shouldPresentReplay = !event.replayed || event.eventSequence === this.replayPresentationEventSequence;
+      const animated =
+        event.type === 'roll_start' || (event.type === 'roll_updated' && event.animate);
+      const shouldPresentReplay =
+        !event.replayed || event.eventSequence === this.replayPresentationEventSequence;
       if (animated && shouldPresentReplay) {
         const roomRenderer = this.room.policy?.renderer;
-        roll.presentation = this.draftroll.present(event.result, {
-          ...this.options.renderer,
-          defaultThemeId: this.options.renderer?.defaultThemeId ?? roomRenderer?.defaultThemeId,
-          autoClearMs: this.options.renderer?.autoClearMs ?? roomRenderer?.autoClearMs,
-          reducedMotion: this.options.renderer?.reducedMotion ?? roomRenderer?.reducedMotion,
-          forceFallback: this.options.renderer?.forceFallback ?? roomRenderer?.fallbackOnly,
-          physicsPreset: this.options.renderer?.physicsPreset ?? roomRenderer?.physicsPreset,
-          startTime: event.localStartTimeMs,
-          animationSeed: event.animationSeed,
-          elapsedMs: event.elapsedMs,
-          animationDurationMs: event.animationDurationMs,
-          lateEvent: this.options.renderer?.lateEvent ?? { mode: 'auto' },
-          table: (this.options.concurrentTableRolls && (roomRenderer?.concurrentTableRolls ?? true))
-            ? {
-                mode: 'concurrent',
-                groupId: event.rollId,
-                actorLabel: event.actor.name,
-                rollLabel: event.summary.name,
-                maximumConcurrentVisuals: roomRenderer?.maximumConcurrentVisuals,
-                ...this.options.renderer?.table,
-              }
-            : { mode: 'queue', ...this.options.renderer?.table },
-        }).wait();
+        roll.presentation = this.draftroll
+          .present(event.result, {
+            ...this.options.renderer,
+            defaultThemeId: this.options.renderer?.defaultThemeId ?? roomRenderer?.defaultThemeId,
+            autoClearMs: this.options.renderer?.autoClearMs ?? roomRenderer?.autoClearMs,
+            reducedMotion: this.options.renderer?.reducedMotion ?? roomRenderer?.reducedMotion,
+            forceFallback: this.options.renderer?.forceFallback ?? roomRenderer?.fallbackOnly,
+            physicsPreset: this.options.renderer?.physicsPreset ?? roomRenderer?.physicsPreset,
+            startTime: event.localStartTimeMs,
+            animationSeed: event.animationSeed,
+            elapsedMs: event.elapsedMs,
+            animationDurationMs: event.animationDurationMs,
+            lateEvent: this.options.renderer?.lateEvent ?? { mode: 'auto' },
+            table:
+              this.options.concurrentTableRolls && (roomRenderer?.concurrentTableRolls ?? true)
+                ? {
+                    mode: 'concurrent',
+                    groupId: event.rollId,
+                    actorLabel: event.actor.name,
+                    rollLabel: event.summary.name,
+                    maximumConcurrentVisuals: roomRenderer?.maximumConcurrentVisuals,
+                    ...this.options.renderer?.table,
+                  }
+                : { mode: 'queue', ...this.options.renderer?.table },
+          })
+          .wait();
         if (event.replayed) this.replayPresentationEventSequence = null;
       } else {
         roll.presentation = this.draftroll.presentUpdate(event.result).wait();
@@ -1238,7 +1402,9 @@ export class DraftrollRoomSession {
     this.emit('roll', roll);
   }
 
-  private upsert(event: SynchronizedRollStart | SynchronizedRollUpdate | SynchronizedVisibilityUpdate): DraftrollRoomRoll {
+  private upsert(
+    event: SynchronizedRollStart | SynchronizedRollUpdate | SynchronizedVisibilityUpdate,
+  ): DraftrollRoomRoll {
     const existing = this.rolls.get(event.rollId);
     if (existing) {
       existing.apply(event);
@@ -1249,9 +1415,16 @@ export class DraftrollRoomSession {
     return created;
   }
 
-  private emit<K extends DraftrollRoomSessionEventName>(event: K, payload: DraftrollRoomSessionEventMap[K]): void {
+  private emit<K extends DraftrollRoomSessionEventName>(
+    event: K,
+    payload: DraftrollRoomSessionEventMap[K],
+  ): void {
     for (const handler of this.handlers.get(event) ?? []) {
       try {
+        // Handlers are stored contravariantly at `never` so one map can hold every event's
+        // handler. `on` only ever files a handler under its own key, so widening back to this
+        // key's payload type restores the signature the caller registered.
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion
         (handler as (value: DraftrollRoomSessionEventMap[K]) => void)(payload);
       } catch {
         // Observer failures cannot alter room state or request completion.
@@ -1282,76 +1455,110 @@ export class DraftrollRoomRoll {
   /**
    * Stable logical roll ID.
    */
-  get id(): string { return this.event.rollId; }
+  get id(): string {
+    return this.event.rollId;
+  }
   /**
    * Current normalized result, or `null` when hidden.
    */
-  get result(): NormalizedRollResult | null { return this.event.result; }
+  get result(): NormalizedRollResult | null {
+    return this.event.result;
+  }
   /**
    * Whether the current participant is denied the roll result.
    */
-  get hidden(): boolean { return this.event.hidden; }
+  get hidden(): boolean {
+    return this.event.hidden;
+  }
   /**
    * Participant that created the roll.
    */
-  get actor(): RoomActor { return this.event.actor; }
+  get actor(): RoomActor {
+    return this.event.actor;
+  }
   /**
    * Projected visibility available to the current participant.
    */
-  get visibility(): ProjectedRollVisibility { return this.event.visibility; }
+  get visibility(): ProjectedRollVisibility {
+    return this.event.visibility;
+  }
   /**
    * Current authoritative revision number.
    */
-  get revision(): number { return this.event.summary.revision; }
+  get revision(): number {
+    return this.event.summary.revision;
+  }
   /**
    * Roll-local sequence number.
    */
-  get sequence(): number { return this.event.sequence; }
+  get sequence(): number {
+    return this.event.sequence;
+  }
   /**
    * Room-global event sequence number.
    */
-  get eventSequence(): number { return this.event.eventSequence; }
+  get eventSequence(): number {
+    return this.event.eventSequence;
+  }
   /**
    * Optional display name for the roll.
    */
-  get name(): string | undefined { return this.event.summary.name; }
+  get name(): string | undefined {
+    return this.event.summary.name;
+  }
   /**
    * Waits for the current renderer presentation to settle.
    */
-  wait(): Promise<RendererCompletion | void> { return this.presentation; }
+  wait(): Promise<RendererCompletion | void> {
+    return this.presentation;
+  }
 
   /**
    * Applies an authoritative revision to this roll.
    */
-  update(update: RollUpdateInput, options: DraftrollRoomRollUpdateOptions = {}): Promise<DraftrollRoomRoll> {
+  update(
+    update: RollUpdateInput,
+    options: DraftrollRoomRollUpdateOptions = {},
+  ): Promise<DraftrollRoomRoll> {
     return this.session.updateRoll(this, update, options);
   }
 
   /**
    * Applies a revision without requesting renderer animation.
    */
-  updateLog(update: RollUpdateInput, options: Omit<DraftrollRoomRollUpdateOptions, 'animate'> = {}): Promise<DraftrollRoomRoll> {
+  updateLog(
+    update: RollUpdateInput,
+    options: Omit<DraftrollRoomRollUpdateOptions, 'animate'> = {},
+  ): Promise<DraftrollRoomRoll> {
     return this.update(update, { ...options, animate: false });
   }
 
   /**
    * Applies a revision and animates selected dice.
    */
-  animateUpdate(update: RollUpdateInput, options: Omit<DraftrollRoomRollUpdateOptions, 'animate'> = {}): Promise<DraftrollRoomRoll> {
+  animateUpdate(
+    update: RollUpdateInput,
+    options: Omit<DraftrollRoomRollUpdateOptions, 'animate'> = {},
+  ): Promise<DraftrollRoomRoll> {
     return this.update(update, { ...options, animate: true });
   }
 
   /**
    * Rerolls the complete room roll.
    */
-  reroll(options: Omit<DraftrollRoomRollUpdateOptions, 'reroll' | 'animate'> = {}): Promise<DraftrollRoomRoll> {
+  reroll(
+    options: Omit<DraftrollRoomRollUpdateOptions, 'reroll' | 'animate'> = {},
+  ): Promise<DraftrollRoomRoll> {
     return this.update({}, { ...options, reroll: true, animate: true });
   }
 
   /**
    * Rerolls one die and retains previous table dice.
    */
-  rerollDie(dieId: string, options: Omit<DraftrollRoomRollUpdateOptions, 'reroll' | 'animate'> = {}): Promise<DraftrollRoomRoll> {
+  rerollDie(
+    dieId: string,
+    options: Omit<DraftrollRoomRollUpdateOptions, 'reroll' | 'animate'> = {},
+  ): Promise<DraftrollRoomRoll> {
     return this.update({}, { ...options, reroll: [dieId], animate: true });
   }
 
@@ -1369,40 +1576,59 @@ export class DraftrollRoomRoll {
   /**
    * Replaces the expression while preserving compatible dice when possible.
    */
-  setFormula(expression: string, options: DraftrollRoomRollUpdateOptions = {}): Promise<DraftrollRoomRoll> {
+  setFormula(
+    expression: string,
+    options: DraftrollRoomRollUpdateOptions = {},
+  ): Promise<DraftrollRoomRoll> {
     return this.update({ expression }, options);
   }
 
   /**
    * Changes this roll’s visibility policy.
    */
-  setVisibility(visibility: RollVisibility, options: { expectedRevision?: number; signal?: AbortSignal; audit?: RollAuditDetails } = {}): Promise<DraftrollRoomRoll> {
+  setVisibility(
+    visibility: RollVisibility,
+    options: { expectedRevision?: number; signal?: AbortSignal; audit?: RollAuditDetails } = {},
+  ): Promise<DraftrollRoomRoll> {
     return this.session.setRollVisibility(this, visibility, options);
   }
 
   /**
    * Makes this roll public.
    */
-  reveal(options: { expectedRevision?: number; signal?: AbortSignal; audit?: RollAuditDetails } = {}): Promise<DraftrollRoomRoll> {
+  reveal(
+    options: { expectedRevision?: number; signal?: AbortSignal; audit?: RollAuditDetails } = {},
+  ): Promise<DraftrollRoomRoll> {
     return this.setVisibility({ type: 'public' }, options);
   }
 
   /**
    * Restricts this roll to selected participants.
    */
-  whisperToParticipants(participantIds: readonly string[], options: { expectedRevision?: number; signal?: AbortSignal; audit?: RollAuditDetails } = {}): Promise<DraftrollRoomRoll> {
-    return this.setVisibility({ type: 'participants', participantIds: [...participantIds] }, options);
+  whisperToParticipants(
+    participantIds: readonly string[],
+    options: { expectedRevision?: number; signal?: AbortSignal; audit?: RollAuditDetails } = {},
+  ): Promise<DraftrollRoomRoll> {
+    return this.setVisibility(
+      { type: 'participants', participantIds: [...participantIds] },
+      options,
+    );
   }
 
   /**
    * Restricts this roll to selected roles.
    */
-  whisperToRoles(roles: readonly string[], options: { expectedRevision?: number; signal?: AbortSignal; audit?: RollAuditDetails } = {}): Promise<DraftrollRoomRoll> {
+  whisperToRoles(
+    roles: readonly string[],
+    options: { expectedRevision?: number; signal?: AbortSignal; audit?: RollAuditDetails } = {},
+  ): Promise<DraftrollRoomRoll> {
     return this.setVisibility({ type: 'roles', roles: [...roles] }, options);
   }
 
   /** @internal */
-  apply(event: SynchronizedRollStart | SynchronizedRollUpdate | SynchronizedVisibilityUpdate): void {
+  apply(
+    event: SynchronizedRollStart | SynchronizedRollUpdate | SynchronizedVisibilityUpdate,
+  ): void {
     this.event = event;
   }
 }
@@ -1571,7 +1797,10 @@ export class DraftrollSession {
 
   /** Browser convenience that creates a lifecycle session with an owned overlay renderer. */
   static async createOverlay(options: DraftrollEmbeddedOptions = {}): Promise<DraftrollSession> {
-    const session = new DraftrollSession({ engine: options.engine, instrumentation: options.instrumentation });
+    const session = new DraftrollSession({
+      engine: options.engine,
+      instrumentation: options.instrumentation,
+    });
     await session.enableOverlay(options.overlay, options.warmupThemes, options.signal);
     return session;
   }
@@ -1592,19 +1821,27 @@ export class DraftrollSession {
   /**
    * Current connection and disposal status.
    */
-  get status(): DraftrollSessionStatus { return this.statusValue; }
+  get status(): DraftrollSessionStatus {
+    return this.statusValue;
+  }
   /**
    * Current local or realtime operating mode.
    */
-  get mode(): DraftrollSessionMode { return this.activeRoom ? 'realtime' : 'local'; }
+  get mode(): DraftrollSessionMode {
+    return this.activeRoom ? 'realtime' : 'local';
+  }
   /**
    * Active realtime room session, if connected.
    */
-  get room(): DraftrollRoomSession | null { return this.activeRoom; }
+  get room(): DraftrollRoomSession | null {
+    return this.activeRoom;
+  }
   /**
    * Currently attached renderer, if any.
    */
-  get renderer(): DiceRenderer | undefined { return this.draftroll.renderer; }
+  get renderer(): DiceRenderer | undefined {
+    return this.draftroll.renderer;
+  }
   /**
    * Immutable current lifecycle snapshot.
    */
@@ -1619,7 +1856,9 @@ export class DraftrollSession {
 
   /** Unified stable handles observed in local and realtime modes, in first-seen order. */
   get rollLog(): readonly DraftrollSessionRoll[] {
-    return this.rollOrder.map((rollId) => this.rolls.get(rollId)).filter((roll): roll is DraftrollSessionRoll => Boolean(roll));
+    return this.rollOrder
+      .map((rollId) => this.rolls.get(rollId))
+      .filter((roll): roll is DraftrollSessionRoll => Boolean(roll));
   }
 
   /**
@@ -1630,16 +1869,41 @@ export class DraftrollSession {
   }
 
   /** Roll locally or through the active room without changing the consumer-facing object. */
-  async roll(input: string | RollInput, options: DraftrollSessionRollOptions = {}): Promise<DraftrollSessionRoll> {
+  async roll(
+    input: string | RollInput,
+    options: DraftrollSessionRollOptions = {},
+  ): Promise<DraftrollSessionRoll> {
     this.assertActive();
     if (this.activeRoom) {
-      const roomOptions = { visibility: options.visibility, clientRollId: options.clientRollId, signal: options.signal };
-      if (typeof input !== 'string' && input.mode === 'display') return this.activeRoom.display(input, roomOptions);
+      const roomOptions = {
+        visibility: options.visibility,
+        clientRollId: options.clientRollId,
+        signal: options.signal,
+      };
+      if (typeof input !== 'string' && input.mode === 'display')
+        return this.activeRoom.display(input, roomOptions);
       return this.activeRoom.roll(input, roomOptions);
     }
-    if (typeof input === 'string') return this.draftroll.roll(input, { ...options.local, renderer: { ...options.local?.renderer, signal: options.signal ?? options.local?.renderer?.signal } });
-    if (input.mode === 'display') return this.draftroll.display(input, { ...options.local?.renderer, signal: options.signal ?? options.local?.renderer?.signal });
-    return this.draftroll.evaluate(input, { ...options.local, renderer: { ...options.local?.renderer, signal: options.signal ?? options.local?.renderer?.signal } });
+    if (typeof input === 'string')
+      return this.draftroll.roll(input, {
+        ...options.local,
+        renderer: {
+          ...options.local?.renderer,
+          signal: options.signal ?? options.local?.renderer?.signal,
+        },
+      });
+    if (input.mode === 'display')
+      return this.draftroll.display(input, {
+        ...options.local?.renderer,
+        signal: options.signal ?? options.local?.renderer?.signal,
+      });
+    return this.draftroll.evaluate(input, {
+      ...options.local,
+      renderer: {
+        ...options.local?.renderer,
+        signal: options.signal ?? options.local?.renderer?.signal,
+      },
+    });
   }
 
   /**
@@ -1685,14 +1949,18 @@ export class DraftrollSession {
       const room = await DraftrollRoomSession.connect(this.draftroll, options);
       if (this.statusValue === 'disposed' || generation !== this.transitionGeneration) {
         room.close(1000, 'Draftroll session transition superseded');
-        throw new DraftrollStateError('Draftroll room connection was superseded by a newer lifecycle transition', { package: 'sdk', recoverable: true });
+        throw new DraftrollStateError(
+          'Draftroll room connection was superseded by a newer lifecycle transition',
+          { package: 'sdk', recoverable: true },
+        );
       }
       this.activeRoom = room;
       this.bindRoom(room);
       this.setStatus('realtime');
       return room;
     } catch (error) {
-      if (generation === this.transitionGeneration && this.statusValue !== 'disposed') this.setStatus('local');
+      if (generation === this.transitionGeneration && this.statusValue !== 'disposed')
+        this.setStatus('local');
       const normalized = error instanceof Error ? error : new Error(String(error));
       this.emit('error', { error: normalized });
       throw normalized;
@@ -1715,7 +1983,10 @@ export class DraftrollSession {
   }
 
   /** Attach a renderer while retaining the engine, room, roll handles, and subscriptions. */
-  async setRenderer(renderer?: DiceRenderer, options: DraftrollSessionRendererOptions = {}): Promise<void> {
+  async setRenderer(
+    renderer?: DiceRenderer,
+    options: DraftrollSessionRendererOptions = {},
+  ): Promise<void> {
     this.assertActive();
     const previous = this.renderer;
     const previousOwned = this.rendererOwned;
@@ -1738,14 +2009,19 @@ export class DraftrollSession {
       if (options.clearPrevious ?? true) await previous.clear?.();
       if (options.disposePrevious ?? previousOwned) await destroyRenderer(previous);
     } catch (error) {
-      const normalized = error instanceof DraftrollError
-        ? error
-        : new DraftrollError(DRAFTROLL_ERROR_CODES.rendererOperationFailed, 'Previous renderer cleanup failed after replacement', {
-            package: 'sdk',
-            recoverable: true,
-            details: { operation: 'replaceRendererCleanup' },
-            cause: error,
-          });
+      const normalized =
+        error instanceof DraftrollError
+          ? error
+          : new DraftrollError(
+              DRAFTROLL_ERROR_CODES.rendererOperationFailed,
+              'Previous renderer cleanup failed after replacement',
+              {
+                package: 'sdk',
+                recoverable: true,
+                details: { operation: 'replaceRendererCleanup' },
+                cause: error,
+              },
+            );
       this.emit('error', { error: normalized });
     }
   }
@@ -1775,35 +2051,59 @@ export class DraftrollSession {
   /**
    * Pauses the active renderer.
    */
-  pausePresentation(): Promise<void> { this.assertActive(); return this.draftroll.pausePresentation(); }
+  pausePresentation(): Promise<void> {
+    this.assertActive();
+    return this.draftroll.pausePresentation();
+  }
   /**
    * Resumes the active renderer.
    */
-  resumePresentation(): Promise<void> { this.assertActive(); return this.draftroll.resumePresentation(); }
+  resumePresentation(): Promise<void> {
+    this.assertActive();
+    return this.draftroll.resumePresentation();
+  }
   /**
    * Captures the active renderer.
    */
-  screenshot(): Promise<Blob | string> { this.assertActive(); return this.draftroll.screenshot(); }
+  screenshot(): Promise<Blob | string> {
+    this.assertActive();
+    return this.draftroll.screenshot();
+  }
   /**
    * Configures the active renderer camera.
    */
-  configureCamera(options: RendererCameraOptions): Promise<void> { this.assertActive(); return this.draftroll.configureCamera(options); }
+  configureCamera(options: RendererCameraOptions): Promise<void> {
+    this.assertActive();
+    return this.draftroll.configureCamera(options);
+  }
   /**
    * Restores active renderer camera defaults.
    */
-  resetCamera(): Promise<void> { this.assertActive(); return this.draftroll.resetCamera(); }
+  resetCamera(): Promise<void> {
+    this.assertActive();
+    return this.draftroll.resetCamera();
+  }
   /**
    * Displays a renderer preview.
    */
-  preview(options: RendererPreviewOptions = {}): Promise<RendererCompletion> { this.assertActive(); return this.draftroll.preview(options); }
+  preview(options: RendererPreviewOptions = {}): Promise<RendererCompletion> {
+    this.assertActive();
+    return this.draftroll.preview(options);
+  }
   /**
    * Filters visible participants in the active renderer.
    */
-  setParticipantFilter(filter?: RendererParticipantFilter): void { this.assertActive(); this.draftroll.setParticipantFilter(filter); }
+  setParticipantFilter(filter?: RendererParticipantFilter): void {
+    this.assertActive();
+    this.draftroll.setParticipantFilter(filter);
+  }
   /**
    * Configures active renderer interactions.
    */
-  configureInteractions(options: RendererInteractionOptions): Promise<void> { this.assertActive(); return this.draftroll.configureInteractions(options); }
+  configureInteractions(options: RendererInteractionOptions): Promise<void> {
+    this.assertActive();
+    return this.draftroll.configureInteractions(options);
+  }
 
   /**
    * Detaches the active renderer and conditionally destroys owned resources.
@@ -1841,7 +2141,9 @@ export class DraftrollSession {
     if (cleanupError !== undefined) {
       throw cleanupError instanceof Error
         ? cleanupError
-        : new Error(`Renderer cleanup failed: ${describeThrowable(cleanupError)}`, { cause: cleanupError });
+        : new Error(`Renderer cleanup failed: ${describeThrowable(cleanupError)}`, {
+            cause: cleanupError,
+          });
     }
   }
 
@@ -1894,12 +2196,20 @@ export class DraftrollSession {
   }
 
   private assertActive(): void {
-    if (this.statusValue === 'disposed') throw new DraftrollStateError('Draftroll session has been disposed', { package: 'sdk' });
+    if (this.statusValue === 'disposed')
+      throw new DraftrollStateError('Draftroll session has been disposed', { package: 'sdk' });
   }
 
-  private emit<K extends DraftrollSessionEventName>(event: K, payload: DraftrollSessionEventMap[K]): void {
+  private emit<K extends DraftrollSessionEventName>(
+    event: K,
+    payload: DraftrollSessionEventMap[K],
+  ): void {
     for (const handler of this.handlers.get(event) ?? []) {
       try {
+        // Handlers are stored contravariantly at `never` so one map can hold every event's
+        // handler. `on` only ever files a handler under its own key, so widening back to this
+        // key's payload type restores the signature the caller registered.
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion
         (handler as (value: DraftrollSessionEventMap[K]) => void)(payload);
       } catch {
         // Observer failures cannot alter lifecycle transitions.
@@ -1928,7 +2238,10 @@ export async function mountDraftroll(options: DraftrollEmbeddedOptions = {}): Pr
  *
  * @public
  */
-export function applyDiceThemes(result: NormalizedRollResult, selection?: DiceThemeSelection): NormalizedRollResult {
+export function applyDiceThemes(
+  result: NormalizedRollResult,
+  selection?: DiceThemeSelection,
+): NormalizedRollResult {
   if (!selection) return result;
   return {
     ...result,
@@ -1937,13 +2250,21 @@ export function applyDiceThemes(result: NormalizedRollResult, selection?: DiceTh
       if (typeof selection === 'string') themeId = selection;
       else if (typeof selection === 'function') themeId = selection(die, index);
       else if (Array.isArray(selection)) themeId = selection[index];
+      // `DiceThemeSelection` has four members and the branches above eliminate the string,
+      // function, and array forms, leaving only the by-die-id record. `Array.isArray` does not
+      // narrow the readonly-array member out of the union, so the compiler cannot see that.
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion
       else themeId = (selection as Readonly<Record<string, string>>)[die.id];
       return themeId ? { ...die, themeId } : { ...die };
     }),
   };
 }
 
-function findLatestAnimatedReplaySequence(events: readonly import('../../protocol/src/index').RoomReplayEvent[] | readonly import('../../client/src/index').SynchronizedRoomRollEvent[]): number | null {
+function findLatestAnimatedReplaySequence(
+  events:
+    | readonly import('../../protocol/src/index').RoomReplayEvent[]
+    | readonly import('../../client/src/index').SynchronizedRoomRollEvent[],
+): number | null {
   let latest: number | null = null;
   for (const event of events) {
     if (!('result' in event) || !event.result) continue;
@@ -1971,7 +2292,11 @@ function readRerolledDieIds(result: NormalizedRollResult): string[] {
   const raw = result.metadata?.rerolledDice;
   if (!Array.isArray(raw)) return [];
   const available = new Set(result.dice.map((die) => die.id));
-  return [...new Set(raw.filter((value): value is string => typeof value === 'string' && available.has(value)))];
+  return [
+    ...new Set(
+      raw.filter((value): value is string => typeof value === 'string' && available.has(value)),
+    ),
+  ];
 }
 
 function createRerollPresentation(
@@ -1989,7 +2314,7 @@ function createRerollPresentation(
     const current = revisedById.get(logicalDieId);
     return {
       ...die,
-      kept: previousAffected.has(logicalDieId) ? false : current?.kept ?? die.kept,
+      kept: previousAffected.has(logicalDieId) ? false : (current?.kept ?? die.kept),
     };
   });
 
@@ -2004,19 +2329,21 @@ function createRerollPresentation(
     const generatedFromDieId = isRerolledRoot
       ? die.id
       : die.generatedFromDieId
-        ? remappedIds.get(die.generatedFromDieId) ?? die.generatedFromDieId
+        ? (remappedIds.get(die.generatedFromDieId) ?? die.generatedFromDieId)
         : undefined;
-    return [{
-      ...die,
-      id,
-      generatedBy: isRerolledRoot ? 'reroll' as const : die.generatedBy,
-      generatedFromDieId,
-      metadata: {
-        ...die.metadata,
-        draftrollPresentationOnly: true,
-        logicalDieId: die.id,
+    return [
+      {
+        ...die,
+        id,
+        generatedBy: isRerolledRoot ? ('reroll' as const) : die.generatedBy,
+        generatedFromDieId,
+        metadata: {
+          ...die.metadata,
+          draftrollPresentationOnly: true,
+          logicalDieId: die.id,
+        },
       },
-    }];
+    ];
   });
 
   return {
@@ -2047,7 +2374,8 @@ function collectCausalDieIds(
   while (changed) {
     changed = false;
     for (const die of dice) {
-      if (!die.generatedFromDieId || !affected.has(die.generatedFromDieId) || affected.has(die.id)) continue;
+      if (!die.generatedFromDieId || !affected.has(die.generatedFromDieId) || affected.has(die.id))
+        continue;
       affected.add(die.id);
       changed = true;
     }
@@ -2081,10 +2409,15 @@ function allocatePresentationDieId(base: string, used: Set<string>): string {
   return candidate;
 }
 
-function asRevision(previous: NormalizedRollResult, next: NormalizedRollResult): NormalizedRollResult {
+function asRevision(
+  previous: NormalizedRollResult,
+  next: NormalizedRollResult,
+): NormalizedRollResult {
   const updatedAt = new Date().toISOString();
   const revision = (previous.revision ?? 0) + 1;
-  const rerolledDice = Array.isArray(next.metadata?.rerolledDice) ? next.metadata.rerolledDice : null;
+  const rerolledDice = Array.isArray(next.metadata?.rerolledDice)
+    ? next.metadata.rerolledDice
+    : null;
   return {
     ...next,
     rollId: previous.rollId,
@@ -2113,10 +2446,9 @@ function resolveAnimatedDieIds(
   return next.dice
     .filter((die) => {
       const old = previousById.get(die.id);
-      return !old
-        || old.result !== die.result
-        || old.type !== die.type
-        || old.themeId !== die.themeId;
+      return (
+        !old || old.result !== die.result || old.type !== die.type || old.themeId !== die.themeId
+      );
     })
     .map((die) => die.id);
 }

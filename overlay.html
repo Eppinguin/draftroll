@@ -5,14 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="color-scheme" content="normal" />
     <style>
-      html[data-draftroll-mode="overlay"],
-      html[data-draftroll-mode="overlay"] body,
-      html[data-draftroll-mode="overlay"] #app,
-      html[data-draftroll-mode="overlay"] #scene {
+      html[data-draftroll-mode='overlay'],
+      html[data-draftroll-mode='overlay'] body,
+      html[data-draftroll-mode='overlay'] #app,
+      html[data-draftroll-mode='overlay'] #scene {
         background: transparent !important;
       }
-      html[data-draftroll-mode="overlay"] #app::before,
-      html[data-draftroll-mode="overlay"] #app::after {
+      html[data-draftroll-mode='overlay'] #app::before,
+      html[data-draftroll-mode='overlay'] #app::after {
         content: none !important;
         display: none !important;
       }
@@ -25,7 +25,10 @@
       <div id="flash" aria-hidden="true"></div>
       <div class="overlay-hidden" aria-hidden="true">
         <div id="status"><span></span><span>Ready</span></div>
-        <section id="result-panel" role="status" aria-live="polite" aria-atomic="true"><div id="result-total">—</div><div id="result-detail">Ready</div></section>
+        <section id="result-panel" role="status" aria-live="polite" aria-atomic="true">
+          <div id="result-total">—</div>
+          <div id="result-detail">Ready</div>
+        </section>
         <button id="roll-button" type="button"><span>✦</span><span>CAST D20</span></button>
         <span id="quantity-value">1</span>
         <button id="sound-toggle" type="button" aria-pressed="false"></button>

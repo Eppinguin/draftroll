@@ -1,4 +1,8 @@
-import type { NormalizedDieResult, NormalizedRollResult, RollTreeNode } from '../../protocol/src/index';
+import type {
+  NormalizedDieResult,
+  NormalizedRollResult,
+  RollTreeNode,
+} from '../../protocol/src/index';
 
 /**
  * Controls human-readable result formatting.
@@ -10,7 +14,6 @@ export interface FormatRollOptions {
   includeComment?: boolean;
   includeAuthority?: boolean;
 }
-
 
 /**
  * Strategy for converting normalized roll data to text.
@@ -51,7 +54,9 @@ export class DefaultRollStringifier implements RollStringifier {
  */
 export function stringifyRoll(
   result: NormalizedRollResult,
-  stringifier: RollStringifier | ((result: NormalizedRollResult) => string) = new DefaultRollStringifier(),
+  stringifier:
+    | RollStringifier
+    | ((result: NormalizedRollResult) => string) = new DefaultRollStringifier(),
 ): string {
   return typeof stringifier === 'function' ? stringifier(result) : stringifier.stringify(result);
 }
@@ -65,10 +70,15 @@ export function stringifyRoll(
  *
  * @public
  */
-export function formatRollResult(result: NormalizedRollResult, options: FormatRollOptions = {}): string {
+export function formatRollResult(
+  result: NormalizedRollResult,
+  options: FormatRollOptions = {},
+): string {
   const style = options.style ?? 'plain';
   const expression = result.expression ?? formatTree(result.tree, result.dice, style);
-  const rendered = result.tree ? formatTree(result.tree, result.dice, style) : formatDiceList(result.dice, style);
+  const rendered = result.tree
+    ? formatTree(result.tree, result.dice, style)
+    : formatDiceList(result.dice, style);
   const total = style === 'markdown' ? `\`${result.total}\`` : String(result.total);
   const prefix = options.includeAuthority ? `[${result.authority}] ` : '';
   const comment = options.includeComment !== false && result.comment ? ` ${result.comment}` : '';
@@ -76,13 +86,19 @@ export function formatRollResult(result: NormalizedRollResult, options: FormatRo
   return `${prefix}${rendered || expression} = ${total}${comment}`;
 }
 
-function formatTree(tree: RollTreeNode | undefined, dice: readonly NormalizedDieResult[], style: NonNullable<FormatRollOptions['style']>): string {
+function formatTree(
+  tree: RollTreeNode | undefined,
+  dice: readonly NormalizedDieResult[],
+  style: NonNullable<FormatRollOptions['style']>,
+): string {
   if (!tree) return '';
   const byId = new Map(dice.map((die) => [die.id, die]));
   const annotation = tree.annotations.length ? ` [${tree.annotations.join(', ')}]` : '';
   let text: string;
   switch (tree.kind) {
-    case 'literal': text = String(tree.literal); break;
+    case 'literal':
+      text = String(tree.literal);
+      break;
     case 'die': {
       const die = byId.get(tree.dieId);
       text = die ? formatDie(die, style) : String(tree.value);
@@ -93,19 +109,33 @@ function formatTree(tree: RollTreeNode | undefined, dice: readonly NormalizedDie
       text = `${notation} (${tree.children.map((child) => formatTree(child, dice, style)).join(', ')})`;
       break;
     }
-    case 'set': text = `(${tree.children.map((child) => formatTree(child, dice, style)).join(', ')})`; break;
-    case 'parenthetical': text = `(${formatTree(tree.child, dice, style)})`; break;
-    case 'unary': text = `${tree.operator}${formatTree(tree.child, dice, style)}`; break;
-    case 'binary': text = `${formatTree(tree.left, dice, style)} ${tree.operator} ${formatTree(tree.right, dice, style)}`; break;
+    case 'set':
+      text = `(${tree.children.map((child) => formatTree(child, dice, style)).join(', ')})`;
+      break;
+    case 'parenthetical':
+      text = `(${formatTree(tree.child, dice, style)})`;
+      break;
+    case 'unary':
+      text = `${tree.operator}${formatTree(tree.child, dice, style)}`;
+      break;
+    case 'binary':
+      text = `${formatTree(tree.left, dice, style)} ${tree.operator} ${formatTree(tree.right, dice, style)}`;
+      break;
   }
   return `${tree.kept ? text : dropped(text, style)}${annotation}`;
 }
 
-function formatDiceList(dice: readonly NormalizedDieResult[], style: NonNullable<FormatRollOptions['style']>): string {
+function formatDiceList(
+  dice: readonly NormalizedDieResult[],
+  style: NonNullable<FormatRollOptions['style']>,
+): string {
   return dice.map((die) => formatDie(die, style)).join(', ');
 }
 
-function formatDie(die: NormalizedDieResult, style: NonNullable<FormatRollOptions['style']>): string {
+function formatDie(
+  die: NormalizedDieResult,
+  style: NonNullable<FormatRollOptions['style']>,
+): string {
   const value = String(die.result);
   return die.kept ? value : dropped(value, style);
 }

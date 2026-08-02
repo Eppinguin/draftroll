@@ -152,8 +152,8 @@ export type VerifyRoomCapabilityTokenResult =
  * @public
  */
 export async function createRoomCapabilityToken(
-  payload: Omit<RoomCapabilityTokenPayload, 'protocolVersion' | 'exp' | 'iat' | 'jti'>
-    & Partial<Pick<RoomCapabilityTokenPayload, 'exp' | 'iat' | 'jti'>>,
+  payload: Omit<RoomCapabilityTokenPayload, 'protocolVersion' | 'exp' | 'iat' | 'jti'> &
+    Partial<Pick<RoomCapabilityTokenPayload, 'exp' | 'iat' | 'jti'>>,
   key: string | RoomTokenSigningKey,
   options: CreateRoomTokenOptions = {},
 ): Promise<string> {
@@ -167,7 +167,9 @@ export async function createRoomCapabilityToken(
     iat: payload.iat ?? nowSeconds,
     nbf: payload.nbf ?? normalizeUnixTime(options.notBefore),
     jti: payload.jti ?? options.tokenId ?? crypto.randomUUID(),
-    exp: payload.exp ?? (options.expiresInSeconds === undefined ? undefined : nowSeconds + options.expiresInSeconds),
+    exp:
+      payload.exp ??
+      (options.expiresInSeconds === undefined ? undefined : nowSeconds + options.expiresInSeconds),
   };
   const validated = decodeRoomCapabilityTokenPayload(complete);
   if (!validated.success) throw validated.error;
@@ -203,7 +205,10 @@ export async function verifyRoomCapabilityTokenDetailed(
   const parts = token.split('.');
   const legacy = parts.length === 2;
   if (!(legacy || parts.length === 3)) {
-    return invalid('malformed_token', 'Room capability tokens must contain two legacy parts or three versioned parts');
+    return invalid(
+      'malformed_token',
+      'Room capability tokens must contain two legacy parts or three versioned parts',
+    );
   }
 
   let header: RoomTokenHeader;
@@ -222,7 +227,10 @@ export async function verifyRoomCapabilityTokenDetailed(
   } else {
     const parsedHeader = decodeJson(parts[0]);
     if (!isRoomTokenHeader(parsedHeader)) {
-      return invalid('unsupported_token_header', 'The room capability token header is invalid or unsupported');
+      return invalid(
+        'unsupported_token_header',
+        'The room capability token header is invalid or unsupported',
+      );
     }
     header = parsedHeader;
     payloadPart = parts[1]!;
@@ -231,13 +239,14 @@ export async function verifyRoomCapabilityTokenDetailed(
   }
 
   const keys = normalizeVerificationKeys(keySource);
-  const candidates = header.kid
-    ? keys.filter((candidate) => candidate.id === header.kid)
-    : keys;
+  const candidates = header.kid ? keys.filter((candidate) => candidate.id === header.kid) : keys;
   if (candidates.length === 0) {
-    return invalid('unknown_key_id', header.kid
-      ? `No verification key is configured for key ID '${header.kid}'`
-      : 'No room token verification key is configured');
+    return invalid(
+      'unknown_key_id',
+      header.kid
+        ? `No verification key is configured for key ID '${header.kid}'`
+        : 'No room token verification key is configured',
+    );
   }
 
   let signature: Uint8Array;
@@ -254,16 +263,24 @@ export async function verifyRoomCapabilityTokenDetailed(
       break;
     }
   }
-  if (!verifiedKey) return invalid('invalid_signature', 'The room capability token signature is invalid');
+  if (!verifiedKey)
+    return invalid('invalid_signature', 'The room capability token signature is invalid');
 
   const parsedPayload = decodeJson(payloadPart);
-  if (parsedPayload === null) return invalid('invalid_payload', 'The room capability token payload is not valid JSON');
+  if (parsedPayload === null)
+    return invalid('invalid_payload', 'The room capability token payload is not valid JSON');
   const decoded = decodeRoomCapabilityTokenPayload(parsedPayload);
   if (!decoded.success) return invalid('invalid_payload', decoded.error.message);
   const payload = decoded.data;
 
-  if (payload.protocolVersion !== undefined && payload.protocolVersion !== DRAFTROLL_PROTOCOL_VERSION) {
-    return invalid('protocol_mismatch', 'The room capability token uses an unsupported Draftroll protocol version');
+  if (
+    payload.protocolVersion !== undefined &&
+    payload.protocolVersion !== DRAFTROLL_PROTOCOL_VERSION
+  ) {
+    return invalid(
+      'protocol_mismatch',
+      'The room capability token uses an unsupported Draftroll protocol version',
+    );
   }
   if (options.roomId !== undefined && payload.roomId !== options.roomId) {
     return invalid('room_mismatch', 'The room capability token is not valid for this room');
@@ -281,18 +298,30 @@ export async function verifyRoomCapabilityTokenDetailed(
     return invalid('token_issued_in_future', 'The room capability token was issued in the future');
   }
   if (options.issuer !== undefined && payload.iss !== options.issuer) {
-    return invalid('token_issuer_mismatch', 'The room capability token issuer does not match this deployment');
+    return invalid(
+      'token_issuer_mismatch',
+      'The room capability token issuer does not match this deployment',
+    );
   }
   if (options.audience !== undefined && !audienceMatches(payload.aud, options.audience)) {
-    return invalid('token_audience_mismatch', 'The room capability token audience does not match this deployment');
+    return invalid(
+      'token_audience_mismatch',
+      'The room capability token audience does not match this deployment',
+    );
   }
   if (options.requireTokenId && !payload.jti) {
-    return invalid('token_id_required', 'This deployment requires room capability tokens to include a token ID');
+    return invalid(
+      'token_id_required',
+      'This deployment requires room capability tokens to include a token ID',
+    );
   }
   if (options.requireIssuedAt && payload.iat === undefined) {
-    return invalid('token_issued_at_required', 'This deployment requires room capability tokens to include an issued-at time');
+    return invalid(
+      'token_issued_at_required',
+      'This deployment requires room capability tokens to include an issued-at time',
+    );
   }
-  if (options.isRevoked && await options.isRevoked(payload, header)) {
+  if (options.isRevoked && (await options.isRevoked(payload, header))) {
     return invalid('token_revoked', 'The room capability token has been revoked');
   }
 
@@ -383,13 +412,19 @@ function isRoomTokenHeader(value: unknown): value is RoomTokenHeader {
   const record = value;
   const allowed = new Set(['typ', 'alg', 'version', 'kid']);
   if (Object.keys(record).some((key) => !allowed.has(key))) return false;
-  return record.typ === DRAFTROLL_ROOM_TOKEN_TYPE
-    && record.alg === 'HS256'
-    && record.version === DRAFTROLL_ROOM_TOKEN_FORMAT_VERSION
-    && (record.kid === undefined || (typeof record.kid === 'string' && record.kid.length > 0 && record.kid.length <= 200));
+  return (
+    record.typ === DRAFTROLL_ROOM_TOKEN_TYPE &&
+    record.alg === 'HS256' &&
+    record.version === DRAFTROLL_ROOM_TOKEN_FORMAT_VERSION &&
+    (record.kid === undefined ||
+      (typeof record.kid === 'string' && record.kid.length > 0 && record.kid.length <= 200))
+  );
 }
 
-function audienceMatches(tokenAudience: string | string[] | undefined, expected: string | readonly string[]): boolean {
+function audienceMatches(
+  tokenAudience: string | string[] | undefined,
+  expected: string | readonly string[],
+): boolean {
   if (tokenAudience === undefined) return false;
   const actual = Array.isArray(tokenAudience) ? tokenAudience : [tokenAudience];
   const wanted = Array.isArray(expected) ? expected : [expected];
@@ -401,7 +436,10 @@ function normalizeUnixTime(value: Date | number | undefined): number | undefined
   return value instanceof Date ? Math.floor(value.getTime() / 1_000) : Math.floor(value);
 }
 
-function invalid(code: RoomTokenVerificationFailureCode, message: string): VerifyRoomCapabilityTokenResult {
+function invalid(
+  code: RoomTokenVerificationFailureCode,
+  message: string,
+): VerifyRoomCapabilityTokenResult {
   return { valid: false, code, message };
 }
 
@@ -410,7 +448,11 @@ async function sign(value: string, secret: string): Promise<ArrayBuffer> {
   return crypto.subtle.sign('HMAC', key, new TextEncoder().encode(value));
 }
 
-async function verifySignature(value: string, signature: Uint8Array, secret: string): Promise<boolean> {
+async function verifySignature(
+  value: string,
+  signature: Uint8Array,
+  secret: string,
+): Promise<boolean> {
   const key = await importHmacKey(secret, ['verify']);
   return crypto.subtle.verify(
     'HMAC',
@@ -457,11 +499,13 @@ function base64UrlEncode(value: ArrayBuffer | Uint8Array): string {
 
 function base64UrlDecode(value: string): Uint8Array {
   if (!/^[A-Za-z0-9_-]*$/.test(value)) throw new Error('Invalid base64url');
-  const padded = value.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - value.length % 4) % 4);
+  const padded =
+    value.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (value.length % 4)) % 4);
   const binary = atob(padded);
   return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
 
 function assertSecret(secret: string): void {
-  if (!secret || secret.length < 16) throw new Error('Draftroll room token secrets must contain at least 16 characters');
+  if (!secret || secret.length < 16)
+    throw new Error('Draftroll room token secrets must contain at least 16 characters');
 }

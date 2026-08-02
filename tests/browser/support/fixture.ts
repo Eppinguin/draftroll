@@ -38,7 +38,13 @@ export function getState(page: Page): Promise<FixtureState> {
 
 export async function openParticipant(
   context: BrowserContext,
-  options: { roomId: string; participantId: string; sessionId: string; name: string; overlay?: boolean },
+  options: {
+    roomId: string;
+    participantId: string;
+    sessionId: string;
+    name: string;
+    overlay?: boolean;
+  },
 ): Promise<Page> {
   const page = await context.newPage();
   const search = new URLSearchParams({
@@ -60,8 +66,16 @@ declare global {
       ready: Promise<void>;
       getState(): FixtureState;
       rollLocal(expression?: string): Promise<{ total: number; dice: number }>;
-      connectRoom(options?: { roomId?: string; participantId?: string; sessionId?: string; name?: string }): Promise<void>;
-      rollRoom(expression?: string, visibility?: { type: string; [key: string]: unknown }): Promise<{ rollId: string; hidden: boolean; total: number | null }>;
+      connectRoom(options?: {
+        roomId?: string;
+        participantId?: string;
+        sessionId?: string;
+        name?: string;
+      }): Promise<void>;
+      rollRoom(
+        expression?: string,
+        visibility?: { type: string; [key: string]: unknown },
+      ): Promise<{ rollId: string; hidden: boolean; total: number | null }>;
       revealLast(): Promise<{ rollId: string; revision: number; total: number | null }>;
       destroyOverlay(): void;
       closeRoom(): void;

@@ -85,16 +85,16 @@ A top-down, screen-filling polyhedral dice engine built with Three.js, Cannon-es
 
 ## Themes
 
-| Theme ID | Name | Positive | Neutral | Negative |
-| --- | --- | --- | --- | --- |
-| `dragon` | Wyrmfire | Dragon emergence / fire breath | Orbiting embers | Cinder collapse |
-| `celestial` | Sunforged | Solar ascension / radiant beams | Star halo | Eclipse collapse |
-| `tempest` | Stormbound | Thunder strike | Static crown | Storm discharge |
-| `frost` | Glacier Heart | Ice crown / crystal growth | Snow orbit | Ice shatter |
-| `nebula` | Astral Void | Void rift / stellar vortex | Stardust orbit | Singularity collapse |
-| `ember` | Phoenix Forge | Phoenix flame wings | Ember drift | Ash collapse |
-| `necrotic` | Gravebound | Spectral reaper | Grave wisps | Soul collapse |
-| `wildwood` | Verdant Oath | Verdant bloom | Firefly orbit | Thorn bind |
+| Theme ID    | Name          | Positive                        | Neutral         | Negative             |
+| ----------- | ------------- | ------------------------------- | --------------- | -------------------- |
+| `dragon`    | Wyrmfire      | Dragon emergence / fire breath  | Orbiting embers | Cinder collapse      |
+| `celestial` | Sunforged     | Solar ascension / radiant beams | Star halo       | Eclipse collapse     |
+| `tempest`   | Stormbound    | Thunder strike                  | Static crown    | Storm discharge      |
+| `frost`     | Glacier Heart | Ice crown / crystal growth      | Snow orbit      | Ice shatter          |
+| `nebula`    | Astral Void   | Void rift / stellar vortex      | Stardust orbit  | Singularity collapse |
+| `ember`     | Phoenix Forge | Phoenix flame wings             | Ember drift     | Ash collapse         |
+| `necrotic`  | Gravebound    | Spectral reaper                 | Grave wisps     | Soul collapse        |
+| `wildwood`  | Verdant Oath  | Verdant bloom                   | Firefly orbit   | Thorn bind           |
 
 Each theme supplies procedural albedo, normal, and roughness data plus theme-specific PBR response, labels, edges, and semantic result effects.
 
@@ -105,7 +105,6 @@ The d4 uses top-read tetrahedral numbering instead of the face-center numbering 
 Each triangular face contains three labels, one toward each vertex. The same value appears next to a given vertex on all three adjacent faces. The result is the value of the uppermost vertex after the tetrahedron settles.
 
 Predetermined d4 results use the tetrahedron’s exact rotational symmetries. A constant local orientation is applied across the complete physical trajectory so the requested top-read vertex ends uppermost without relabeling or a late correction.
-
 
 ## Throw dynamics
 
@@ -170,8 +169,8 @@ window.draftrollDice.roll({
   outcomes: ['positive', 'positive'],
   context: {
     rollType: 'skill-check',
-    reason: 'doubles'
-  }
+    reason: 'doubles',
+  },
 });
 ```
 
@@ -184,8 +183,8 @@ window.draftrollDice.roll({
   results: [1, 6],
   outcomes: ['negative', 'neutral'],
   context: {
-    rollType: 'damage'
-  }
+    rollType: 'damage',
+  },
 });
 ```
 
@@ -205,7 +204,7 @@ window.draftrollDice.configure({
       if (context.rollType === 'damage' && result === 1) return 'negative';
       return 'neutral';
     });
-  }
+  },
 });
 ```
 
@@ -217,43 +216,43 @@ An explicit `outcomes` array passed to `roll()` takes precedence over the resolv
 window.draftrollDice.configureThemeEffects('dragon', {
   positive: 'dragon-awaken',
   neutral: 'dragon-embers',
-  negative: 'dragon-cinders'
+  negative: 'dragon-cinders',
 });
 ```
 
 Built-in effect presets:
 
 ```ts
-'dragon-awaken'
-'dragon-embers'
-'dragon-cinders'
-'void-rift'
-'stardust-orbit'
-'void-collapse'
-'phoenix-flare'
-'ember-drift'
-'ash-collapse'
-'ice-crown'
-'snow-orbit'
-'ice-shatter'
-'solar-ascension'
-'star-halo'
-'eclipse-collapse'
-'thunder-strike'
-'static-crown'
-'storm-fizzle'
-'soul-reaper'
-'grave-wisp'
-'soul-collapse'
-'verdant-bloom'
-'firefly-orbit'
-'thorn-bind'
-'major-burst'
-'subtle-pulse'
-'void-fracture'
-'ember-fracture'
-'frost-fracture'
-'none'
+'dragon-awaken';
+'dragon-embers';
+'dragon-cinders';
+'void-rift';
+'stardust-orbit';
+'void-collapse';
+'phoenix-flare';
+'ember-drift';
+'ash-collapse';
+'ice-crown';
+'snow-orbit';
+'ice-shatter';
+'solar-ascension';
+'star-halo';
+'eclipse-collapse';
+'thunder-strike';
+'static-crown';
+'storm-fizzle';
+'soul-reaper';
+'grave-wisp';
+'soul-collapse';
+'verdant-bloom';
+'firefly-orbit';
+'thorn-bind';
+'major-burst';
+'subtle-pulse';
+'void-fracture';
+'ember-fracture';
+'frost-fracture';
+'none';
 ```
 
 The registry is separate from game logic so future user-created themes can map the three semantic outcome slots to any compatible effect preset.
@@ -306,7 +305,6 @@ Large pools are optimized without replacing the physical roll or reducing dice g
 - Bloom internal buffers adapt from 68% to 58% for crowded rolls while the scene and dice remain full-resolution
 - Active shader variants are precompiled asynchronously after startup and theme changes to reduce first-use hitches
 
-
 ## Run locally
 
 ```bash
@@ -352,7 +350,6 @@ The production build uses relative asset paths, so `dist` can also be hosted fro
 ## Surface stability fix
 
 Dice texture variation now uses a small pool of immutable material variants. Variants share the same PBR textures and compiled shader program, but each keeps a stable UV offset for its entire lifetime. The shader also leaves UV derivatives continuous and relies on `RepeatWrapping` rather than applying `fract()` in the vertex stage. This removes intermittent surface-pattern switching and mip shimmer while dice rotate or change render order.
-
 
 ## Large-pool settling and launch planning
 
@@ -400,7 +397,7 @@ window.draftrollDice.roll({
   seed: 'encounter-42-attack-7',
   results: [8, 8],
   outcomes: ['positive', 'positive'],
-  context: { rollType: 'check', reason: 'doubles' }
+  context: { rollType: 'check', reason: 'doubles' },
 });
 
 const replay = window.draftrollDice.getLastReplay();
@@ -422,11 +419,10 @@ Every built-in theme declares support for positive, neutral, and negative result
 ## Contact shadows
 
 Each die has a lightweight height-aware contact shadow. It becomes tighter and darker near the table and wider and fainter while airborne. This is layered beneath the existing real-time directional shadows to improve grounding without adding another shadow-render pass.
+
 ## Hand-release motion
 
 Ordinary multi-die rolls begin as a compact non-overlapping three-dimensional handful with a coherent wrist-driven throw direction and restrained release variation. Pools of twelve or more switch to the broad staged-pour path described above so dense convex bodies are never activated as one compressed stack. Both layouts preserve forward no-slip rotation, controlled tumble, deterministic results, and viewport containment.
-
-
 
 ## Repository completion and deployment boundary
 
@@ -440,7 +436,6 @@ The consolidated implementation plan and status checklist is in [`plan.md`](./pl
 
 - [Runtime validation and compatibility](docs/RUNTIME_VALIDATION.md)
 - [Expression validation diagnostics](docs/VALIDATION_DIAGNOSTICS.md)
-
 
 Browser capability tokens are not embedded in room URLs. The client authenticates after a secure WebSocket opens and uses `Authorization: Bearer` for HTTP room requests, reducing leakage through access logs, referrers, and copied invite URLs. See `docs/TOKEN_SECURITY.md`.
 

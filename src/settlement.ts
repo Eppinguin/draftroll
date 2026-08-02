@@ -28,7 +28,9 @@ export function deriveDieSettleTimes(
   }
   const expectedLength = frameCount * dieCount * 7;
   if (transforms.length !== expectedLength) {
-    throw new Error(`Recorded dice trajectory contains ${transforms.length} values; expected ${expectedLength}`);
+    throw new Error(
+      `Recorded dice trajectory contains ${transforms.length} values; expected ${expectedLength}`,
+    );
   }
   if (trajectory.activationDelays && trajectory.activationDelays.length !== dieCount) {
     throw new Error('Recorded dice activation delays do not match the die count');
@@ -61,10 +63,10 @@ export function deriveDieSettleTimes(
       if (dx * dx + dy * dy + dz * dz > positionToleranceSquared) break;
 
       const quaternionDot = Math.abs(
-        transforms[offset + 3] * finalQx
-        + transforms[offset + 4] * finalQy
-        + transforms[offset + 5] * finalQz
-        + transforms[offset + 6] * finalQw
+        transforms[offset + 3] * finalQx +
+          transforms[offset + 4] * finalQy +
+          transforms[offset + 5] * finalQz +
+          transforms[offset + 6] * finalQw,
       );
       if (quaternionDot < minimumQuaternionDot) break;
       firstStableFrame = frame;
@@ -93,7 +95,8 @@ export function consumeSettledVisualIndexes(
   for (let index = 0; index < visualIds.length; index += 1) {
     const id = visualIds[index];
     const settleTime = settleTimes[index];
-    if (!Number.isFinite(settleTime) || settleTime > currentTime + 1e-6 || consumed.has(id)) continue;
+    if (!Number.isFinite(settleTime) || settleTime > currentTime + 1e-6 || consumed.has(id))
+      continue;
     consumed.add(id);
     indexes.push(index);
   }

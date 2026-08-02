@@ -9,7 +9,10 @@ const root = resolve(import.meta.dirname, '..');
 const temp = await mkdtemp(join(tmpdir(), 'draftroll-performance-'));
 try {
   const ts = loadTypeScript();
-  const performanceSource = await readFile(join(root, 'packages/renderer/src/performance.ts'), 'utf8');
+  const performanceSource = await readFile(
+    join(root, 'packages/renderer/src/performance.ts'),
+    'utf8',
+  );
   const transpiled = ts.transpileModule(performanceSource, {
     fileName: 'performance.ts',
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 },
@@ -26,22 +29,46 @@ try {
   await writeFile(viewportModulePath, viewportTranspiled);
   const viewportModule = await import(pathToFileURL(viewportModulePath).href);
 
-  assert.deepEqual(module.resolveRendererPerformanceBudget({
-    profile: 'battery', overlay: true, reducedMotion: false, visualCount: 1,
-    devicePixelRatio: 2,
-  }), { maximumPixelRatio: 1, activeFramesPerSecond: 30 });
-  assert.deepEqual(module.resolveRendererPerformanceBudget({
-    profile: 'auto', overlay: true, reducedMotion: false, visualCount: 4,
-    devicePixelRatio: 2,
-  }), { maximumPixelRatio: 1.35, activeFramesPerSecond: 60 });
-  assert.equal(module.resolveRendererPerformanceBudget({
-    profile: 'auto', overlay: true, reducedMotion: false, visualCount: 30,
-    devicePixelRatio: 2,
-  }).activeFramesPerSecond, 30);
-  assert.equal(module.resolveRendererPerformanceBudget({
-    profile: 'quality', overlay: false, reducedMotion: false, visualCount: 1,
-    devicePixelRatio: 2,
-  }).maximumPixelRatio, 2);
+  assert.deepEqual(
+    module.resolveRendererPerformanceBudget({
+      profile: 'battery',
+      overlay: true,
+      reducedMotion: false,
+      visualCount: 1,
+      devicePixelRatio: 2,
+    }),
+    { maximumPixelRatio: 1, activeFramesPerSecond: 30 },
+  );
+  assert.deepEqual(
+    module.resolveRendererPerformanceBudget({
+      profile: 'auto',
+      overlay: true,
+      reducedMotion: false,
+      visualCount: 4,
+      devicePixelRatio: 2,
+    }),
+    { maximumPixelRatio: 1.35, activeFramesPerSecond: 60 },
+  );
+  assert.equal(
+    module.resolveRendererPerformanceBudget({
+      profile: 'auto',
+      overlay: true,
+      reducedMotion: false,
+      visualCount: 30,
+      devicePixelRatio: 2,
+    }).activeFramesPerSecond,
+    30,
+  );
+  assert.equal(
+    module.resolveRendererPerformanceBudget({
+      profile: 'quality',
+      overlay: false,
+      reducedMotion: false,
+      visualCount: 1,
+      devicePixelRatio: 2,
+    }).maximumPixelRatio,
+    2,
+  );
 
   const viewport = viewportModule.resolveRendererViewport({
     canvas: { width: 300, height: 150 },
@@ -78,7 +105,7 @@ try {
     'const composer = OVERLAY_MODE ? null',
     'resolveRendererViewport',
     'canvas.getBoundingClientRect()',
-    "new ResizeObserver",
+    'new ResizeObserver',
     'clampDieToVisibleArea',
     'shadowsEnabled: quality.shadowsEnabled && count <= 8',
     'function requestRender()',
@@ -88,30 +115,43 @@ try {
     'function getRollWorker()',
     'scheduleRollWorkerRelease()',
     'getPerformanceSnapshot',
-  ]) assert.ok(main.includes(marker), `renderer performance implementation is missing ${marker}`);
-  assert.ok(!main.includes('requestAnimationFrame(animate);\n  const dt'), 'renderer still has a perpetual RAF loop');
+  ])
+    assert.ok(main.includes(marker), `renderer performance implementation is missing ${marker}`);
+  assert.ok(
+    !main.includes('requestAnimationFrame(animate);\n  const dt'),
+    'renderer still has a perpetual RAF loop',
+  );
   assert.ok(effects.includes('hasActiveAnimations()'), 'effects do not expose an idle signal');
   assert.ok(dice.includes('getVisualRadius()'), 'dice do not expose conservative visual bounds');
-  assert.ok(overlay.includes('performance?: RendererPerformanceOptions'), 'overlay performance options are missing');
+  assert.ok(
+    overlay.includes('performance?: RendererPerformanceOptions'),
+    'overlay performance options are missing',
+  );
   assert.match(workspace, /esbuild:\s*true/);
   assert.match(workspace, /workerd:\s*true/);
 
-  console.log(JSON.stringify({
-    ok: true,
-    tested: [
-      'battery/auto/quality budgets',
-      '30-dice frame cap',
-      'adaptive resolution hysteresis',
-      'CSS viewport and camera aspect parity',
-      'small-roll antialiasing and depth-preserving shadows',
-      'visual-radius screen containment',
-      'idle-zero render scheduling',
-      'bounded presentation queue',
-      'lazy physics worker lifecycle',
-      'overlay performance configuration',
-      'esbuild and workerd build approvals',
-    ],
-  }, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        ok: true,
+        tested: [
+          'battery/auto/quality budgets',
+          '30-dice frame cap',
+          'adaptive resolution hysteresis',
+          'CSS viewport and camera aspect parity',
+          'small-roll antialiasing and depth-preserving shadows',
+          'visual-radius screen containment',
+          'idle-zero render scheduling',
+          'bounded presentation queue',
+          'lazy physics worker lifecycle',
+          'overlay performance configuration',
+          'esbuild and workerd build approvals',
+        ],
+      },
+      null,
+      2,
+    ),
+  );
 } finally {
   await rm(temp, { recursive: true, force: true });
 }

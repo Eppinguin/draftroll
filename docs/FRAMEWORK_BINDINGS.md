@@ -18,7 +18,11 @@ const { DraftrollProvider, useDraftrollSnapshot, useDraftrollRolls } =
 function DicePanel() {
   const snapshot = useDraftrollSnapshot();
   const rolls = useDraftrollRolls();
-  return <output>{snapshot.status}: {rolls.length} rolls</output>;
+  return (
+    <output>
+      {snapshot.status}: {rolls.length} rolls
+    </output>
+  );
 }
 
 export function App() {

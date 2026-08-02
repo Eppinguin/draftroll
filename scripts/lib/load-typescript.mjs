@@ -68,7 +68,11 @@ export function runTsc(args, options = {}) {
   const file = command.endsWith('.js') ? process.execPath : command;
   const result = spawnSync(file, spawnArgs, { encoding: 'utf8', ...options });
   if (result.error) {
-    return { status: 1, stdout: '', stderr: `Failed to run TypeScript compiler: ${result.error.message}\n` };
+    return {
+      status: 1,
+      stdout: '',
+      stderr: `Failed to run TypeScript compiler: ${result.error.message}\n`,
+    };
   }
   return { status: result.status ?? 1, stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
 }
@@ -82,13 +86,19 @@ function locateGlobalCompiler() {
   const locator = process.platform === 'win32' ? 'where' : 'which';
   let output;
   try {
-    output = execFileSync(locator, ['tsc'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    output = execFileSync(locator, ['tsc'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
   } catch {
     // No `tsc` on PATH. Some shells also exit 0 while printing a "not found"
     // message, which the existence check below rejects.
     return null;
   }
-  const first = output.split(/\r?\n/).map((line) => line.trim()).find(Boolean);
+  const first = output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean);
   if (!first) return null;
   let executable;
   try {

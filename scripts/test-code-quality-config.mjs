@@ -26,7 +26,11 @@ const expectedVersions = {
   oxfmt: '0.61.0',
 };
 for (const [name, version] of Object.entries(expectedVersions)) {
-  assert.equal(packageJson.devDependencies?.[name], version, `${name} must use the reviewed exact version`);
+  assert.equal(
+    packageJson.devDependencies?.[name],
+    version,
+    `${name} must use the reviewed exact version`,
+  );
 }
 
 assert.equal(packageJson.scripts?.lint, 'oxlint .');
@@ -47,14 +51,37 @@ assert.equal(
   'pedantic rules must be reviewed and enabled individually to avoid blanket false positives',
 );
 assert.equal(oxlint.categories?.style, 'off', 'Oxfmt is the formatting authority');
-assert.equal(oxlint.categories?.restriction, undefined, 'restriction rules must be adopted individually');
-assert.equal(oxlint.categories?.nursery, undefined, 'unstable nursery rules must not be enabled globally');
+assert.equal(
+  oxlint.categories?.restriction,
+  undefined,
+  'restriction rules must be adopted individually',
+);
+assert.equal(
+  oxlint.categories?.nursery,
+  undefined,
+  'unstable nursery rules must not be enabled globally',
+);
 assert.equal(oxlint.options?.denyWarnings, true);
 assert.equal(oxlint.options?.reportUnusedDisableDirectives, 'error');
 assert.equal(oxlint.options?.typeAware, true);
-assert.equal(oxlint.options?.typeCheck, undefined, 'experimental Oxlint type checking must not replace tsc');
+assert.equal(
+  oxlint.options?.typeCheck,
+  undefined,
+  'experimental Oxlint type checking must not replace tsc',
+);
 
-for (const plugin of ['eslint', 'typescript', 'unicorn', 'oxc', 'import', 'promise', 'node', 'react', 'jsx-a11y', 'vue']) {
+for (const plugin of [
+  'eslint',
+  'typescript',
+  'unicorn',
+  'oxc',
+  'import',
+  'promise',
+  'node',
+  'react',
+  'jsx-a11y',
+  'vue',
+]) {
   assert.ok(oxlint.plugins?.includes(plugin), `missing Oxlint plugin: ${plugin}`);
 }
 
@@ -79,9 +106,19 @@ for (const rule of [
   assert.equal(severityOf(oxlint.rules?.[rule]), 'error', `${rule} must be an error`);
 }
 
-for (const pattern of ['packages/*/dist/**', 'apps/worker/worker-configuration.d.ts', 'benchmark-results/**']) {
-  assert.ok(oxlint.ignorePatterns?.includes(pattern), `Oxlint must ignore generated path: ${pattern}`);
-  assert.ok(oxfmt.ignorePatterns?.includes(pattern), `Oxfmt must ignore generated path: ${pattern}`);
+for (const pattern of [
+  'packages/*/dist/**',
+  'apps/worker/worker-configuration.d.ts',
+  'benchmark-results/**',
+]) {
+  assert.ok(
+    oxlint.ignorePatterns?.includes(pattern),
+    `Oxlint must ignore generated path: ${pattern}`,
+  );
+  assert.ok(
+    oxfmt.ignorePatterns?.includes(pattern),
+    `Oxfmt must ignore generated path: ${pattern}`,
+  );
 }
 
 assert.equal(oxfmt.printWidth, 100);
@@ -97,7 +134,11 @@ assert.equal(vscodeSettings['editor.formatOnSave'], true);
 assert.equal(vscodeSettings['editor.codeActionsOnSave']?.['source.fixAll.oxc'], 'always');
 assert.equal(vscodeSettings['oxc.typeAware'], true);
 
-assert.match(serverSource, /copyToArrayBuffer\(signature\)/, 'signature verification must pass an owned ArrayBuffer');
+assert.match(
+  serverSource,
+  /copyToArrayBuffer\(signature\)/,
+  'signature verification must pass an owned ArrayBuffer',
+);
 assert.doesNotMatch(
   serverSource,
   /subtle\.verify\(\s*'HMAC',\s*key,\s*signature,/m,

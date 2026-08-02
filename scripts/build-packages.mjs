@@ -28,12 +28,16 @@ async function rewriteFile(path) {
   const outputExtension = path.endsWith('.d.ts') ? '.js' : '.js';
   const source = await readFile(path, 'utf8');
   const rewritten = source
-    .replace(/(\bfrom\s+|\bimport\s*\(\s*|\bimport\s+)(["'])([^"']+)\2/g, (match, prefix, quote, specifier) => (
-      `${prefix}${quote}${rewriteSpecifier(specifier, outputExtension)}${quote}`
-    ))
-    .replace(/(\bexport\s+\*\s+from\s+)(["'])([^"']+)\2/g, (match, prefix, quote, specifier) => (
-      `${prefix}${quote}${rewriteSpecifier(specifier, outputExtension)}${quote}`
-    ));
+    .replace(
+      /(\bfrom\s+|\bimport\s*\(\s*|\bimport\s+)(["'])([^"']+)\2/g,
+      (match, prefix, quote, specifier) =>
+        `${prefix}${quote}${rewriteSpecifier(specifier, outputExtension)}${quote}`,
+    )
+    .replace(
+      /(\bexport\s+\*\s+from\s+)(["'])([^"']+)\2/g,
+      (match, prefix, quote, specifier) =>
+        `${prefix}${quote}${rewriteSpecifier(specifier, outputExtension)}${quote}`,
+    );
   await writeFile(path, rewritten);
 }
 

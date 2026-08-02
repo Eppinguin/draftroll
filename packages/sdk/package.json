@@ -1,7 +1,12 @@
 {
   "name": "@draftroll/sdk",
   "version": "0.1.0",
+  "files": [
+    "dist"
+  ],
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "browser": {
@@ -20,21 +25,16 @@
       "default": "./dist/index.js"
     }
   },
-  "dependencies": {
-    "@draftroll/core": "workspace:*",
-    "@draftroll/client": "workspace:*",
-    "@draftroll/protocol": "workspace:*",
-    "@draftroll/themes": "workspace:*",
-    "@draftroll/renderer": "workspace:*",
-    "@draftroll/overlay": "workspace:*",
-    "@draftroll/errors": "workspace:*"
-  },
-  "files": [
-    "dist"
-  ],
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
   "scripts": {
     "prepack": "node ../../scripts/build-packages.mjs"
+  },
+  "dependencies": {
+    "@draftroll/client": "workspace:*",
+    "@draftroll/core": "workspace:*",
+    "@draftroll/errors": "workspace:*",
+    "@draftroll/overlay": "workspace:*",
+    "@draftroll/protocol": "workspace:*",
+    "@draftroll/renderer": "workspace:*",
+    "@draftroll/themes": "workspace:*"
   }
 }

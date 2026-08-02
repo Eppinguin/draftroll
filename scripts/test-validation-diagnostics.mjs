@@ -13,26 +13,35 @@ const configPath = join(tempRoot, 'tsconfig.json');
 function applySuggestion(source, suggestion) {
   assert.ok(suggestion.range, 'expected an editor-applicable suggestion range');
   assert.equal(typeof suggestion.replacement, 'string');
-  return source.slice(0, suggestion.range.start.offset)
-    + suggestion.replacement
-    + source.slice(suggestion.range.end.offset);
+  return (
+    source.slice(0, suggestion.range.start.offset) +
+    suggestion.replacement +
+    source.slice(suggestion.range.end.offset)
+  );
 }
 
 try {
-  await writeFile(configPath, JSON.stringify({
-    compilerOptions: {
-      target: 'ES2022',
-      module: 'CommonJS',
-      moduleResolution: 'Node',
-      rootDir: join(projectRoot, 'packages'),
-      outDir,
-      strict: true,
-      skipLibCheck: true,
-      esModuleInterop: true,
-      lib: ['ES2023', 'DOM', 'DOM.Iterable'],
-    },
-    include: [join(projectRoot, 'packages/**/*.ts')],
-  }, null, 2));
+  await writeFile(
+    configPath,
+    JSON.stringify(
+      {
+        compilerOptions: {
+          target: 'ES2022',
+          module: 'CommonJS',
+          moduleResolution: 'Node',
+          rootDir: join(projectRoot, 'packages'),
+          outDir,
+          strict: true,
+          skipLibCheck: true,
+          esModuleInterop: true,
+          lib: ['ES2023', 'DOM', 'DOM.Iterable'],
+        },
+        include: [join(projectRoot, 'packages/**/*.ts')],
+      },
+      null,
+      2,
+    ),
+  );
 
   const compile = runTsc(['-p', configPath], { cwd: projectRoot });
   if (compile.status !== 0) {
@@ -92,22 +101,38 @@ try {
 
   const missingParenthesisSource = '2d6 + (1d4';
   const missingParenthesis = engine.validate(missingParenthesisSource);
-  assert.equal(missingParenthesis.diagnostics[0].code, DICE_DIAGNOSTIC_CODES.expectedClosingParenthesis);
-  assert.equal(missingParenthesis.diagnostics[0].range.start.offset, missingParenthesisSource.length);
-  const parenthesisFix = missingParenthesis.diagnostics[0].suggestions.find((entry) => entry.replacement === ')');
-  assert.equal(engine.validate(applySuggestion(missingParenthesisSource, parenthesisFix)).valid, true);
+  assert.equal(
+    missingParenthesis.diagnostics[0].code,
+    DICE_DIAGNOSTIC_CODES.expectedClosingParenthesis,
+  );
+  assert.equal(
+    missingParenthesis.diagnostics[0].range.start.offset,
+    missingParenthesisSource.length,
+  );
+  const parenthesisFix = missingParenthesis.diagnostics[0].suggestions.find(
+    (entry) => entry.replacement === ')',
+  );
+  assert.equal(
+    engine.validate(applySuggestion(missingParenthesisSource, parenthesisFix)).valid,
+    true,
+  );
 
   const missingModifierSource = '2d6kh';
   const missingModifier = engine.validate(missingModifierSource);
   assert.equal(missingModifier.diagnostics[0].code, DICE_DIAGNOSTIC_CODES.expectedModifierCount);
-  const modifierFix = missingModifier.diagnostics[0].suggestions.find((entry) => entry.replacement === '1');
+  const modifierFix = missingModifier.diagnostics[0].suggestions.find(
+    (entry) => entry.replacement === '1',
+  );
   assert.equal(engine.validate(applySuggestion(missingModifierSource, modifierFix)).valid, true);
 
   const expectedPrimary = engine.validate('1 +');
   assert.equal(expectedPrimary.diagnostics[0].code, DICE_DIAGNOSTIC_CODES.expectedPrimary);
 
   const expectedSetDelimiter = engine.validate('(1, 2 3)');
-  assert.equal(expectedSetDelimiter.diagnostics[0].code, DICE_DIAGNOSTIC_CODES.expectedSetDelimiter);
+  assert.equal(
+    expectedSetDelimiter.diagnostics[0].code,
+    DICE_DIAGNOSTIC_CODES.expectedSetDelimiter,
+  );
 
   const expectedSelector = engine.validate('1d6r');
   assert.equal(expectedSelector.diagnostics[0].code, DICE_DIAGNOSTIC_CODES.expectedSelectorValue);
@@ -117,12 +142,17 @@ try {
   assert.ok(comparison.diagnostics[0].suggestions[0].message.includes('>='));
 
   const expectedModifierValue = engine.validate('1d6mi');
-  assert.equal(expectedModifierValue.diagnostics[0].code, DICE_DIAGNOSTIC_CODES.expectedModifierValue);
+  assert.equal(
+    expectedModifierValue.diagnostics[0].code,
+    DICE_DIAGNOSTIC_CODES.expectedModifierValue,
+  );
 
   const annotationSource = '1d6 [fire';
   const annotation = engine.validate(annotationSource);
   assert.equal(annotation.diagnostics[0].code, DICE_DIAGNOSTIC_CODES.unterminatedAnnotation);
-  const annotationFix = annotation.diagnostics[0].suggestions.find((entry) => entry.replacement === ']');
+  const annotationFix = annotation.diagnostics[0].suggestions.find(
+    (entry) => entry.replacement === ']',
+  );
   assert.equal(engine.validate(applySuggestion(annotationSource, annotationFix)).valid, true);
 
   const tooLong = new DiceEngine({ limits: { maxExpressionLength: 5 } }).validate('1d6+20');
@@ -147,7 +177,10 @@ try {
   assert.equal(tooManyModifiers.diagnostics[0].code, DICE_DIAGNOSTIC_CODES.tooManyModifiers);
   assert.ok(tooManyModifiers.error instanceof DiceLimitError);
   assert.deepEqual(
-    [tooManyModifiers.diagnostics[0].range.start.offset, tooManyModifiers.diagnostics[0].range.end.offset],
+    [
+      tooManyModifiers.diagnostics[0].range.start.offset,
+      tooManyModifiers.diagnostics[0].range.end.offset,
+    ],
     [6, 9],
   );
 

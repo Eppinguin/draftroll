@@ -78,16 +78,18 @@ draftroll.presentUpdate(revisedServerResult);
 Manual presentations can select the late-event policy explicitly:
 
 ```ts
-await draftroll.present(serverResult, {
-  startTime: localStartTimeMs,
-  animationSeed,
-  elapsedMs,
-  animationDurationMs: 2800,
-  lateEvent: {
-    mode: 'auto', // auto | seek | settled | replay
-    settleAfterProgress: 0.78,
-  },
-}).wait();
+await draftroll
+  .present(serverResult, {
+    startTime: localStartTimeMs,
+    animationSeed,
+    elapsedMs,
+    animationDurationMs: 2800,
+    lateEvent: {
+      mode: 'auto', // auto | seek | settled | replay
+      settleAfterProgress: 0.78,
+    },
+  })
+  .wait();
 ```
 
 `Draftroll.connectRoom()` supplies these values automatically. Reconnect catch-up updates every logical roll but animates only the newest missed animated event, avoiding a backlog of historical throws.
@@ -157,17 +159,17 @@ Format either a normalized result or a Draftroll roll handle:
 ```ts
 const roll = draftroll.roll('4d6kh3', { render: false });
 console.log(draftroll.format(roll, { style: 'plain' }));
-console.log(draftroll.stringify(roll, result => `${result.total} damage`));
+console.log(draftroll.stringify(roll, (result) => `${result.total} damage`));
 ```
 
 ## Events
 
 ```ts
-const offRoll = draftroll.on('roll', roll => {
+const offRoll = draftroll.on('roll', (roll) => {
   console.log('new roll', roll.id, roll.total);
 });
 
-const offUpdate = draftroll.on('update', roll => {
+const offUpdate = draftroll.on('update', (roll) => {
   console.log('revised', roll.result.revision);
 });
 
@@ -218,12 +220,15 @@ const revised = roll.setFormula('3d20kh1+7');
 Animate a revision:
 
 ```ts
-const revised = roll.animateUpdate({
-  expression: '3d20kh1+7',
-}, {
-  reroll: true,
-  animateDice: 'all',
-});
+const revised = roll.animateUpdate(
+  {
+    expression: '3d20kh1+7',
+  },
+  {
+    reroll: true,
+    animateDice: 'all',
+  },
+);
 ```
 
 Explicit log-only form:
@@ -251,18 +256,13 @@ Game integrations do not need to generate notation strings. Use plain typed obje
 import { dice, operations as op, selectors as select } from '@draftroll/sdk';
 
 const damage = draftroll.rollDice({
-  dice: [
-    dice.d6('fire', { themeId: 'ember' }),
-    dice.d8('ice', { themeId: 'frost' }),
-  ],
+  dice: [dice.d6('fire', { themeId: 'ember' }), dice.d8('ice', { themeId: 'frost' })],
   modifier: 3,
   render: false,
 });
 
 const dicePool = draftroll.rollDice({
-  dice: Array.from({ length: 8 }, (_, index) =>
-    dice.d6(`pool_${index + 1}`),
-  ),
+  dice: Array.from({ length: 8 }, (_, index) => dice.d6(`pool_${index + 1}`)),
   operations: [
     op.rerollOnce(select.equal(1)),
     op.explode(select.equal(6)),
@@ -283,11 +283,13 @@ Plain protocol objects remain valid when a game already has its own rules schema
 ```ts
 const pool = draftroll.rollDice({
   dice: [{ id: 'check', type: 'd20' }],
-  operations: [{
-    type: 'minimum',
-    target: 5,
-    dice: ['check'],
-  }],
+  operations: [
+    {
+      type: 'minimum',
+      target: 5,
+      dice: ['check'],
+    },
+  ],
 });
 ```
 
@@ -321,21 +323,25 @@ For a portable request—especially a server-authoritative room roll—include d
 ```ts
 await room.roll({
   mode: 'evaluate',
-  customDice: [{
-    id: 'action',
-    faces: [
-      { result: 'success', value: 1, weight: 2 },
-      { result: 'blank', value: 0, weight: 3 },
-    ],
-  }],
+  customDice: [
+    {
+      id: 'action',
+      faces: [
+        { result: 'success', value: 1, weight: 2 },
+        { result: 'blank', value: 0, weight: 3 },
+      ],
+    },
+  ],
   dice: [
     { id: 'action_1', type: 'action', customDiceId: 'action' },
     { id: 'action_2', type: 'action', customDiceId: 'action' },
   ],
-  operations: [{
-    type: 'success-count',
-    selector: { type: 'greater-equal', target: 1 },
-  }],
+  operations: [
+    {
+      type: 'success-count',
+      selector: { type: 'greater-equal', target: 1 },
+    },
+  ],
 });
 ```
 
@@ -385,7 +391,6 @@ await room.roll({
 
 Draftroll does not require accounts or user API keys. Local development can allow unsigned anonymous participants; secure deployments should issue short-lived, room-scoped capability tokens and disable `ALLOW_ANONYMOUS`. The Durable Object enforces permissions and filters hidden results before sending them to clients. See `docs/REALTIME_PERMISSIONS.md`.
 
-
 ### Password-protected rooms
 
 Room passwords are optional and server-enforced. Supply one through `roomPassword`; Draftroll waits for successful authentication before resolving `connect()` and before allowing room commands:
@@ -430,20 +435,23 @@ The current policy and its optimistic-concurrency revision are available on both
 console.log(room.policy);
 console.log(room.policyRevision);
 
-const updated = await room.setPolicy({
-  authorization: {
-    allowWhispers: false,
+const updated = await room.setPolicy(
+  {
+    authorization: {
+      allowWhispers: false,
+    },
+    limits: {
+      maximumParticipants: 12,
+      maximumDicePerRoll: 100,
+    },
+    rateLimits: {
+      rollsPerMinutePerRoom: 90,
+    },
   },
-  limits: {
-    maximumParticipants: 12,
-    maximumDicePerRoll: 100,
+  {
+    expectedRevision: room.policyRevision,
   },
-  rateLimits: {
-    rollsPerMinutePerRoom: 90,
-  },
-}, {
-  expectedRevision: room.policyRevision,
-});
+);
 ```
 
 Policy updates require `room:manage`. Capability permissions and policy authorization are both enforced: a signed token cannot bypass a room policy that disables an action. Successful changes emit `roomPolicyUpdated` and are included in reconnect replay.
@@ -498,7 +506,7 @@ A `DraftrollRoomRoll` is a stable handle for one logical roll. Its identity does
 
 ```ts
 roll.id;
-roll.result;       // null when this participant is not authorized
+roll.result; // null when this participant is not authorized
 roll.hidden;
 roll.actor;
 roll.visibility;
@@ -519,25 +527,26 @@ See `REALTIME_PERMISSIONS.md` for server-enforced hidden results, capability tok
 `@draftroll/server` contains backend-only helpers for short-lived room capabilities:
 
 ```ts
-import {
-  createDefaultParticipantPermissions,
-  createRoomCapabilityToken,
-} from '@draftroll/server';
+import { createDefaultParticipantPermissions, createRoomCapabilityToken } from '@draftroll/server';
 
-const token = await createRoomCapabilityToken({
-  roomId,
-  participantId,
-  name,
-  roles: ['player'],
-  permissions: createDefaultParticipantPermissions(),
-}, {
-  id: '2026-07',
-  secret: roomTokenSecret,
-}, {
-  expiresInSeconds: 3600,
-  issuer: 'https://app.example.com',
-  audience: 'draftroll-room',
-});
+const token = await createRoomCapabilityToken(
+  {
+    roomId,
+    participantId,
+    name,
+    roles: ['player'],
+    permissions: createDefaultParticipantPermissions(),
+  },
+  {
+    id: '2026-07',
+    secret: roomTokenSecret,
+  },
+  {
+    expiresInSeconds: 3600,
+    issuer: 'https://app.example.com',
+    audience: 'draftroll-room',
+  },
+);
 ```
 
 Do not expose the signing secret to browser code. New tokens automatically include `iat` and `jti`; use a named key, issuer, audience, and expiry for future production deployments.
@@ -545,13 +554,16 @@ Do not expose the signing secret to browser code. New tokens automatically inclu
 Room managers can revoke one token or a participant's earlier tokens through the high-level session:
 
 ```ts
-await session.revokeToken({
-  type: 'token',
-  tokenId,
-  expiresAt: tokenExpiry,
-}, {
-  reason: 'Compromised session',
-});
+await session.revokeToken(
+  {
+    type: 'token',
+    tokenId,
+    expiresAt: tokenExpiry,
+  },
+  {
+    reason: 'Compromised session',
+  },
+);
 ```
 
 See `TOKEN_SECURITY.md` for verification rings, key rotation, and revocation behavior.
@@ -561,28 +573,26 @@ See `TOKEN_SECURITY.md` for verification rings, key rotation, and revocation beh
 The overlay accepts any `ThemeProvider`. Theme manifests are validated and their resources are loaded by the host before being installed into the isolated renderer iframe.
 
 ```ts
-import {
-  BundledThemeProvider,
-  DRAFTROLL_THEME_SCHEMA_VERSION,
-  Draftroll,
-} from '@draftroll/sdk';
+import { BundledThemeProvider, DRAFTROLL_THEME_SCHEMA_VERSION, Draftroll } from '@draftroll/sdk';
 
-const themeProvider = new BundledThemeProvider([{
-  schemaVersion: DRAFTROLL_THEME_SCHEMA_VERSION,
-  id: 'obsidian',
-  name: 'Obsidian',
-  version: '1.0.0',
-  availableDice: ['d4', 'd6', 'd8', 'd10', 'd12', 'd20'],
-  material: {
-    color: '#17131f',
-    roughness: 0.36,
-    metalness: 0.42,
+const themeProvider = new BundledThemeProvider([
+  {
+    schemaVersion: DRAFTROLL_THEME_SCHEMA_VERSION,
+    id: 'obsidian',
+    name: 'Obsidian',
+    version: '1.0.0',
+    availableDice: ['d4', 'd6', 'd8', 'd10', 'd12', 'd20'],
+    material: {
+      color: '#17131f',
+      roughness: 0.36,
+      metalness: 0.42,
+    },
+    labels: {
+      color: '#f8eaff',
+      glowColor: '#c468ff',
+    },
   },
-  labels: {
-    color: '#f8eaff',
-    glowColor: '#c468ff',
-  },
-}]);
+]);
 
 const draftroll = await Draftroll.createOverlay({
   overlay: {
@@ -597,7 +607,6 @@ const draftroll = await Draftroll.createOverlay({
 ```
 
 Use `renderer.loadTheme(themeId, signal)` when loading needs explicit cancellation. Invalid optional assets fall back independently instead of failing the complete roll. See `docs/THEMES.md` for the complete manifest and asset model.
-
 
 ## Runtime validation
 
@@ -614,7 +623,6 @@ draftroll.present(decoded.data);
 ```
 
 `Draftroll.present()`, core roll updates, external display inputs, room commands, room events, persisted results, participant identities, and capability-token payloads are validated before use. See [Runtime validation and compatibility](RUNTIME_VALIDATION.md). Expression parsing also exposes stable codes, source ranges, and suggestions; see [Expression validation diagnostics](VALIDATION_DIAGNOSTICS.md).
-
 
 ## Concurrent room table rolls
 

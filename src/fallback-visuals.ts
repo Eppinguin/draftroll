@@ -105,7 +105,14 @@ function createVisualTexture(spec: DraftrollFallbackVisual): THREE.CanvasTexture
   } else if (spec.kind === 'fate') {
     roundedRect(context, bounds.x, bounds.y, bounds.width, bounds.height, 62);
   } else {
-    roundedRect(context, bounds.x, bounds.y, bounds.width, bounds.height, spec.kind === 'card' ? 48 : 100);
+    roundedRect(
+      context,
+      bounds.x,
+      bounds.y,
+      bounds.width,
+      bounds.height,
+      spec.kind === 'card' ? 48 : 100,
+    );
   }
 
   const fill = context.createLinearGradient(120, 70, 520, 390);
@@ -294,20 +301,26 @@ export class FallbackVisualInstance {
     if (this.settled) return;
     const trajectory = this.trajectory;
     if (!trajectory) return;
-    const normalized = THREE.MathUtils.clamp((progress - trajectory.delay) / Math.max(0.001, 1 - trajectory.delay), 0, 1);
+    const normalized = THREE.MathUtils.clamp(
+      (progress - trajectory.delay) / Math.max(0.001, 1 - trajectory.delay),
+      0,
+      1,
+    );
     this.group.visible = normalized > 0;
     if (normalized <= 0) return;
 
     const travel = easeOutCubic(normalized);
     this.group.position.lerpVectors(trajectory.start, trajectory.end, travel);
     const arc = Math.sin(normalized * Math.PI) * trajectory.arcHeight * (1 - normalized * 0.38);
-    const settleBounce = normalized > 0.72
-      ? Math.sin((normalized - 0.72) * Math.PI * 7) * (1 - normalized) * 0.36
-      : 0;
+    const settleBounce =
+      normalized > 0.72 ? Math.sin((normalized - 0.72) * Math.PI * 7) * (1 - normalized) * 0.36 : 0;
     this.group.position.y = trajectory.end.y + arc + settleBounce;
-    this.material.rotation = trajectory.rotationStart + trajectory.rotationTurns * Math.PI * 2 * (1 - Math.pow(1 - normalized, 2));
+    this.material.rotation =
+      trajectory.rotationStart +
+      trajectory.rotationTurns * Math.PI * 2 * (1 - Math.pow(1 - normalized, 2));
     this.material.opacity = THREE.MathUtils.clamp(normalized * 5, 0, 1);
-    this.shadowMaterial.opacity = THREE.MathUtils.clamp((normalized - 0.22) * 1.2, 0, 0.34) * (1 - Math.min(0.8, arc / 5));
+    this.shadowMaterial.opacity =
+      THREE.MathUtils.clamp((normalized - 0.22) * 1.2, 0, 0.34) * (1 - Math.min(0.8, arc / 5));
     const scale = easeOutBack(Math.min(1, normalized * 1.45));
     this.group.scale.setScalar(Math.max(0.2, scale));
   }

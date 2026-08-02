@@ -2,11 +2,13 @@ import { createReadStream, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { extname, join, normalize, resolve } from 'node:path';
 
-const args = new Map(process.argv.slice(2).map((value, index, values) => {
-  if (!value.startsWith('--')) return [value, ''];
-  const next = values[index + 1];
-  return [value.slice(2), next && !next.startsWith('--') ? next : 'true'];
-}));
+const args = new Map(
+  process.argv.slice(2).map((value, index, values) => {
+    if (!value.startsWith('--')) return [value, ''];
+    const next = values[index + 1];
+    return [value.slice(2), next && !next.startsWith('--') ? next : 'true'];
+  }),
+);
 const port = Number(args.get('port') ?? 4173);
 const role = args.get('role') ?? 'host';
 const root = resolve(process.cwd(), 'dist-browser');
@@ -33,10 +35,13 @@ const server = createServer((request, response) => {
 
   let pathname = url.pathname;
   if (role === 'host' && (pathname === '/' || pathname === '/host.html')) pathname = '/host.html';
-  if (role === 'host' && (pathname === '/blocked.html' || pathname === '/connect-blocked.html')) pathname = '/host.html';
+  if (role === 'host' && (pathname === '/blocked.html' || pathname === '/connect-blocked.html'))
+    pathname = '/host.html';
   if (role === 'overlay' && pathname === '/') pathname = '/overlay.html';
 
-  const safePath = normalize(pathname).replace(/^([.][.][/\\])+/, '').replace(/^[/\\]+/, '');
+  const safePath = normalize(pathname)
+    .replace(/^([.][.][/\\])+/, '')
+    .replace(/^[/\\]+/, '');
   const filePath = join(root, safePath);
   if (!filePath.startsWith(root) || !isFile(filePath)) {
     response.writeHead(404, securityHeaders(role, url.pathname));
@@ -89,16 +94,17 @@ function securityHeaders(serverRole, pathname) {
         "worker-src 'self' blob:",
         "object-src 'none'",
         "base-uri 'none'",
-        "frame-ancestors http://127.0.0.1:4173",
+        'frame-ancestors http://127.0.0.1:4173',
       ].join('; '),
       'cross-origin-resource-policy': 'cross-origin',
     };
   }
 
   const frameSource = pathname === '/blocked.html' ? "'none'" : 'http://127.0.0.1:4174';
-  const connectSource = pathname === '/connect-blocked.html'
-    ? "'self'"
-    : "'self' http://127.0.0.1:8787 ws://127.0.0.1:8787";
+  const connectSource =
+    pathname === '/connect-blocked.html'
+      ? "'self'"
+      : "'self' http://127.0.0.1:8787 ws://127.0.0.1:8787";
   return {
     ...common,
     'content-security-policy': [

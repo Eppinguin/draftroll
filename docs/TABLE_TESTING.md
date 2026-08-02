@@ -24,11 +24,11 @@ The result metadata contains:
 
 The **Simultaneous table-roll tester** starts the main roller and a second named roller with a configurable delay. Its default is 80 ms so both handfuls are planned together as fully dynamic bodies.
 
-| Delay | Scenario |
-|---:|---|
-| 0–140 ms | One fully dynamic shared-world launch |
-| 300–600 ms | Incoming dice collide with the preserved moving trajectory |
-| 1,000 ms or more | Incoming dice can strike and move recently settled dice |
+|            Delay | Scenario                                                   |
+| ---------------: | ---------------------------------------------------------- |
+|         0–140 ms | One fully dynamic shared-world launch                      |
+|       300–600 ms | Incoming dice collide with the preserved moving trajectory |
+| 1,000 ms or more | Incoming dice can strike and move recently settled dice    |
 
 The second fixed-result field is optional. Clear it to use normal random server or local evaluation.
 
@@ -45,7 +45,7 @@ Roll buttons use:
 and the overlay is configured with:
 
 ```ts
-dismissIgnoreSelector: '[data-draftroll-preserve-table]'
+dismissIgnoreSelector: '[data-draftroll-preserve-table]';
 ```
 
 This prevents the pointer gesture that initiates an asynchronous room roll from dissolving settled dice before the server event returns. Clicking elsewhere still dismisses the table. **Clear table** removes it immediately.

@@ -1,12 +1,12 @@
 {
   "name": "draftroll-monorepo",
-  "private": true,
   "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "type": "module",
-  "packageManager": "pnpm@11.17.0",
-  "engines": {
-    "node": ">=22.12.0"
-  },
   "scripts": {
     "dev": "pnpm dev:playground",
     "dev:playground": "vite --host 0.0.0.0",
@@ -90,20 +90,20 @@
     "three": "^0.178.0"
   },
   "devDependencies": {
-    "@types/three": "^0.178.1",
-    "concurrently": "^9.2.1",
-    "typescript": "^5.8.3",
-    "vite": "^7.0.4",
-    "@playwright/test": "^1.62.0",
-    "@types/node": "^22.0.0",
     "@microsoft/tsdoc": "^0.16.0",
     "@microsoft/tsdoc-config": "^0.18.1",
+    "@playwright/test": "^1.62.0",
+    "@types/node": "^22.0.0",
+    "@types/three": "^0.178.1",
+    "concurrently": "^9.2.1",
+    "oxfmt": "0.61.0",
     "oxlint": "1.76.0",
     "oxlint-tsgolint": "7.0.2001",
-    "oxfmt": "0.61.0"
+    "typescript": "^5.8.3",
+    "vite": "^7.0.4"
   },
-  "workspaces": [
-    "packages/*",
-    "apps/*"
-  ]
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "packageManager": "pnpm@11.17.0"
 }

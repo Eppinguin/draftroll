@@ -39,16 +39,16 @@ Recommended panels, grouped by environment and room-policy preset:
 
 ## Default alerts
 
-| Alert | Initial threshold | Action |
-|---|---:|---|
-| Health/protocol failure | 2 consecutive probes | Block promotion; inspect Worker deployment/configuration |
-| Persistence failure | Any occurrence | SEV-2 unless known transient and fully recovered |
-| Request failure rate | >2% for 5 minutes, excluding cancellation | Inspect stable error-code distribution |
-| p95 authoritative latency | Above deployment SLO for 5 minutes | Inspect Worker/D1/region and payload sizes |
-| Abnormal close 1006 | 3× normal baseline for 10 minutes | Inspect network/proxy/TLS and deployment health |
-| Replay truncation | Above normal baseline | Increase durable recovery investigation; do not only enlarge memory buffer |
-| Renderer-ready ratio | Below policy threshold | Inspect theme/renderer load failures and client versions |
-| Retained event buffer | >90% of configured limit | Inspect event rate and recovery policy |
+| Alert                     |                         Initial threshold | Action                                                                     |
+| ------------------------- | ----------------------------------------: | -------------------------------------------------------------------------- |
+| Health/protocol failure   |                      2 consecutive probes | Block promotion; inspect Worker deployment/configuration                   |
+| Persistence failure       |                            Any occurrence | SEV-2 unless known transient and fully recovered                           |
+| Request failure rate      | >2% for 5 minutes, excluding cancellation | Inspect stable error-code distribution                                     |
+| p95 authoritative latency |        Above deployment SLO for 5 minutes | Inspect Worker/D1/region and payload sizes                                 |
+| Abnormal close 1006       |         3× normal baseline for 10 minutes | Inspect network/proxy/TLS and deployment health                            |
+| Replay truncation         |                     Above normal baseline | Increase durable recovery investigation; do not only enlarge memory buffer |
+| Renderer-ready ratio      |                    Below policy threshold | Inspect theme/renderer load failures and client versions                   |
+| Retained event buffer     |                  >90% of configured limit | Inspect event rate and recovery policy                                     |
 
 Tune thresholds after collecting controlled staging baselines. Do not alert on raw counts without normalizing for traffic.
 

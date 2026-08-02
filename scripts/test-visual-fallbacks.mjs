@@ -9,7 +9,11 @@ const [renderer, engine, visuals, html] = await Promise.all([
 ]);
 
 for (const kind of ['coin', 'percentile', 'fate', 'spinner', 'token', 'card']) {
-  assert.match(renderer, new RegExp(`['"]${kind}['"]`), `renderer fallback kind ${kind} is missing`);
+  assert.match(
+    renderer,
+    new RegExp(`['"]${kind}['"]`),
+    `renderer fallback kind ${kind} is missing`,
+  );
 }
 assert.match(renderer, /DraftrollFallbackVisual/);
 assert.match(renderer, /visualOrder/);
@@ -28,9 +32,15 @@ assert.match(visuals, /configureTrajectory/);
 assert.match(visuals, /easeOutBack/);
 assert.match(html, /1d20\+1d2\+1dF\+1d9\+1d100/);
 
-console.log(JSON.stringify({
-  ok: true,
-  fallbacks: ['d2/coin', 'd10x/d100', 'dF', 'arbitrary dN', 'symbolic', 'weighted/custom'],
-  mixedWithPhysical: true,
-  fallbackOnly: true,
-}, null, 2));
+console.log(
+  JSON.stringify(
+    {
+      ok: true,
+      fallbacks: ['d2/coin', 'd10x/d100', 'dF', 'arbitrary dN', 'symbolic', 'weighted/custom'],
+      mixedWithPhysical: true,
+      fallbackOnly: true,
+    },
+    null,
+    2,
+  ),
+);

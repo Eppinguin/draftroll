@@ -11,6 +11,7 @@
     "apps/worker/worker-configuration.d.ts",
     "benchmark-results/**",
     "pnpm-lock.yaml",
+    "**/*.jsonc",
     "dist/**",
     "dist-browser/**",
     "dist-overlay/**",

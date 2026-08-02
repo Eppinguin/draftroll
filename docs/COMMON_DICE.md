@@ -105,10 +105,7 @@ const symbols = commonDice.symbolPool('action', [
 await room.roll({
   mode: 'evaluate',
   customDice: [symbols],
-  dice: [
-    dice.custom(symbols.id, 'action-1'),
-    dice.custom(symbols.id, 'action-2'),
-  ],
+  dice: [dice.custom(symbols.id, 'action-1'), dice.custom(symbols.id, 'action-2')],
 });
 ```
 

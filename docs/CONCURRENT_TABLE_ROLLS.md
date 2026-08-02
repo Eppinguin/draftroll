@@ -118,6 +118,7 @@ Rolls outside the initial coalescing window can still join while a compatible ph
 ## Dismissal
 
 A grouped table throw is dismissed as one visual scene. Dismissing it does not remove or merge the individual logical room-history entries. Rerolls and revisions continue to target the original stable roll IDs.
+
 ## In-flight additions
 
 A second roll does not need to arrive inside the initial batching window:
@@ -135,7 +136,6 @@ The active bodies are not restarted from their original launch. Their current tr
 This behavior is local presentation. Different clients may see different plausible trajectories because each plans against its own canvas dimensions, but all clients show the same authoritative values.
 
 See [`NATURAL_TARGET_PHYSICS.md`](NATURAL_TARGET_PHYSICS.md) for exact-result shape-symmetry behavior and continuity constraints.
-
 
 ## Adding to a settled table
 

@@ -5,7 +5,7 @@
 ## Connection diagnostics
 
 ```ts
-room.on('connectionState', diagnostic => {
+room.on('connectionState', (diagnostic) => {
   console.log(diagnostic.state, diagnostic.code, diagnostic.recommendations);
 });
 

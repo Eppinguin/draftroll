@@ -771,7 +771,6 @@ export interface ParticipantUpdateRequestEvent {
   metadata?: Record<string, unknown>;
 }
 
-
 /**
  * Protocol payload for a authenticate room token event.
  *

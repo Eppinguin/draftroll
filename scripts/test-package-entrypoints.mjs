@@ -43,10 +43,7 @@ const browserEntries = [
 ];
 
 const forbiddenServerPackages = new Set(['three', 'cannon-es']);
-const forbiddenServerDirectories = [
-  'packages/renderer/',
-  'packages/overlay/',
-];
+const forbiddenServerDirectories = ['packages/renderer/', 'packages/overlay/'];
 const forbiddenServerFiles = new Set([
   'src/main.ts',
   'src/dice.ts',
@@ -70,40 +67,68 @@ const forbiddenBrowserPackages = new Set([
   'node:worker_threads',
 ]);
 
-const serverReports = serverEntries.map((entry) => analyzeEntry(entry, {
-  forbiddenPackages: forbiddenServerPackages,
-  forbiddenDirectories: forbiddenServerDirectories,
-  forbiddenFiles: forbiddenServerFiles,
-}));
-const browserReports = browserEntries.map((entry) => analyzeEntry(entry, {
-  forbiddenPackages: forbiddenBrowserPackages,
-  forbiddenDirectories: forbiddenBrowserDirectories,
-  forbiddenFiles: new Set(),
-}));
+const serverReports = serverEntries.map((entry) =>
+  analyzeEntry(entry, {
+    forbiddenPackages: forbiddenServerPackages,
+    forbiddenDirectories: forbiddenServerDirectories,
+    forbiddenFiles: forbiddenServerFiles,
+  }),
+);
+const browserReports = browserEntries.map((entry) =>
+  analyzeEntry(entry, {
+    forbiddenPackages: forbiddenBrowserPackages,
+    forbiddenDirectories: forbiddenBrowserDirectories,
+    forbiddenFiles: new Set(),
+  }),
+);
 
 const headlessSdk = serverReports.find((report) => report.entry === 'packages/sdk/src/index.ts');
 assert(headlessSdk, 'headless SDK report is missing');
-assert(!headlessSdk.files.includes('packages/sdk/src/browser.ts'), 'headless SDK reached its browser entry');
-assert(!headlessSdk.files.some((file) => file.startsWith('packages/overlay/')), 'headless SDK reached overlay runtime code');
-assert(!headlessSdk.files.some((file) => file.startsWith('packages/renderer/')), 'headless SDK reached renderer runtime code');
-assert(headlessSdk.dynamicImports.includes('packages/overlay/src/index.ts'), 'headless SDK overlay loading must remain an explicit dynamic boundary');
+assert(
+  !headlessSdk.files.includes('packages/sdk/src/browser.ts'),
+  'headless SDK reached its browser entry',
+);
+assert(
+  !headlessSdk.files.some((file) => file.startsWith('packages/overlay/')),
+  'headless SDK reached overlay runtime code',
+);
+assert(
+  !headlessSdk.files.some((file) => file.startsWith('packages/renderer/')),
+  'headless SDK reached renderer runtime code',
+);
+assert(
+  headlessSdk.dynamicImports.includes('packages/overlay/src/index.ts'),
+  'headless SDK overlay loading must remain an explicit dynamic boundary',
+);
 
 const browserSdk = browserReports.find((report) => report.entry === 'packages/sdk/src/browser.ts');
 assert(browserSdk, 'browser SDK report is missing');
-assert(browserSdk.files.includes('packages/overlay/src/index.ts'), 'browser SDK must expose the overlay package');
-assert(browserSdk.files.includes('packages/renderer/src/index.ts'), 'browser SDK must expose the renderer package');
+assert(
+  browserSdk.files.includes('packages/overlay/src/index.ts'),
+  'browser SDK must expose the overlay package',
+);
+assert(
+  browserSdk.files.includes('packages/renderer/src/index.ts'),
+  'browser SDK must expose the renderer package',
+);
 
-console.log(JSON.stringify({
-  ok: true,
-  serverEntries: serverReports.map(summarize),
-  browserEntries: browserReports.map(summarize),
-  guarantees: [
-    'default/headless SDK has no static overlay or renderer dependency',
-    'server-safe package graphs contain no Three.js or Cannon-es imports',
-    'browser entry graph contains no Worker application or Node runtime imports',
-    'browser SDK still exposes renderer and overlay APIs',
-  ],
-}, null, 2));
+console.log(
+  JSON.stringify(
+    {
+      ok: true,
+      serverEntries: serverReports.map(summarize),
+      browserEntries: browserReports.map(summarize),
+      guarantees: [
+        'default/headless SDK has no static overlay or renderer dependency',
+        'server-safe package graphs contain no Three.js or Cannon-es imports',
+        'browser entry graph contains no Worker application or Node runtime imports',
+        'browser SDK still exposes renderer and overlay APIs',
+      ],
+    },
+    null,
+    2,
+  ),
+);
 
 function analyzeEntry(entry, policy) {
   const start = resolveSource(join(root, entry));
@@ -128,29 +153,47 @@ function analyzeEntry(entry, policy) {
             dynamicImports.add(target);
             continue;
           }
-          assert(!policy.forbiddenFiles.has(target), `${entry} reaches forbidden file ${target} through ${[...current.chain, target].join(' -> ')}`);
+          assert(
+            !policy.forbiddenFiles.has(target),
+            `${entry} reaches forbidden file ${target} through ${[...current.chain, target].join(' -> ')}`,
+          );
           for (const directory of policy.forbiddenDirectories) {
-            assert(!target.startsWith(directory), `${entry} reaches forbidden directory ${directory} through ${[...current.chain, target].join(' -> ')}`);
+            assert(
+              !target.startsWith(directory),
+              `${entry} reaches forbidden directory ${directory} through ${[...current.chain, target].join(' -> ')}`,
+            );
           }
           stack.push({ file: workspaceResolved, chain: [...current.chain, target] });
           continue;
         }
         const packageName = normalizePackageName(dependency.specifier);
-        assert(!policy.forbiddenPackages.has(packageName) && !policy.forbiddenPackages.has(dependency.specifier),
-          `${entry} imports forbidden package ${dependency.specifier} through ${current.chain.join(' -> ')}`);
+        assert(
+          !policy.forbiddenPackages.has(packageName) &&
+            !policy.forbiddenPackages.has(dependency.specifier),
+          `${entry} imports forbidden package ${dependency.specifier} through ${current.chain.join(' -> ')}`,
+        );
         continue;
       }
 
       const resolved = resolveSource(resolve(dirname(current.file), dependency.specifier));
-      assert(resolved, `${relativePath(current.file)} has unresolved import ${dependency.specifier}`);
+      assert(
+        resolved,
+        `${relativePath(current.file)} has unresolved import ${dependency.specifier}`,
+      );
       const target = relativePath(resolved);
       if (dependency.dynamic) {
         dynamicImports.add(target);
         continue;
       }
-      assert(!policy.forbiddenFiles.has(target), `${entry} reaches forbidden file ${target} through ${[...current.chain, target].join(' -> ')}`);
+      assert(
+        !policy.forbiddenFiles.has(target),
+        `${entry} reaches forbidden file ${target} through ${[...current.chain, target].join(' -> ')}`,
+      );
       for (const directory of policy.forbiddenDirectories) {
-        assert(!target.startsWith(directory), `${entry} reaches forbidden directory ${directory} through ${[...current.chain, target].join(' -> ')}`);
+        assert(
+          !target.startsWith(directory),
+          `${entry} reaches forbidden directory ${directory} through ${[...current.chain, target].join(' -> ')}`,
+        );
       }
       stack.push({ file: resolved, chain: [...current.chain, target] });
     }
@@ -165,7 +208,13 @@ function analyzeEntry(entry, policy) {
 
 function parseDependencies(source, fileName = 'entry.ts') {
   const dependencies = [];
-  const sourceFile = ts.createSourceFile(fileName, source, ts.ScriptTarget.ES2022, true, ts.ScriptKind.TS);
+  const sourceFile = ts.createSourceFile(
+    fileName,
+    source,
+    ts.ScriptTarget.ES2022,
+    true,
+    ts.ScriptKind.TS,
+  );
 
   for (const statement of sourceFile.statements) {
     if (ts.isImportDeclaration(statement) && ts.isStringLiteral(statement.moduleSpecifier)) {
@@ -173,14 +222,22 @@ function parseDependencies(source, fileName = 'entry.ts') {
       dependencies.push(toDependency(statement.moduleSpecifier.text, false));
       continue;
     }
-    if (ts.isExportDeclaration(statement) && statement.moduleSpecifier && ts.isStringLiteral(statement.moduleSpecifier)) {
+    if (
+      ts.isExportDeclaration(statement) &&
+      statement.moduleSpecifier &&
+      ts.isStringLiteral(statement.moduleSpecifier)
+    ) {
       if (statement.isTypeOnly) continue;
       dependencies.push(toDependency(statement.moduleSpecifier.text, false));
     }
   }
 
   const visit = (node) => {
-    if (ts.isCallExpression(node) && node.arguments.length === 1 && ts.isStringLiteral(node.arguments[0])) {
+    if (
+      ts.isCallExpression(node) &&
+      node.arguments.length === 1 &&
+      ts.isStringLiteral(node.arguments[0])
+    ) {
       if (node.expression.kind === ts.SyntaxKind.ImportKeyword) {
         dependencies.push(toDependency(node.arguments[0].text, true));
       } else if (ts.isIdentifier(node.expression) && node.expression.text === 'require') {
@@ -209,7 +266,14 @@ function toDependency(specifier, dynamic) {
 function resolveSource(candidate) {
   const variants = extname(candidate)
     ? [candidate]
-    : [candidate, `${candidate}.ts`, `${candidate}.tsx`, `${candidate}.mts`, `${candidate}.js`, join(candidate, 'index.ts')];
+    : [
+        candidate,
+        `${candidate}.ts`,
+        `${candidate}.tsx`,
+        `${candidate}.mts`,
+        `${candidate}.js`,
+        join(candidate, 'index.ts'),
+      ];
   return variants.find((file) => existsSync(file)) ?? null;
 }
 
@@ -223,7 +287,8 @@ function loadWorkspacePackages() {
       const manifestPath = join(packageDirectory, 'package.json');
       if (!existsSync(manifestPath)) continue;
       const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-      if (typeof manifest.name === 'string') packages.set(manifest.name, { directory: packageDirectory, manifest });
+      if (typeof manifest.name === 'string')
+        packages.set(manifest.name, { directory: packageDirectory, manifest });
     }
   }
   return packages;
@@ -238,9 +303,14 @@ function resolveWorkspaceImport(specifier) {
   let target = null;
   if (typeof exportsField === 'string' && subpath === '.') target = exportsField;
   else if (exportsField && typeof exportsField === 'object') {
-    const selected = Object.hasOwn(exportsField, subpath) ? exportsField[subpath] : (subpath === '.' ? exportsField : null);
+    const selected = Object.hasOwn(exportsField, subpath)
+      ? exportsField[subpath]
+      : subpath === '.'
+        ? exportsField
+        : null;
     if (typeof selected === 'string') target = selected;
-    else if (selected && typeof selected === 'object') target = selected.default ?? selected.browser ?? selected.types ?? null;
+    else if (selected && typeof selected === 'object')
+      target = selected.default ?? selected.browser ?? selected.types ?? null;
   }
   if (!target) return null;
   return resolveSource(resolve(workspacePackage.directory, target));

@@ -42,7 +42,20 @@ export interface UnaryNode extends AstNodeBase {
  *
  * @public
  */
-export type BinaryOperator = '+' | '-' | '*' | '/' | '//' | '%' | '==' | '=' | '!=' | '<' | '<=' | '>' | '>=';
+export type BinaryOperator =
+  | '+'
+  | '-'
+  | '*'
+  | '/'
+  | '//'
+  | '%'
+  | '=='
+  | '='
+  | '!='
+  | '<'
+  | '<='
+  | '>'
+  | '>=';
 
 /**
  * Binary-expression AST node.
@@ -96,7 +109,15 @@ export interface DiceNode extends AstNodeBase {
  *
  * @public
  */
-export type SelectorType = 'literal' | 'highest' | 'lowest' | 'greater' | 'less' | 'greater-equal' | 'less-equal' | 'not-equal';
+export type SelectorType =
+  | 'literal'
+  | 'highest'
+  | 'lowest'
+  | 'greater'
+  | 'less'
+  | 'greater-equal'
+  | 'less-equal'
+  | 'not-equal';
 
 /**
  * Selector predicate attached to a set operation.
@@ -143,7 +164,6 @@ export interface SetOperation {
  */
 export type DiceModifier = SetOperation;
 
-
 /**
  * Parsed expression, AST, source text, and optional trailing comment.
  *
@@ -165,12 +185,18 @@ export interface ParsedExpression {
  */
 export function selectorToComparison(selector: SetSelector): ComparisonOperator | null {
   switch (selector.type) {
-    case 'literal': return '=';
-    case 'greater': return '>';
-    case 'less': return '<';
-    case 'greater-equal': return '>=';
-    case 'less-equal': return '<=';
-    case 'not-equal': return '!=';
+    case 'literal':
+      return '=';
+    case 'greater':
+      return '>';
+    case 'less':
+      return '<';
+    case 'greater-equal':
+      return '>=';
+    case 'less-equal':
+      return '<=';
+    case 'not-equal':
+      return '!=';
     case 'highest':
     case 'lowest':
       return null;

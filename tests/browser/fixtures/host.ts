@@ -40,8 +40,16 @@ interface BrowserFixtureApi {
   ready: Promise<void>;
   getState(): BrowserFixtureState;
   rollLocal(expression?: string): Promise<{ total: number; dice: number }>;
-  connectRoom(options?: { roomId?: string; participantId?: string; sessionId?: string; name?: string }): Promise<void>;
-  rollRoom(expression?: string, visibility?: RollVisibility): Promise<{ rollId: string; hidden: boolean; total: number | null }>;
+  connectRoom(options?: {
+    roomId?: string;
+    participantId?: string;
+    sessionId?: string;
+    name?: string;
+  }): Promise<void>;
+  rollRoom(
+    expression?: string,
+    visibility?: RollVisibility,
+  ): Promise<{ rollId: string; hidden: boolean; total: number | null }>;
   revealLast(): Promise<{ rollId: string; revision: number; total: number | null }>;
   destroyOverlay(): void;
   closeRoom(): void;
@@ -154,7 +162,9 @@ async function initialize(): Promise<void> {
   }
 }
 
-async function rollLocal(expression = '1d20+1d8+1d2+1dF+1d9'): Promise<{ total: number; dice: number }> {
+async function rollLocal(
+  expression = '1d20+1d8+1d2+1dF+1d9',
+): Promise<{ total: number; dice: number }> {
   await ready;
   const roll = draftroll.roll(expression, {
     render: rendererEnabled,
@@ -168,7 +178,9 @@ async function rollLocal(expression = '1d20+1d8+1d2+1dF+1d9'): Promise<{ total: 
   return { total: roll.total, dice: roll.dice.length };
 }
 
-async function connectRoom(options: { roomId?: string; participantId?: string; sessionId?: string; name?: string } = {}): Promise<void> {
+async function connectRoom(
+  options: { roomId?: string; participantId?: string; sessionId?: string; name?: string } = {},
+): Promise<void> {
   if (roomSession) return;
   if (!draftroll) await ready;
   const roomId = options.roomId ?? `browser-${crypto.randomUUID()}`;
@@ -258,11 +270,12 @@ function recordRoomEvent(event: {
     total: event.result?.total ?? null,
     replayed: event.replayed === true,
   };
-  const existing = state.roomEvents.findIndex((candidate) =>
-    candidate.rollId === entry.rollId
-      && candidate.type === entry.type
-      && candidate.revision === entry.revision
-      && candidate.eventSequence === entry.eventSequence,
+  const existing = state.roomEvents.findIndex(
+    (candidate) =>
+      candidate.rollId === entry.rollId &&
+      candidate.type === entry.type &&
+      candidate.revision === entry.revision &&
+      candidate.eventSequence === entry.eventSequence,
   );
   if (existing >= 0) state.roomEvents[existing] = entry;
   else state.roomEvents.push(entry);
@@ -270,7 +283,10 @@ function recordRoomEvent(event: {
 }
 
 function syncParticipants(): void {
-  state.participants = roomSession?.room.participants.map((participant) => participant.name).toSorted((left, right) => left.localeCompare(right)) ?? [];
+  state.participants =
+    roomSession?.room.participants
+      .map((participant) => participant.name)
+      .toSorted((left, right) => left.localeCompare(right)) ?? [];
   renderState();
 }
 

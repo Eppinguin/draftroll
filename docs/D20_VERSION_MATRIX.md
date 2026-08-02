@@ -2,11 +2,11 @@
 
 Draftroll's exact compatibility baseline is Python `d20` 1.1.2. The frozen compatibility corpus is executed by `scripts/test-d20-compat.mjs`; repository changes must update both this matrix and that corpus.
 
-| Upstream version | Draftroll status | Notes |
-| --- | --- | --- |
-| 1.1.2 | Supported syntax/API behavior | Arithmetic, sets, selectors, keep/drop, reroll families, explode, min/max, comparison, comments, annotations, advantage/disadvantage, critical classification, execution limits, AST/result traversal, and stringification are covered. |
-| 1.0.x | Covered by the 1.1.2 language baseline | No separate Draftroll dialect is required for the syntax represented in the corpus. |
-| 0.x | Not a supported compatibility target | Historical behavior is not frozen; use the documented Draftroll/d20 dialect instead. |
+| Upstream version | Draftroll status                       | Notes                                                                                                                                                                                                                                   |
+| ---------------- | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1.1.2            | Supported syntax/API behavior          | Arithmetic, sets, selectors, keep/drop, reroll families, explode, min/max, comparison, comments, annotations, advantage/disadvantage, critical classification, execution limits, AST/result traversal, and stringification are covered. |
+| 1.0.x            | Covered by the 1.1.2 language baseline | No separate Draftroll dialect is required for the syntax represented in the corpus.                                                                                                                                                     |
+| 0.x              | Not a supported compatibility target   | Historical behavior is not frozen; use the documented Draftroll/d20 dialect instead.                                                                                                                                                    |
 
 ## Intentional differences
 

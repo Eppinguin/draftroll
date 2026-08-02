@@ -338,7 +338,6 @@ Also hard-refresh the browser so it does not reuse an older overlay module.
 
 The checked-in `wrangler.jsonc` uses `compatibility_date: "2026-07-29"`. Keep this date until the installed Wrangler release accepts a later compatibility date.
 
-
 ## Protocol-version query parameter
 
 Room HTTP and WebSocket endpoints require `protocolVersion=2`. The SDK adds this automatically. For direct manual requests, include it explicitly:

@@ -48,12 +48,20 @@ export class DiceSyntaxError extends DraftrollError {
   /**
    * Creates a DiceSyntaxError instance.
    */
-  constructor(message: string, public readonly offset: number, options: DiceSyntaxErrorOptions = {}) {
-    super(options.code ?? DICE_DIAGNOSTIC_CODES.unexpectedToken, `${message} at character ${offset + 1}`, {
-      package: 'core',
-      recoverable: true,
-      details: { offset, endOffset: options.endOffset ?? offset },
-    });
+  constructor(
+    message: string,
+    public readonly offset: number,
+    options: DiceSyntaxErrorOptions = {},
+  ) {
+    super(
+      options.code ?? DICE_DIAGNOSTIC_CODES.unexpectedToken,
+      `${message} at character ${offset + 1}`,
+      {
+        package: 'core',
+        recoverable: true,
+        details: { offset, endOffset: options.endOffset ?? offset },
+      },
+    );
     this.name = 'DiceSyntaxError';
     this.code = options.code ?? DICE_DIAGNOSTIC_CODES.unexpectedToken;
     this.endOffset = options.endOffset ?? offset;
@@ -99,44 +107,52 @@ export function parseDiceExpression(
 ): ParsedExpression {
   const dialect = options.dialect ?? 'd20';
   const allowComments = options.allowComments ?? false;
-  return profileParse(options.instrumentation, { source, dialect, allowComments, cache: 'bypass' }, () => {
-  if (source.length > limits.maxExpressionLength) {
-    throw new DiceLimitError(`Expression exceeds ${limits.maxExpressionLength} characters`, {
-      code: DICE_DIAGNOSTIC_CODES.expressionTooLong,
-      startOffset: limits.maxExpressionLength,
-      endOffset: source.length,
-      source,
-      suggestions: [{ message: `Shorten the expression to ${limits.maxExpressionLength} characters or fewer.` }],
-    });
-  }
+  return profileParse(
+    options.instrumentation,
+    { source, dialect, allowComments, cache: 'bypass' },
+    () => {
+      if (source.length > limits.maxExpressionLength) {
+        throw new DiceLimitError(`Expression exceeds ${limits.maxExpressionLength} characters`, {
+          code: DICE_DIAGNOSTIC_CODES.expressionTooLong,
+          startOffset: limits.maxExpressionLength,
+          endOffset: source.length,
+          source,
+          suggestions: [
+            {
+              message: `Shorten the expression to ${limits.maxExpressionLength} characters or fewer.`,
+            },
+          ],
+        });
+      }
 
-  const input = source.trimStart();
-  const sourceOffset = source.length - input.length;
-  if (!input) {
-    throw new DiceSyntaxError('Expression is empty', 0, {
-      code: DICE_DIAGNOSTIC_CODES.emptyExpression,
-      endOffset: source.length,
-      source,
-      suggestions: [{ message: 'Enter a dice expression, for example 1d20 + 5.' }],
-    });
-  }
+      const input = source.trimStart();
+      const sourceOffset = source.length - input.length;
+      if (!input) {
+        throw new DiceSyntaxError('Expression is empty', 0, {
+          code: DICE_DIAGNOSTIC_CODES.emptyExpression,
+          endOffset: source.length,
+          source,
+          suggestions: [{ message: 'Enter a dice expression, for example 1d20 + 5.' }],
+        });
+      }
 
-  const parser = new Parser(source, input, sourceOffset, limits, dialect);
-  const { ast, expressionEnd } = parser.parse(allowComments);
-  const expression = input.slice(0, expressionEnd).trimEnd();
-  const commentText = input.slice(expressionEnd).trim();
-  const comment = commentText || null;
-  const annotation = ast.annotations.length > 0 ? ast.annotations.join(' ') : null;
+      const parser = new Parser(source, input, sourceOffset, limits, dialect);
+      const { ast, expressionEnd } = parser.parse(allowComments);
+      const expression = input.slice(0, expressionEnd).trimEnd();
+      const commentText = input.slice(expressionEnd).trim();
+      const comment = commentText || null;
+      const annotation = ast.annotations.length > 0 ? ast.annotations.join(' ') : null;
 
-  return {
-    source,
-    expression,
-    annotation,
-    comment,
-    ast,
-    dialect,
-  };
-  });
+      return {
+        source,
+        expression,
+        annotation,
+        comment,
+        ast,
+        dialect,
+      };
+    },
+  );
 }
 
 class Parser {
@@ -157,9 +173,18 @@ class Parser {
     this.skipWhitespace();
     const expressionEnd = this.offset;
     if (!this.isEnd() && !allowComments) {
-      throw this.error(`Unexpected token '${this.peek()}'`, DICE_DIAGNOSTIC_CODES.unexpectedToken, this.offset, this.offset + 1, [
-        { message: 'Remove the unexpected token, or enable trailing comments when the remaining text is a comment.' },
-      ]);
+      throw this.error(
+        `Unexpected token '${this.peek()}'`,
+        DICE_DIAGNOSTIC_CODES.unexpectedToken,
+        this.offset,
+        this.offset + 1,
+        [
+          {
+            message:
+              'Remove the unexpected token, or enable trailing comments when the remaining text is a comment.',
+          },
+        ],
+      );
     }
     return { ast, expressionEnd };
   }
@@ -281,14 +306,22 @@ class Parser {
           }
           const count = leading ?? 1;
           if (!Number.isSafeInteger(count) || count < 0) {
-            throw this.error('Dice count must be a non-negative integer', DICE_DIAGNOSTIC_CODES.invalidDiceCount, start, diceMarker, [
-              { message: 'Use a whole-number dice count, for example 2d6.' },
-            ]);
+            throw this.error(
+              'Dice count must be a non-negative integer',
+              DICE_DIAGNOSTIC_CODES.invalidDiceCount,
+              start,
+              diceMarker,
+              [{ message: 'Use a whole-number dice count, for example 2d6.' }],
+            );
           }
           if (sides !== 'F' && sides < 1) {
-            throw this.error('Dice sides must be at least 1', DICE_DIAGNOSTIC_CODES.invalidDiceSides, sidesStart, this.offset, [
-              { message: 'Use at least one side, for example d6.' },
-            ]);
+            throw this.error(
+              'Dice sides must be at least 1',
+              DICE_DIAGNOSTIC_CODES.invalidDiceSides,
+              sidesStart,
+              this.offset,
+              [{ message: 'Use at least one side, for example d6.' }],
+            );
           }
           node = {
             type: 'dice',
@@ -312,9 +345,8 @@ class Parser {
       }
 
       if (node.type === 'dice' || node.type === 'set' || node.type === 'parenthetical') {
-        const defaultExplosionTarget = node.type === 'dice'
-          ? node.sides === 'F' ? 1 : node.sides
-          : undefined;
+        const defaultExplosionTarget =
+          node.type === 'dice' ? (node.sides === 'F' ? 1 : node.sides) : undefined;
         node.modifiers.push(...this.parseModifiers(defaultExplosionTarget));
       }
       node.annotations.push(...this.parseAnnotations());
@@ -332,10 +364,26 @@ class Parser {
     this.skipWhitespace();
     if (!this.consume(',')) {
       if (!this.consume(')')) {
-        throw this.error("Expected ')' or ','", DICE_DIAGNOSTIC_CODES.expectedClosingParenthesis, this.offset, this.isEnd() ? this.offset : this.offset + 1, [
-          { message: "Insert ')' to close the parenthesized expression.", replacement: ')', startOffset: this.offset, endOffset: this.offset },
-          { message: "Insert ',' to make this a set.", replacement: ',', startOffset: this.offset, endOffset: this.offset },
-        ]);
+        throw this.error(
+          "Expected ')' or ','",
+          DICE_DIAGNOSTIC_CODES.expectedClosingParenthesis,
+          this.offset,
+          this.isEnd() ? this.offset : this.offset + 1,
+          [
+            {
+              message: "Insert ')' to close the parenthesized expression.",
+              replacement: ')',
+              startOffset: this.offset,
+              endOffset: this.offset,
+            },
+            {
+              message: "Insert ',' to make this a set.",
+              replacement: ',',
+              startOffset: this.offset,
+              endOffset: this.offset,
+            },
+          ],
+        );
       }
       return { type: 'parenthetical', value: first, modifiers: [], annotations: [] };
     }
@@ -348,10 +396,26 @@ class Parser {
       this.skipWhitespace();
       if (this.consume(')')) break;
       if (!this.consume(',')) {
-        throw this.error("Expected ',' or ')' in set", DICE_DIAGNOSTIC_CODES.expectedSetDelimiter, this.offset, this.isEnd() ? this.offset : this.offset + 1, [
-          { message: "Insert ',' before the next set value.", replacement: ',', startOffset: this.offset, endOffset: this.offset },
-          { message: "Insert ')' to close the set.", replacement: ')', startOffset: this.offset, endOffset: this.offset },
-        ]);
+        throw this.error(
+          "Expected ',' or ')' in set",
+          DICE_DIAGNOSTIC_CODES.expectedSetDelimiter,
+          this.offset,
+          this.isEnd() ? this.offset : this.offset + 1,
+          [
+            {
+              message: "Insert ',' before the next set value.",
+              replacement: ',',
+              startOffset: this.offset,
+              endOffset: this.offset,
+            },
+            {
+              message: "Insert ')' to close the set.",
+              replacement: ')',
+              startOffset: this.offset,
+              endOffset: this.offset,
+            },
+          ],
+        );
       }
     }
     return { type: 'set', values, modifiers: [], annotations: [] };
@@ -365,35 +429,51 @@ class Parser {
       const remaining = this.input.slice(this.offset).toLowerCase();
       let modifier: SetOperation | null = null;
 
-      if (remaining.startsWith('kh')) modifier = this.readAliasOperation('keep', 'highest', 2, 'kh');
-      else if (remaining.startsWith('kl')) modifier = this.readAliasOperation('keep', 'lowest', 2, 'kl');
-      else if (remaining.startsWith('ph')) modifier = this.readAliasOperation('drop', 'highest', 2, 'ph');
-      else if (remaining.startsWith('pl')) modifier = this.readAliasOperation('drop', 'lowest', 2, 'pl');
-      else if (remaining.startsWith('dh')) modifier = this.readAliasOperation('drop', 'highest', 2, 'dh');
-      else if (remaining.startsWith('dl')) modifier = this.readAliasOperation('drop', 'lowest', 2, 'dl');
+      if (remaining.startsWith('kh'))
+        modifier = this.readAliasOperation('keep', 'highest', 2, 'kh');
+      else if (remaining.startsWith('kl'))
+        modifier = this.readAliasOperation('keep', 'lowest', 2, 'kl');
+      else if (remaining.startsWith('ph'))
+        modifier = this.readAliasOperation('drop', 'highest', 2, 'ph');
+      else if (remaining.startsWith('pl'))
+        modifier = this.readAliasOperation('drop', 'lowest', 2, 'pl');
+      else if (remaining.startsWith('dh'))
+        modifier = this.readAliasOperation('drop', 'highest', 2, 'dh');
+      else if (remaining.startsWith('dl'))
+        modifier = this.readAliasOperation('drop', 'lowest', 2, 'dl');
       else if (remaining.startsWith('rr')) modifier = this.readSelectorOperation('reroll', 2, 'rr');
-      else if (remaining.startsWith('ro')) modifier = this.readSelectorOperation('reroll-once', 2, 'ro');
-      else if (remaining.startsWith('ra')) modifier = this.readSelectorOperation('reroll-add', 2, 'ra');
+      else if (remaining.startsWith('ro'))
+        modifier = this.readSelectorOperation('reroll-once', 2, 'ro');
+      else if (remaining.startsWith('ra'))
+        modifier = this.readSelectorOperation('reroll-add', 2, 'ra');
       else if (remaining.startsWith('mi')) modifier = this.readLiteralOperation('minimum', 2, 'mi');
       else if (remaining.startsWith('ma')) modifier = this.readLiteralOperation('maximum', 2, 'ma');
-      else if (remaining.startsWith('cs')) modifier = this.readSelectorOperation('success-count', 2, 'cs');
-      else if (remaining.startsWith('count')) modifier = this.readSelectorOperation('success-count', 5, 'count');
+      else if (remaining.startsWith('cs'))
+        modifier = this.readSelectorOperation('success-count', 2, 'cs');
+      else if (remaining.startsWith('count'))
+        modifier = this.readSelectorOperation('success-count', 5, 'count');
       else if (remaining.startsWith('r')) modifier = this.readSelectorOperation('reroll', 1, 'r');
-      else if (remaining.startsWith('e')) modifier = this.readExplosionOperation(1, 'e', defaultExplosionTarget);
+      else if (remaining.startsWith('e'))
+        modifier = this.readExplosionOperation(1, 'e', defaultExplosionTarget);
       else if (remaining.startsWith('k')) modifier = this.readSelectorOperation('keep', 1, 'k');
       else if (remaining.startsWith('p')) modifier = this.readSelectorOperation('drop', 1, 'p');
       else if (this.dialect === 'draftroll') {
         const selector = this.tryReadComparisonSelector();
-        if (selector) modifier = { type: 'success-count', selector, notation: selectorNotation(selector) };
+        if (selector)
+          modifier = { type: 'success-count', selector, notation: selectorNotation(selector) };
       }
 
       if (!modifier) break;
       modifiers.push(modifier);
       this.modifierCount += 1;
       if (this.modifierCount > this.limits.maxModifiers) {
-        throw this.limitError(`Expression exceeds ${this.limits.maxModifiers} set operations`, DICE_DIAGNOSTIC_CODES.tooManyModifiers, modifierStart, this.offset, [
-          { message: `Reduce the expression to ${this.limits.maxModifiers} modifiers or fewer.` },
-        ]);
+        throw this.limitError(
+          `Expression exceeds ${this.limits.maxModifiers} set operations`,
+          DICE_DIAGNOSTIC_CODES.tooManyModifiers,
+          modifierStart,
+          this.offset,
+          [{ message: `Reduce the expression to ${this.limits.maxModifiers} modifiers or fewer.` }],
+        );
       }
     }
     return modifiers;
@@ -411,21 +491,38 @@ class Parser {
       type,
       selector: {
         type: selectorType,
-        target: this.readRequiredInteger(`Expected count after ${notation}`, DICE_DIAGNOSTIC_CODES.expectedModifierCount, [
-          { message: `Add a count after ${notation}, for example ${notation}1.`, replacement: '1', startOffset: this.offset, endOffset: this.offset },
-        ]),
+        target: this.readRequiredInteger(
+          `Expected count after ${notation}`,
+          DICE_DIAGNOSTIC_CODES.expectedModifierCount,
+          [
+            {
+              message: `Add a count after ${notation}, for example ${notation}1.`,
+              replacement: '1',
+              startOffset: this.offset,
+              endOffset: this.offset,
+            },
+          ],
+        ),
       },
       notation,
     };
   }
 
-  private readSelectorOperation(type: SetOperationType, prefixLength: number, notation: string): SetOperation {
+  private readSelectorOperation(
+    type: SetOperationType,
+    prefixLength: number,
+    notation: string,
+  ): SetOperation {
     this.offset += prefixLength;
     this.skipWhitespace();
     return { type, selector: this.readSelector(), notation };
   }
 
-  private readExplosionOperation(prefixLength: number, notation: string, defaultTarget?: number): SetOperation {
+  private readExplosionOperation(
+    prefixLength: number,
+    notation: string,
+    defaultTarget?: number,
+  ): SetOperation {
     this.offset += prefixLength;
     this.skipWhitespace();
     if (defaultTarget !== undefined && !this.canStartSelector()) {
@@ -440,29 +537,37 @@ class Parser {
 
   private canStartSelector(): boolean {
     const marker = this.peek().toLowerCase();
-    return marker === 'h'
-      || marker === 'l'
-      || marker === '.'
-      || /\d/.test(marker)
-      || this.input.startsWith('!=', this.offset)
-      || this.input.startsWith('<=', this.offset)
-      || this.input.startsWith('>=', this.offset)
-      || this.input.startsWith('==', this.offset)
-      || marker === '='
-      || marker === '<'
-      || marker === '>';
+    return (
+      marker === 'h' ||
+      marker === 'l' ||
+      marker === '.' ||
+      /\d/.test(marker) ||
+      this.input.startsWith('!=', this.offset) ||
+      this.input.startsWith('<=', this.offset) ||
+      this.input.startsWith('>=', this.offset) ||
+      this.input.startsWith('==', this.offset) ||
+      marker === '=' ||
+      marker === '<' ||
+      marker === '>'
+    );
   }
 
-  private readLiteralOperation(type: 'minimum' | 'maximum', prefixLength: number, notation: string): SetOperation {
+  private readLiteralOperation(
+    type: 'minimum' | 'maximum',
+    prefixLength: number,
+    notation: string,
+  ): SetOperation {
     this.offset += prefixLength;
     this.skipWhitespace();
     return {
       type,
       selector: {
         type: 'literal',
-        target: this.readSignedNumber(`Expected value after ${notation}`, DICE_DIAGNOSTIC_CODES.expectedModifierValue, [
-          { message: `Add a numeric value after ${notation}.` },
-        ]),
+        target: this.readSignedNumber(
+          `Expected value after ${notation}`,
+          DICE_DIAGNOSTIC_CODES.expectedModifierValue,
+          [{ message: `Add a numeric value after ${notation}.` }],
+        ),
       },
       notation,
     };
@@ -475,18 +580,29 @@ class Parser {
       this.offset += 1;
       return {
         type: marker === 'h' ? 'highest' : 'lowest',
-        target: this.readRequiredInteger(`Expected count after ${marker}`, DICE_DIAGNOSTIC_CODES.expectedModifierCount, [
-          { message: `Add a count after ${marker}, for example ${marker}1.`, replacement: '1', startOffset: this.offset, endOffset: this.offset },
-        ]),
+        target: this.readRequiredInteger(
+          `Expected count after ${marker}`,
+          DICE_DIAGNOSTIC_CODES.expectedModifierCount,
+          [
+            {
+              message: `Add a count after ${marker}, for example ${marker}1.`,
+              replacement: '1',
+              startOffset: this.offset,
+              endOffset: this.offset,
+            },
+          ],
+        ),
       };
     }
     const comparison = this.tryReadComparisonSelector();
     if (comparison) return comparison;
     return {
       type: 'literal',
-      target: this.readSignedNumber('Expected selector value', DICE_DIAGNOSTIC_CODES.expectedSelectorValue, [
-        { message: 'Add a selector value such as 1 or >=5.' },
-      ]),
+      target: this.readSignedNumber(
+        'Expected selector value',
+        DICE_DIAGNOSTIC_CODES.expectedSelectorValue,
+        [{ message: 'Add a selector value such as 1 or >=5.' }],
+      ),
     };
   }
 
@@ -497,9 +613,11 @@ class Parser {
     if (!operator) return null;
     this.offset += operator.length;
     this.skipWhitespace();
-    const target = this.readSignedNumber('Expected comparison value', DICE_DIAGNOSTIC_CODES.expectedComparisonValue, [
-      { message: `Add a numeric value after ${operator}.` },
-    ]);
+    const target = this.readSignedNumber(
+      'Expected comparison value',
+      DICE_DIAGNOSTIC_CODES.expectedComparisonValue,
+      [{ message: `Add a numeric value after ${operator}.` }],
+    );
     return { type: selectorTypeForComparison(operator), target };
   }
 
@@ -519,9 +637,20 @@ class Parser {
       const start = this.offset;
       while (!this.isEnd() && this.peek() !== ']') this.offset += 1;
       if (this.isEnd()) {
-        throw this.error("Expected ']'", DICE_DIAGNOSTIC_CODES.unterminatedAnnotation, start - 1, this.offset, [
-          { message: "Insert ']' to close the annotation.", replacement: ']', startOffset: this.offset, endOffset: this.offset },
-        ]);
+        throw this.error(
+          "Expected ']'",
+          DICE_DIAGNOSTIC_CODES.unterminatedAnnotation,
+          start - 1,
+          this.offset,
+          [
+            {
+              message: "Insert ']' to close the annotation.",
+              replacement: ']',
+              startOffset: this.offset,
+              endOffset: this.offset,
+            },
+          ],
+        );
       }
       const text = this.input.slice(start, this.offset).trim();
       this.offset += 1;
@@ -538,9 +667,13 @@ class Parser {
     this.offset += match[0].length;
     const value = Number(match[0]);
     if (!Number.isFinite(value)) {
-      throw this.error('Number is too large', DICE_DIAGNOSTIC_CODES.numberTooLarge, start, this.offset, [
-        { message: 'Use a smaller finite number.' },
-      ]);
+      throw this.error(
+        'Number is too large',
+        DICE_DIAGNOSTIC_CODES.numberTooLarge,
+        start,
+        this.offset,
+        [{ message: 'Use a smaller finite number.' }],
+      );
     }
     return value;
   }
@@ -574,9 +707,13 @@ class Parser {
     this.offset += match[0].length;
     const value = Number(match[0]);
     if (!Number.isSafeInteger(value)) {
-      throw this.error('Integer is too large', DICE_DIAGNOSTIC_CODES.integerTooLarge, start, this.offset, [
-        { message: 'Use a smaller whole number.' },
-      ]);
+      throw this.error(
+        'Integer is too large',
+        DICE_DIAGNOSTIC_CODES.integerTooLarge,
+        start,
+        this.offset,
+        [{ message: 'Use a smaller whole number.' }],
+      );
     }
     return value;
   }
@@ -584,9 +721,13 @@ class Parser {
   private withDepth<T>(callback: () => T): T {
     this.depth += 1;
     if (this.depth > this.limits.maxAstDepth) {
-      throw this.limitError(`AST depth exceeds ${this.limits.maxAstDepth}`, DICE_DIAGNOSTIC_CODES.astDepthExceeded, this.offset, this.offset, [
-        { message: 'Simplify nested parentheses or chained operations.' },
-      ]);
+      throw this.limitError(
+        `AST depth exceeds ${this.limits.maxAstDepth}`,
+        DICE_DIAGNOSTIC_CODES.astDepthExceeded,
+        this.offset,
+        this.offset,
+        [{ message: 'Simplify nested parentheses or chained operations.' }],
+      );
     }
     try {
       return callback();
@@ -594,7 +735,6 @@ class Parser {
       this.depth -= 1;
     }
   }
-
 
   private skipWhitespace(): void {
     while (/\s/.test(this.peek())) this.offset += 1;
@@ -614,7 +754,6 @@ class Parser {
     return this.offset >= this.input.length;
   }
 
-
   private limitError(
     message: string,
     code: DiceDiagnosticCode,
@@ -629,8 +768,12 @@ class Parser {
       source: this.source,
       suggestions: suggestions.map((suggestion) => ({
         ...suggestion,
-        ...(suggestion.startOffset === undefined ? {} : { startOffset: this.sourceOffset + suggestion.startOffset }),
-        ...(suggestion.endOffset === undefined ? {} : { endOffset: this.sourceOffset + suggestion.endOffset }),
+        ...(suggestion.startOffset === undefined
+          ? {}
+          : { startOffset: this.sourceOffset + suggestion.startOffset }),
+        ...(suggestion.endOffset === undefined
+          ? {}
+          : { endOffset: this.sourceOffset + suggestion.endOffset }),
       })),
     });
   }
@@ -650,8 +793,12 @@ class Parser {
       source: this.source,
       suggestions: suggestions.map((suggestion) => ({
         ...suggestion,
-        ...(suggestion.startOffset === undefined ? {} : { startOffset: this.sourceOffset + suggestion.startOffset }),
-        ...(suggestion.endOffset === undefined ? {} : { endOffset: this.sourceOffset + suggestion.endOffset }),
+        ...(suggestion.startOffset === undefined
+          ? {}
+          : { startOffset: this.sourceOffset + suggestion.startOffset }),
+        ...(suggestion.endOffset === undefined
+          ? {}
+          : { endOffset: this.sourceOffset + suggestion.endOffset }),
       })),
     });
   }
@@ -660,23 +807,37 @@ class Parser {
 function selectorTypeForComparison(operator: ComparisonOperator | '=='): SetSelector['type'] {
   switch (operator) {
     case '=':
-    case '==': return 'literal';
-    case '!=': return 'not-equal';
-    case '<': return 'less';
-    case '<=': return 'less-equal';
-    case '>': return 'greater';
-    case '>=': return 'greater-equal';
+    case '==':
+      return 'literal';
+    case '!=':
+      return 'not-equal';
+    case '<':
+      return 'less';
+    case '<=':
+      return 'less-equal';
+    case '>':
+      return 'greater';
+    case '>=':
+      return 'greater-equal';
   }
 }
 
 function selectorNotation(selector: SetSelector): string {
-  const prefix = selector.type === 'literal' ? '='
-    : selector.type === 'not-equal' ? '!='
-      : selector.type === 'less' ? '<'
-        : selector.type === 'less-equal' ? '<='
-          : selector.type === 'greater' ? '>'
-            : selector.type === 'greater-equal' ? '>='
-              : selector.type === 'highest' ? 'h'
-                : 'l';
+  const prefix =
+    selector.type === 'literal'
+      ? '='
+      : selector.type === 'not-equal'
+        ? '!='
+        : selector.type === 'less'
+          ? '<'
+          : selector.type === 'less-equal'
+            ? '<='
+            : selector.type === 'greater'
+              ? '>'
+              : selector.type === 'greater-equal'
+                ? '>='
+                : selector.type === 'highest'
+                  ? 'h'
+                  : 'l';
   return `${prefix}${selector.target}`;
 }

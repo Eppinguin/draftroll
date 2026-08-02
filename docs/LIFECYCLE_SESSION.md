@@ -42,7 +42,7 @@ The lower-level APIs remain available through:
 
 ```ts
 session.draftroll; // stable local engine, history, formatting, custom dice
-session.room;      // active DraftrollRoomSession, or null in local mode
+session.room; // active DraftrollRoomSession, or null in local mode
 ```
 
 ## Renderer on and off

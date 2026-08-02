@@ -18,7 +18,8 @@ interface HistoryResponse {
   rolls?: Array<{ result?: unknown }>;
 }
 
-type LogAction = 'select' | 'reroll-all' | 'reroll-die' | 'load';
+const LOG_ACTIONS = ['select', 'reroll-all', 'reroll-die', 'load'] as const;
+type LogAction = (typeof LOG_ACTIONS)[number];
 
 const tableOptions = (
   groupId: string,
@@ -34,7 +35,12 @@ const tableOptions = (
   maximumConcurrentVisuals: 30,
 });
 
-const logButton = (label: string, action: LogAction, rollId: string, dieId?: string): HTMLButtonElement => {
+const logButton = (
+  label: string,
+  action: LogAction,
+  rollId: string,
+  dieId?: string,
+): HTMLButtonElement => {
   const element = document.createElement('button');
   element.type = 'button';
   element.textContent = label;
@@ -85,44 +91,46 @@ export async function initSdkDemo(): Promise<void> {
   };
 
   overlayStatus.textContent = 'LOADING RENDERER';
-  const testThemeProvider = new BundledThemeProvider([{
-    schemaVersion: DRAFTROLL_THEME_SCHEMA_VERSION,
-    id: 'test-obsidian',
-    name: 'Obsidian Test',
-    version: '1.0.0',
-    description: 'Local constrained runtime-theme test manifest.',
-    availableDice: ['d4', 'd6', 'd8', 'd10', 'd12', 'd20'],
-    material: {
-      color: '#17131f',
-      emissive: '#3d1859',
-      emissiveIntensity: 0.34,
-      roughness: 0.36,
-      metalness: 0.42,
-      clearcoat: 0.48,
-      clearcoatRoughness: 0.2,
-    },
-    labels: {
-      color: '#f8eaff',
-      glowColor: '#c468ff',
-      fontFamily: 'Georgia',
-    },
-    effects: {
-      positive: 'major-burst',
-      neutral: 'subtle-pulse',
-      negative: 'void-fracture',
-    },
-    metadata: {
-      edgeColor: '#b45cff',
-      particleColor: '#d8a4ff',
-      surfaceAudio: {
-        impactSet: 'crystal',
-        pitchRange: [0.92, 1.08],
-        resonance: 0.72,
-        weight: 1.05,
-        brightness: 0.8,
+  const testThemeProvider = new BundledThemeProvider([
+    {
+      schemaVersion: DRAFTROLL_THEME_SCHEMA_VERSION,
+      id: 'test-obsidian',
+      name: 'Obsidian Test',
+      version: '1.0.0',
+      description: 'Local constrained runtime-theme test manifest.',
+      availableDice: ['d4', 'd6', 'd8', 'd10', 'd12', 'd20'],
+      material: {
+        color: '#17131f',
+        emissive: '#3d1859',
+        emissiveIntensity: 0.34,
+        roughness: 0.36,
+        metalness: 0.42,
+        clearcoat: 0.48,
+        clearcoatRoughness: 0.2,
+      },
+      labels: {
+        color: '#f8eaff',
+        glowColor: '#c468ff',
+        fontFamily: 'Georgia',
+      },
+      effects: {
+        positive: 'major-burst',
+        neutral: 'subtle-pulse',
+        negative: 'void-fracture',
+      },
+      metadata: {
+        edgeColor: '#b45cff',
+        particleColor: '#d8a4ff',
+        surfaceAudio: {
+          impactSet: 'crystal',
+          pitchRange: [0.92, 1.08],
+          resonance: 0.72,
+          weight: 1.05,
+          brightness: 0.8,
+        },
       },
     },
-  }]);
+  ]);
   const draftroll = await Draftroll.createOverlay({
     overlay: {
       src: '/overlay.html',
@@ -133,7 +141,8 @@ export async function initSdkDemo(): Promise<void> {
       themeProvider: testThemeProvider,
       fallbackThemeId: 'dragon',
       onThemeLoad: (event) => {
-        overlayStatus.textContent = event.type === 'complete' ? 'SDK OVERLAY READY' : `THEME ${event.type.toUpperCase()}`;
+        overlayStatus.textContent =
+          event.type === 'complete' ? 'SDK OVERLAY READY' : `THEME ${event.type.toUpperCase()}`;
       },
       results: {
         position: 'bottom-right',
@@ -173,21 +182,27 @@ export async function initSdkDemo(): Promise<void> {
     roomStatus.textContent = label;
     roomStatus.classList.toggle('connected', connected);
     roomStatus.classList.toggle('connecting', connecting);
-    roomConnectButton.textContent = connected ? 'Disconnect room' : connecting ? 'Connecting…' : 'Connect room';
+    roomConnectButton.textContent = connected
+      ? 'Disconnect room'
+      : connecting
+        ? 'Connecting…'
+        : 'Connect room';
     roomRollButton.disabled = !connected;
   };
 
-  const actorName = () => rollNameInput.value.trim() || characterNameInput.value.trim() || 'Anonymous';
+  const actorName = () =>
+    rollNameInput.value.trim() || characterNameInput.value.trim() || 'Anonymous';
   const actionName = () => actionNameInput.value.trim() || 'Unnamed roll';
   const rollMetadata = () => ({
     source: 'character-sheet-test-client',
     actionName: actionName(),
     characterName: actorName(),
-    characterClass: document.querySelector<HTMLInputElement>('#sheet-character-class')?.value.trim() || undefined,
-    characterLevel: Number(document.querySelector<HTMLInputElement>('#sheet-character-level')?.value || 0) || undefined,
+    characterClass:
+      document.querySelector<HTMLInputElement>('#sheet-character-class')?.value.trim() || undefined,
+    characterLevel:
+      Number(document.querySelector<HTMLInputElement>('#sheet-character-level')?.value || 0) ||
+      undefined,
   });
-
-
 
   const buildFixedDisplayInput = (
     expression: string,
@@ -207,7 +222,9 @@ export async function initSdkDemo(): Promise<void> {
       metadata: { ...metadata, actionName: label, predeterminedResults: true },
     });
     if (rng.remaining > 0) {
-      throw new Error(`The formula consumed ${rng.used} result${rng.used === 1 ? '' : 's'}, but ${values.length} were supplied`);
+      throw new Error(
+        `The formula consumed ${rng.used} result${rng.used === 1 ? '' : 's'}, but ${values.length} were supplied`,
+      );
     }
     return {
       name,
@@ -260,42 +277,60 @@ export async function initSdkDemo(): Promise<void> {
     logById.set(incoming.rollId, incoming);
     if (select) selectedRollId = incoming.rollId;
     renderLog();
-    show(pendingPresentationIds.has(incoming.rollId)
-      ? { rollId: incoming.rollId, status: 'rolling', expression: incoming.expression, name: incoming.name }
-      : incoming);
+    show(
+      pendingPresentationIds.has(incoming.rollId)
+        ? {
+            rollId: incoming.rollId,
+            status: 'rolling',
+            expression: incoming.expression,
+            name: incoming.name,
+          }
+        : incoming,
+    );
   };
 
-  const trackPresentation = (response: { result: NormalizedRollResult; wait(): Promise<unknown> }) => {
+  const trackPresentation = (response: {
+    result: NormalizedRollResult;
+    wait(): Promise<unknown>;
+  }) => {
     const rollId = response.result.rollId;
     if (!rollId) throw new Error('A presented roll must have a rollId');
     const generation = (pendingPresentationIds.get(rollId) ?? 0) + 1;
     pendingPresentationIds.set(rollId, generation);
     upsertLog(response.result);
-    void response.wait().then(() => {
-      if (pendingPresentationIds.get(rollId) !== generation) return;
-      pendingPresentationIds.delete(rollId);
-      renderLog();
-      show(response.result);
-    }, (error) => {
-      if (pendingPresentationIds.get(rollId) !== generation) return;
-      pendingPresentationIds.delete(rollId);
-      renderLog();
-      showError(error);
-    });
+    void response.wait().then(
+      () => {
+        if (pendingPresentationIds.get(rollId) !== generation) return;
+        pendingPresentationIds.delete(rollId);
+        renderLog();
+        show(response.result);
+      },
+      (error) => {
+        if (pendingPresentationIds.get(rollId) !== generation) return;
+        pendingPresentationIds.delete(rollId);
+        renderLog();
+        showError(error);
+      },
+    );
   };
 
   const populateEditor = (result: NormalizedRollResult) => {
     selectedRollId = result.rollId ?? null;
-    rollNameInput.value = result.name
-      ?? (typeof result.metadata?.characterName === 'string' ? result.metadata.characterName : characterNameInput.value);
+    rollNameInput.value =
+      result.name ??
+      (typeof result.metadata?.characterName === 'string'
+        ? result.metadata.characterName
+        : characterNameInput.value);
     characterNameInput.value = rollNameInput.value;
-    actionNameInput.value = typeof result.metadata?.actionName === 'string' ? result.metadata.actionName : result.annotation ?? 'Roll';
+    actionNameInput.value =
+      typeof result.metadata?.actionName === 'string'
+        ? result.metadata.actionName
+        : (result.annotation ?? 'Roll');
     expressionInput.value = result.expression ?? expressionInput.value;
     if (result.themeId) themeInput.value = result.themeId;
     setBusy(false);
     renderLog();
   };
-
 
   const renderLog = () => {
     logElement.replaceChildren();
@@ -325,7 +360,10 @@ export async function initSdkDemo(): Promise<void> {
       const actor = document.createElement('strong');
       actor.textContent = result.name ?? 'Anonymous';
       const action = document.createElement('span');
-      action.textContent = typeof result.metadata?.actionName === 'string' ? result.metadata.actionName : result.annotation ?? 'Roll';
+      action.textContent =
+        typeof result.metadata?.actionName === 'string'
+          ? result.metadata.actionName
+          : (result.annotation ?? 'Roll');
       title.append(actor, action);
       const formula = document.createElement('div');
       formula.className = 'log-formula';
@@ -352,7 +390,12 @@ export async function initSdkDemo(): Promise<void> {
         diceRow.append(hidden);
       } else {
         result.dice.forEach((die) => {
-          const dieButton = logButton(`${die.type.toUpperCase()} ${String(die.result)}`, 'reroll-die', rollId, die.id);
+          const dieButton = logButton(
+            `${die.type.toUpperCase()} ${String(die.result)}`,
+            'reroll-die',
+            rollId,
+            die.id,
+          );
           dieButton.className = `die-result-button${die.kept ? '' : ' dropped'}`;
           dieButton.title = `Reroll ${die.id}`;
           const theme = document.createElement('small');
@@ -368,7 +411,9 @@ export async function initSdkDemo(): Promise<void> {
         logButton('Reroll all', 'reroll-all', rollId),
         logButton('Load formula', 'load', rollId),
       );
-      actions.querySelectorAll('button').forEach((button) => { button.disabled = pending; });
+      actions.querySelectorAll('button').forEach((button) => {
+        button.disabled = pending;
+      });
 
       entry.append(head, diceRow, actions);
       logElement.append(entry);
@@ -386,13 +431,18 @@ export async function initSdkDemo(): Promise<void> {
       return;
     }
     const roomActor = event.result.name ?? event.actor.name ?? 'Anonymous';
-    const roomAction = typeof event.result.metadata?.actionName === 'string'
-      ? event.result.metadata.actionName
-      : event.result.annotation ?? 'Roll';
+    const roomAction =
+      typeof event.result.metadata?.actionName === 'string'
+        ? event.result.metadata.actionName
+        : (event.result.annotation ?? 'Roll');
     presentRoomResult(event.result, {
       startTime: event.localStartTimeMs,
       animationSeed: event.animationSeed,
-      table: tableOptions(event.result.rollId ?? event.clientRollId ?? crypto.randomUUID(), roomActor, roomAction),
+      table: tableOptions(
+        event.result.rollId ?? event.clientRollId ?? crypto.randomUUID(),
+        roomActor,
+        roomAction,
+      ),
     });
   };
 
@@ -406,9 +456,13 @@ export async function initSdkDemo(): Promise<void> {
     const requestedAnimation = rollId ? pendingRoomAnimations.get(rollId) : undefined;
     if (rollId) pendingRoomAnimations.delete(rollId);
     const changedDieIds = previous ? changedDice(previous, event.result) : undefined;
-    const animatedDieIds = requestedAnimation === 'all'
-      ? undefined
-      : requestedAnimation ?? (changedDieIds?.length && changedDieIds.length < event.result.dice.length ? changedDieIds : undefined);
+    const animatedDieIds =
+      requestedAnimation === 'all'
+        ? undefined
+        : (requestedAnimation ??
+          (changedDieIds?.length && changedDieIds.length < event.result.dice.length
+            ? changedDieIds
+            : undefined));
 
     if (event.animate) {
       presentRoomResult(event.result, {
@@ -438,7 +492,10 @@ export async function initSdkDemo(): Promise<void> {
     if (!roomId) throw new Error('Room ID is required');
     const response = await fetch(roomHistoryRequest());
     if (!response.ok) throw new Error(`History request failed with ${response.status}`);
-    const history = await response.json() as HistoryResponse;
+    // `Response.json` returns `any`. Each entry's `result` is re-validated below through
+    // `decodeNormalizedRollResult`, and non-decoding entries are filtered out.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+    const history = (await response.json()) as HistoryResponse;
     const results = (history.rolls ?? [])
       .map((entry) => decodeNormalizedRollResult(entry.result, { allowLegacyResults: true }))
       .filter((decoded) => decoded.success)
@@ -460,15 +517,19 @@ export async function initSdkDemo(): Promise<void> {
       animationSeed: seed,
       table: tableOptions(seed, name, label),
     };
-    const response = fixedValues !== undefined
-      ? draftroll.display(buildFixedDisplayInput(expression, fixedValues, name, label, themeId, metadata), renderer)
-      : draftroll.roll(expression, {
-          rng: new SeededRng(seed),
-          name,
-          themeId,
-          metadata: { ...metadata, actionName: label },
-          renderer,
-        });
+    const response =
+      fixedValues !== undefined
+        ? draftroll.display(
+            buildFixedDisplayInput(expression, fixedValues, name, label, themeId, metadata),
+            renderer,
+          )
+        : draftroll.roll(expression, {
+            rng: new SeededRng(seed),
+            name,
+            themeId,
+            metadata: { ...metadata, actionName: label },
+            renderer,
+          });
     trackPresentation(response);
     return response;
   };
@@ -485,7 +546,6 @@ export async function initSdkDemo(): Promise<void> {
     await response.wait();
   };
 
-
   const launchRoomRoll = async (
     expression: string,
     name: string,
@@ -496,7 +556,9 @@ export async function initSdkDemo(): Promise<void> {
   ) => {
     if (!room) throw new Error('Connect to a room first');
     if (fixedValues !== undefined) {
-      return room.displayRoll(buildFixedDisplayInput(expression, fixedValues, name, label, themeId, metadata));
+      return room.displayRoll(
+        buildFixedDisplayInput(expression, fixedValues, name, label, themeId, metadata),
+      );
     }
     return room.roll({
       mode: 'evaluate',
@@ -514,9 +576,10 @@ export async function initSdkDemo(): Promise<void> {
     themeId: string,
     metadata: Record<string, unknown>,
     fixedValues?: string,
-  ) => room
-    ? launchRoomRoll(expression, name, label, themeId, metadata, fixedValues)
-    : Promise.resolve(launchLocalRoll(expression, name, label, themeId, metadata, fixedValues));
+  ) =>
+    room
+      ? launchRoomRoll(expression, name, label, themeId, metadata, fixedValues)
+      : Promise.resolve(launchLocalRoll(expression, name, label, themeId, metadata, fixedValues));
 
   const updateSelected = async (animate: boolean) => {
     if (!selectedRollId) throw new Error('Select a roll from the dice log first');
@@ -566,9 +629,16 @@ export async function initSdkDemo(): Promise<void> {
       return;
     }
 
-    const ids = dieIds ?? previous.dice
-      .filter((die) => die.generatedBy === 'initial' || die.generatedBy === 'external' || die.generatedBy === undefined)
-      .map((die) => die.id);
+    const ids =
+      dieIds ??
+      previous.dice
+        .filter(
+          (die) =>
+            die.generatedBy === 'initial' ||
+            die.generatedBy === 'external' ||
+            die.generatedBy === undefined,
+        )
+        .map((die) => die.id);
     const response = draftroll.rerollDice(previous, ids, {
       renderer: { animationSeed: crypto.randomUUID() },
     });
@@ -723,7 +793,10 @@ export async function initSdkDemo(): Promise<void> {
           secondFixedResultsInput.value.trim() || undefined,
         );
         const [firstStarted, secondStarted] = await Promise.all([first, second]);
-        await Promise.all([waitForPlaygroundPresentation(firstStarted), waitForPlaygroundPresentation(secondStarted)]);
+        await Promise.all([
+          waitForPlaygroundPresentation(firstStarted),
+          waitForPlaygroundPresentation(secondStarted),
+        ]);
         tableTestStatus.textContent = 'Both rolls shared the same table';
         tableTestStatus.className = 'table-test-status complete';
       } catch (error) {
@@ -741,10 +814,13 @@ export async function initSdkDemo(): Promise<void> {
   refreshLogButton.addEventListener('click', () => void loadHistory().catch(showError));
 
   logElement.addEventListener('click', (event) => {
-    const target = (event.target as HTMLElement).closest<HTMLElement>('[data-action][data-roll-id]');
+    if (!(event.target instanceof Element)) return;
+    const target = event.target.closest<HTMLElement>('[data-action][data-roll-id]');
     if (!target) return;
     const rollId = target.dataset.rollId;
-    const action = target.dataset.action as LogAction | undefined;
+    // `dataset.action` is only correct by convention with the markup that renders the log rows;
+    // ignore a row whose attribute drifted rather than dispatching an unknown action.
+    const action = LOG_ACTIONS.find((candidate) => candidate === target.dataset.action);
     if (!rollId || !action) return;
     const result = logById.get(rollId);
     if (!result) return;
@@ -786,10 +862,14 @@ function requireElement<T extends Element>(selector: string): T {
 
 function changedDice(previous: NormalizedRollResult, next: NormalizedRollResult): string[] {
   const previousById = new Map(previous.dice.map((die) => [die.id, die]));
-  return next.dice.filter((die) => {
-    const old = previousById.get(die.id);
-    return !old || old.result !== die.result || old.type !== die.type || old.themeId !== die.themeId;
-  }).map((die) => die.id);
+  return next.dice
+    .filter((die) => {
+      const old = previousById.get(die.id);
+      return (
+        !old || old.result !== die.result || old.type !== die.type || old.themeId !== die.themeId
+      );
+    })
+    .map((die) => die.id);
 }
 
 class FixedSequenceRng implements DiceRng {
@@ -808,10 +888,14 @@ class FixedSequenceRng implements DiceRng {
   integer(min: number, max: number): number {
     const value = this.values[this.cursor];
     if (value === undefined) {
-      throw new Error(`The formula requested result ${this.cursor + 1}, but no predetermined value was supplied`);
+      throw new Error(
+        `The formula requested result ${this.cursor + 1}, but no predetermined value was supplied`,
+      );
     }
     if (!Number.isSafeInteger(value) || value < min || value > max) {
-      throw new Error(`Predetermined result ${value} is invalid for roll ${this.cursor + 1}; expected ${min}..${max}`);
+      throw new Error(
+        `Predetermined result ${value} is invalid for roll ${this.cursor + 1}; expected ${min}..${max}`,
+      );
     }
     this.cursor += 1;
     return value;
@@ -844,11 +928,7 @@ function describeFormulaDice(expression: string): string[] {
   const pattern = /(\d*)d(%|f|\d+)/gi;
   for (const match of expression.matchAll(pattern)) {
     const count = Math.min(30, Math.max(1, Number.parseInt(match[1] || '1', 10) || 1));
-    const type = match[2].toLowerCase() === 'f'
-      ? 'dF'
-      : match[2] === '%'
-        ? 'd%'
-        : `d${match[2]}`;
+    const type = match[2].toLowerCase() === 'f' ? 'dF' : match[2] === '%' ? 'd%' : `d${match[2]}`;
     for (let index = 0; index < count; index += 1) dice.push(type);
   }
   return dice;

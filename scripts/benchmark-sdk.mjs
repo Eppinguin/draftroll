@@ -14,13 +14,27 @@ const outputPath = outputArg ? resolve(root, outputArg.slice('--output='.length)
 const iterations = readPositiveInteger('--iterations=', 1_000);
 
 try {
-  await writeFile(config, JSON.stringify({
-    compilerOptions: {
-      target: 'ES2022', module: 'CommonJS', moduleResolution: 'Node', rootDir: join(root, 'packages'), outDir: out,
-      strict: true, skipLibCheck: true, esModuleInterop: true, lib: ['ES2023', 'DOM', 'DOM.Iterable'],
-    },
-    include: [join(root, 'packages/**/*.ts')],
-  }, null, 2));
+  await writeFile(
+    config,
+    JSON.stringify(
+      {
+        compilerOptions: {
+          target: 'ES2022',
+          module: 'CommonJS',
+          moduleResolution: 'Node',
+          rootDir: join(root, 'packages'),
+          outDir: out,
+          strict: true,
+          skipLibCheck: true,
+          esModuleInterop: true,
+          lib: ['ES2023', 'DOM', 'DOM.Iterable'],
+        },
+        include: [join(root, 'packages/**/*.ts')],
+      },
+      null,
+      2,
+    ),
+  );
   const compile = runTsc(['-p', config], { cwd: root });
   if (compile.status !== 0) throw new Error(`${compile.stdout}\n${compile.stderr}`);
   await writeFile(join(out, 'package.json'), '{"type":"commonjs"}\n');
@@ -34,7 +48,9 @@ try {
   const validate = sample(iterations, () => engine.validate('4d6kh3 + 2d8e8 + 1d20'));
   const evaluate = sample(iterations, () => compiled.roll());
   const updateBase = engine.roll('20d6');
-  const update = sample(Math.min(iterations, 500), () => engine.reroll(updateBase, updateBase.dice[0].id));
+  const update = sample(Math.min(iterations, 500), () =>
+    engine.reroll(updateBase, updateBase.dice[0].id),
+  );
 
   let themeCalls = 0;
   let assetCalls = 0;
@@ -42,8 +58,13 @@ try {
     async getTheme() {
       themeCalls += 1;
       return {
-        schemaVersion: 1, id: 'benchmark-theme', name: 'Benchmark', version: '1',
-        material: { surfaceTexture: { src: 'benchmark.bin', mimeType: 'application/octet-stream' } },
+        schemaVersion: 1,
+        id: 'benchmark-theme',
+        name: 'Benchmark',
+        version: '1',
+        material: {
+          surfaceTexture: { src: 'benchmark.bin', mimeType: 'application/octet-stream' },
+        },
       };
     },
     async getAsset() {
@@ -101,7 +122,7 @@ function sample(count, operation) {
     count,
     totalMs: round(values.reduce((sum, value) => sum + value, 0)),
     meanMs: round(values.reduce((sum, value) => sum + value, 0) / values.length),
-    p50Ms: round(percentile(values, 0.50)),
+    p50Ms: round(percentile(values, 0.5)),
     p95Ms: round(percentile(values, 0.95)),
     p99Ms: round(percentile(values, 0.99)),
     maxMs: round(values.at(-1) ?? 0),
@@ -109,13 +130,18 @@ function sample(count, operation) {
 }
 
 function percentile(values, percentileValue) {
-  return values[Math.min(values.length - 1, Math.max(0, Math.ceil(values.length * percentileValue) - 1))] ?? 0;
+  return (
+    values[
+      Math.min(values.length - 1, Math.max(0, Math.ceil(values.length * percentileValue) - 1))
+    ] ?? 0
+  );
 }
 
 function readPositiveInteger(prefix, fallback) {
   const argument = process.argv.find((value) => value.startsWith(prefix));
   const parsed = argument ? Number(argument.slice(prefix.length)) : fallback;
-  if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > 100_000) throw new Error(`${prefix} must be an integer from 1 to 100000`);
+  if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > 100_000)
+    throw new Error(`${prefix} must be an integer from 1 to 100000`);
   return parsed;
 }
 

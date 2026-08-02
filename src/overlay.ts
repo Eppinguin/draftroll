@@ -151,7 +151,8 @@ async function handleCommand(message: DraftrollHostMessage, event: MessageEvent)
 
     // `message.type` narrows to `never` here; stringify defensively for the runtime case
     // where a host posts a message type this build does not know about.
-    if (message.type !== 'play') throw new Error(`Unsupported overlay message type: ${String(message.type)}`);
+    if (message.type !== 'play')
+      throw new Error(`Unsupported overlay message type: ${String(message.type)}`);
 
     const outcomeById = new Map<string, DraftrollEffectOutcome>();
     message.result.dice.forEach((die, index) => {
@@ -183,10 +184,25 @@ async function handleCommand(message: DraftrollHostMessage, event: MessageEvent)
 function isHostMessage(value: unknown): value is DraftrollHostMessage {
   if (!value || typeof value !== 'object') return false;
   const candidate = value as Partial<DraftrollHostMessage>;
-  return candidate.source === DRAFTROLL_HOST_SOURCE
-    && candidate.version === DRAFTROLL_OVERLAY_PROTOCOL_VERSION
-    && (candidate.type === 'warmup' || candidate.type === 'install-theme' || candidate.type === 'unload-theme' || candidate.type === 'configure' || candidate.type === 'play' || candidate.type === 'dismiss' || candidate.type === 'clear' || candidate.type === 'pause' || candidate.type === 'resume' || candidate.type === 'configure-camera' || candidate.type === 'reset-camera' || candidate.type === 'configure-interactions' || candidate.type === 'screenshot' || candidate.type === 'preview')
-    && typeof candidate.requestId === 'string';
+  return (
+    candidate.source === DRAFTROLL_HOST_SOURCE &&
+    candidate.version === DRAFTROLL_OVERLAY_PROTOCOL_VERSION &&
+    (candidate.type === 'warmup' ||
+      candidate.type === 'install-theme' ||
+      candidate.type === 'unload-theme' ||
+      candidate.type === 'configure' ||
+      candidate.type === 'play' ||
+      candidate.type === 'dismiss' ||
+      candidate.type === 'clear' ||
+      candidate.type === 'pause' ||
+      candidate.type === 'resume' ||
+      candidate.type === 'configure-camera' ||
+      candidate.type === 'reset-camera' ||
+      candidate.type === 'configure-interactions' ||
+      candidate.type === 'screenshot' ||
+      candidate.type === 'preview') &&
+    typeof candidate.requestId === 'string'
+  );
 }
 
 function complete(requestId: string): Extract<DraftrollOverlayMessage, { type: 'complete' }> {
@@ -202,8 +218,11 @@ function complete(requestId: string): Extract<DraftrollOverlayMessage, { type: '
 function respond(event: MessageEvent, message: DraftrollOverlayMessage): void {
   const target = event.source;
   // `MessageEventSource` also covers MessagePort and ServiceWorker, whose postMessage
-  // signatures differ; only a Window accepts a target origin.
-  if (target === null || !(target instanceof Window)) return;
+  // signatures differ; only a Window accepts a target origin. `instanceof Window` cannot
+  // be used here: a cross-origin parent arrives as a WindowProxy from another realm, so
+  // the check is false for exactly the embedded case this overlay exists to serve.
+  // Windows are distinguishable from ports/workers by carrying a `window` self-reference.
+  if (!target || !('window' in target) || target.window !== target) return;
   target.postMessage(message, event.origin === 'null' ? '*' : event.origin);
 }
 

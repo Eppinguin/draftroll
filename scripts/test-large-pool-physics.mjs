@@ -25,7 +25,7 @@ assert.match(main, /const largePool = count >= 12/);
 assert.match(main, /two-handed pour/);
 assert.match(main, /releaseDelay: number/);
 assert.match(main, /waveInterval/);
-assert.match(main, /spawn\.releaseDelay \+ releaseWindow/);
+assert.match(main, /spawn\.releaseDelay \+\s*releaseWindow/);
 assert.match(main, /activationDelays\?: Float32Array/);
 assert.match(main, /die\.group\.visible = time \+ plan\.step \* 0\.5 >= activationDelay/);
 assert.match(main, /setPhysicalDiceVisible\(false\)/);
@@ -59,19 +59,25 @@ for (const file of [
   assert.equal(parsed.version, '0.1.0', `${file} version changed`);
 }
 
-console.log(JSON.stringify({
-  ok: true,
-  tested: [
-    'single committed visible trajectory',
-    'hidden provisional planning transforms',
-    'planning failure visibility restoration',
-    'no orphaned completion on planning failure',
-    'large-pool staged pour release',
-    'per-die activation visibility',
-    '120 Hz collision planning and recording',
-    'inflated visual-safe colliders',
-    'high-iteration dice contact solving',
-    'bounded trajectory memory',
-    'unchanged versions and deployment configuration',
-  ],
-}, null, 2));
+console.log(
+  JSON.stringify(
+    {
+      ok: true,
+      tested: [
+        'single committed visible trajectory',
+        'hidden provisional planning transforms',
+        'planning failure visibility restoration',
+        'no orphaned completion on planning failure',
+        'large-pool staged pour release',
+        'per-die activation visibility',
+        '120 Hz collision planning and recording',
+        'inflated visual-safe colliders',
+        'high-iteration dice contact solving',
+        'bounded trajectory memory',
+        'unchanged versions and deployment configuration',
+      ],
+    },
+    null,
+    2,
+  ),
+);

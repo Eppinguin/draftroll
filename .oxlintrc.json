@@ -30,11 +30,17 @@
     "eslint/no-eval": "error",
     "eslint/no-implied-eval": "error",
     "eslint/no-new-func": "error",
-    "eslint/no-warning-comments": ["error", { "terms": ["todo", "fixme", "xxx"], "location": "start" }],
-    "eslint/no-underscore-dangle": ["error", {
-      "allow": ["__draftrollTest", "_defaultValue"],
-      "allowFunctionParams": true
-    }],
+    "eslint/no-warning-comments": [
+      "error",
+      { "terms": ["todo", "fixme", "xxx"], "location": "start" }
+    ],
+    "eslint/no-underscore-dangle": [
+      "error",
+      {
+        "allow": ["__draftrollTest", "_defaultValue"],
+        "allowFunctionParams": true
+      }
+    ],
     "eslint/no-await-in-loop": "off",
     "typescript/consistent-return": "off",
     "promise/always-return": "off",
@@ -53,6 +59,7 @@
   "ignorePatterns": [
     "packages/*/dist/**",
     "apps/worker/worker-configuration.d.ts",
+    "**/worker-configuration.d.ts",
     "benchmark-results/**",
     "dist/**",
     "dist-browser/**",

@@ -83,7 +83,9 @@ class MockWebSocket extends EventTarget {
         participantId: parsed.searchParams.get('participantId'),
         sessionId: parsed.searchParams.get('sessionId'),
         name: parsed.searchParams.get('name'),
-        roles: [], permissions: ['roll:create', 'roll:update-own', 'roll:reveal-own'], connectedAt: now,
+        roles: [],
+        permissions: ['roll:create', 'roll:update-own', 'roll:reveal-own'],
+        connectedAt: now,
       };
       if (MockWebSocket.requireToken) {
         this.serverSend({
@@ -100,15 +102,27 @@ class MockWebSocket extends EventTarget {
   finishSession() {
     const parsed = new URL(this.url);
     this.serverSend({
-      type: 'session_ready', protocolVersion: 2, roomId: parsed.searchParams.get('roomId'),
-      participant: this.participant, latestEventSequence: 0, latestRollSequence: 0,
+      type: 'session_ready',
+      protocolVersion: 2,
+      roomId: parsed.searchParams.get('roomId'),
+      participant: this.participant,
+      latestEventSequence: 0,
+      latestRollSequence: 0,
     });
     this.serverSend({
-      type: 'room_state', protocolVersion: 2, roomId: parsed.searchParams.get('roomId'),
-      sequence: 0, latestRollSequence: 0, latestEventSequence: 0,
-      eventBufferStartSequence: 0, missedEventsTruncated: false,
-      policy: this.policy, policyRevision: this.policyRevision,
-      participants: [this.participant], recentEvents: [], recentRolls: [],
+      type: 'room_state',
+      protocolVersion: 2,
+      roomId: parsed.searchParams.get('roomId'),
+      sequence: 0,
+      latestRollSequence: 0,
+      latestEventSequence: 0,
+      eventBufferStartSequence: 0,
+      missedEventsTruncated: false,
+      policy: this.policy,
+      policyRevision: this.policyRevision,
+      participants: [this.participant],
+      recentEvents: [],
+      recentRolls: [],
     });
   }
 
@@ -128,26 +142,38 @@ class MockWebSocket extends EventTarget {
       return;
     }
     if (event.type === 'clock_sync_ping') {
-      this.serverSend({ ...event, type: 'clock_sync_pong', protocolVersion: 2, roomId: new URL(this.url).searchParams.get('roomId'), serverTimeMs: Date.now() });
+      this.serverSend({
+        ...event,
+        type: 'clock_sync_pong',
+        protocolVersion: 2,
+        roomId: new URL(this.url).searchParams.get('roomId'),
+        serverTimeMs: Date.now(),
+      });
       return;
     }
     if (event.type === 'roll_request' || event.type === 'display_roll') {
       this.revision = 0;
-      this.serverSend(makeRoomEvent({
-        requestId: event.requestId,
-        clientRollId: event.clientRollId,
-        eventSequence: ++globalSequence,
-        rollId: 'roll-1',
-        revision: 0,
-        visibility: event.visibility ?? { type: 'public' },
-      }));
+      this.serverSend(
+        makeRoomEvent({
+          requestId: event.requestId,
+          clientRollId: event.clientRollId,
+          eventSequence: ++globalSequence,
+          rollId: 'roll-1',
+          revision: 0,
+          visibility: event.visibility ?? { type: 'public' },
+        }),
+      );
       return;
     }
     if (event.type === 'update_roll') {
       if (event.expectedRevision !== this.revision) {
         this.serverSend({
-          type: 'roll_error', requestId: event.requestId, rollId: event.rollId,
-          code: 'revision_conflict', message: 'stale revision', currentRevision: this.revision,
+          type: 'roll_error',
+          requestId: event.requestId,
+          rollId: event.rollId,
+          code: 'revision_conflict',
+          message: 'stale revision',
+          currentRevision: this.revision,
         });
         return;
       }
@@ -155,25 +181,48 @@ class MockWebSocket extends EventTarget {
       const result = makeResult(this.revision);
       result.annotation = event.update.annotation ?? result.annotation;
       this.serverSend({
-        ...makeRoomEvent({ requestId: event.requestId, eventSequence: ++globalSequence, rollId: event.rollId, revision: this.revision }),
-        type: 'roll_updated', result, summary: summary(result), animate: event.animate ?? false,
+        ...makeRoomEvent({
+          requestId: event.requestId,
+          eventSequence: ++globalSequence,
+          rollId: event.rollId,
+          revision: this.revision,
+        }),
+        type: 'roll_updated',
+        result,
+        summary: summary(result),
+        animate: event.animate ?? false,
       });
       return;
     }
     if (event.type === 'set_roll_visibility') {
       if (event.expectedRevision !== this.revision) {
         this.serverSend({
-          type: 'roll_error', requestId: event.requestId, rollId: event.rollId,
-          code: 'revision_conflict', message: 'stale revision', currentRevision: this.revision,
+          type: 'roll_error',
+          requestId: event.requestId,
+          rollId: event.rollId,
+          code: 'revision_conflict',
+          message: 'stale revision',
+          currentRevision: this.revision,
         });
         return;
       }
       this.revision += 1;
       const result = makeResult(this.revision);
       this.serverSend({
-        ...makeRoomEvent({ requestId: event.requestId, eventSequence: ++globalSequence, rollId: event.rollId, revision: this.revision, visibility: event.visibility }),
-        type: 'roll_visibility_updated', result, summary: summary(result), previousVisibility: { type: 'roller' },
-        animationSeed: undefined, serverStartTimeMs: undefined, animationDurationMs: undefined,
+        ...makeRoomEvent({
+          requestId: event.requestId,
+          eventSequence: ++globalSequence,
+          rollId: event.rollId,
+          revision: this.revision,
+          visibility: event.visibility,
+        }),
+        type: 'roll_visibility_updated',
+        result,
+        summary: summary(result),
+        previousVisibility: { type: 'roller' },
+        animationSeed: undefined,
+        serverStartTimeMs: undefined,
+        animationDurationMs: undefined,
       });
     }
     if (event.type === 'revoke_room_token') {
@@ -194,8 +243,11 @@ class MockWebSocket extends EventTarget {
     if (event.type === 'set_room_policy') {
       if (event.expectedRevision !== this.policyRevision) {
         this.serverSend({
-          type: 'roll_error', requestId: event.requestId,
-          code: 'policy_revision_conflict', message: 'stale policy revision', currentRevision: this.policyRevision,
+          type: 'roll_error',
+          requestId: event.requestId,
+          code: 'policy_revision_conflict',
+          message: 'stale policy revision',
+          currentRevision: this.policyRevision,
         });
         return;
       }
@@ -205,7 +257,11 @@ class MockWebSocket extends EventTarget {
         ...this.policy,
         preset: patch.preset ?? (Object.keys(patch).length > 0 ? 'custom' : this.policy.preset),
         enabled: patch.enabled ?? this.policy.enabled,
-        ...(patch.shutdownReason === null ? { shutdownReason: undefined } : patch.shutdownReason ? { shutdownReason: patch.shutdownReason } : {}),
+        ...(patch.shutdownReason === null
+          ? { shutdownReason: undefined }
+          : patch.shutdownReason
+            ? { shutdownReason: patch.shutdownReason }
+            : {}),
         authorization: { ...this.policy.authorization, ...patch.authorization },
         limits: { ...this.policy.limits, ...patch.limits },
         rateLimits: { ...this.policy.rateLimits, ...patch.rateLimits },
@@ -213,9 +269,15 @@ class MockWebSocket extends EventTarget {
       };
       this.policyRevision += 1;
       this.serverSend({
-        type: 'room_policy_updated', protocolVersion: 2, roomId: new URL(this.url).searchParams.get('roomId'),
-        eventSequence: ++globalSequence, requestId: event.requestId, revision: this.policyRevision,
-        actor: actor('aria', 'Aria'), policy: this.policy, previousPolicy,
+        type: 'room_policy_updated',
+        protocolVersion: 2,
+        roomId: new URL(this.url).searchParams.get('roomId'),
+        eventSequence: ++globalSequence,
+        requestId: event.requestId,
+        revision: this.policyRevision,
+        actor: actor('aria', 'Aria'),
+        policy: this.policy,
+        previousPolicy,
       });
     }
   }
@@ -231,27 +293,57 @@ class MockWebSocket extends EventTarget {
     this.dispatchEvent(new MessageEvent('message', { data: JSON.stringify(data) }));
   }
 
-  addEventListener(...args) { return super.addEventListener(...args); }
-  removeEventListener(...args) { return super.removeEventListener(...args); }
+  addEventListener(...args) {
+    return super.addEventListener(...args);
+  }
+  removeEventListener(...args) {
+    return super.removeEventListener(...args);
+  }
 }
 
-function makeRoomEvent({ requestId, clientRollId, eventSequence, rollId, revision, visibility = { type: 'roller' } }) {
+function makeRoomEvent({
+  requestId,
+  clientRollId,
+  eventSequence,
+  rollId,
+  revision,
+  visibility = { type: 'roller' },
+}) {
   const result = makeResult(revision);
   result.rollId = rollId;
   return {
-    type: 'roll_start', protocolVersion: 2, roomId: 'table', requestId, clientRollId,
-    eventSequence, rollId, sequence: 1, actor: actor('aria', 'Aria'), visibility,
-    hidden: false, result, summary: summary(result), animationSeed: 'seed',
-    serverStartTimeMs: Date.now() + 10, animationDurationMs: 100,
+    type: 'roll_start',
+    protocolVersion: 2,
+    roomId: 'table',
+    requestId,
+    clientRollId,
+    eventSequence,
+    rollId,
+    sequence: 1,
+    actor: actor('aria', 'Aria'),
+    visibility,
+    hidden: false,
+    result,
+    summary: summary(result),
+    animationSeed: 'seed',
+    serverStartTimeMs: Date.now() + 10,
+    animationDurationMs: 100,
   };
 }
 
 function makeResult(revision) {
   return {
     schemaVersion: 1,
-    rollId: 'roll-1', sequence: 1, revision, authority: 'server', expression: '1d20+5', total: 17,
+    rollId: 'roll-1',
+    sequence: 1,
+    revision,
+    authority: 'server',
+    expression: '1d20+5',
+    total: 17,
     dice: [{ id: 'die_1', type: 'd20', sides: 20, result: 12, kept: true, generatedBy: 'initial' }],
-    operations: [], createdAt: now, updatedAt: revision ? now : undefined,
+    operations: [],
+    createdAt: now,
+    updatedAt: revision ? now : undefined,
   };
 }
 
@@ -261,32 +353,46 @@ function actor(participantId, name) {
 
 function summary(result) {
   return {
-    rollId: result.rollId, sequence: result.sequence, revision: result.revision,
-    actor: actor('aria', 'Aria'), createdAt: result.createdAt, updatedAt: result.updatedAt,
+    rollId: result.rollId,
+    sequence: result.sequence,
+    revision: result.revision,
+    actor: actor('aria', 'Aria'),
+    createdAt: result.createdAt,
+    updatedAt: result.updatedAt,
   };
 }
 
 function once(room, eventName) {
   return new Promise((settle) => {
-    const off = room.on(eventName, (event) => { off(); settle(event); });
+    const off = room.on(eventName, (event) => {
+      off();
+      settle(event);
+    });
   });
 }
 
 try {
-  await writeFile(configPath, JSON.stringify({
-    compilerOptions: {
-      target: 'ES2022',
-      module: 'CommonJS',
-      moduleResolution: 'Node',
-      rootDir: join(projectRoot, 'packages'),
-      outDir,
-      strict: true,
-      skipLibCheck: true,
-      esModuleInterop: true,
-      lib: ['ES2023', 'DOM', 'DOM.Iterable'],
-    },
-    include: [join(projectRoot, 'packages/**/*.ts')],
-  }, null, 2));
+  await writeFile(
+    configPath,
+    JSON.stringify(
+      {
+        compilerOptions: {
+          target: 'ES2022',
+          module: 'CommonJS',
+          moduleResolution: 'Node',
+          rootDir: join(projectRoot, 'packages'),
+          outDir,
+          strict: true,
+          skipLibCheck: true,
+          esModuleInterop: true,
+          lib: ['ES2023', 'DOM', 'DOM.Iterable'],
+        },
+        include: [join(projectRoot, 'packages/**/*.ts')],
+      },
+      null,
+      2,
+    ),
+  );
 
   const compile = runTsc(['-p', configPath], { cwd: projectRoot });
   if (compile.status !== 0) {
@@ -309,17 +415,31 @@ try {
   } = serverModule;
 
   const oldTokenKey = { id: '2026-01', secret: 'old-room-test-secret-at-least-16-characters' };
-  const activeTokenKey = { id: '2026-07', secret: 'active-room-test-secret-at-least-16-characters' };
-  const token = await createRoomCapabilityToken({
-    roomId: 'table', participantId: 'gm', name: 'Game Master', roles: ['gm'],
-    permissions: createGameMasterPermissions(),
-  }, activeTokenKey, {
-    expiresInSeconds: 300,
-    issuer: 'draftroll-test',
-    audience: ['draftroll-room', 'draftroll-admin'],
-    tokenId: 'token-gm-1',
-  });
-  assert.equal(token.split('.').length, 3, 'new tokens use a versioned header.payload.signature envelope');
+  const activeTokenKey = {
+    id: '2026-07',
+    secret: 'active-room-test-secret-at-least-16-characters',
+  };
+  const token = await createRoomCapabilityToken(
+    {
+      roomId: 'table',
+      participantId: 'gm',
+      name: 'Game Master',
+      roles: ['gm'],
+      permissions: createGameMasterPermissions(),
+    },
+    activeTokenKey,
+    {
+      expiresInSeconds: 300,
+      issuer: 'draftroll-test',
+      audience: ['draftroll-room', 'draftroll-admin'],
+      tokenId: 'token-gm-1',
+    },
+  );
+  assert.equal(
+    token.split('.').length,
+    3,
+    'new tokens use a versioned header.payload.signature envelope',
+  );
   const verifiedToken = await verifyRoomCapabilityToken(token, [oldTokenKey, activeTokenKey], {
     roomId: 'table',
     issuer: 'draftroll-test',
@@ -331,17 +451,26 @@ try {
   assert.equal(verifiedToken.jti, 'token-gm-1');
   assert.equal(verifiedToken.iss, 'draftroll-test');
   assert.ok(verifiedToken.permissions.includes('roll:view-hidden'));
-  assert.equal(await verifyRoomCapabilityToken(token, [oldTokenKey, activeTokenKey], { roomId: 'other' }), null);
+  assert.equal(
+    await verifyRoomCapabilityToken(token, [oldTokenKey, activeTokenKey], { roomId: 'other' }),
+    null,
+  );
 
-  const wrongAudience = await verifyRoomCapabilityTokenDetailed(token, [oldTokenKey, activeTokenKey], {
-    roomId: 'table',
-    issuer: 'draftroll-test',
-    audience: 'different-service',
-  });
+  const wrongAudience = await verifyRoomCapabilityTokenDetailed(
+    token,
+    [oldTokenKey, activeTokenKey],
+    {
+      roomId: 'table',
+      issuer: 'draftroll-test',
+      audience: 'different-service',
+    },
+  );
   assert.equal(wrongAudience.valid, false);
   assert.equal(wrongAudience.code, 'token_audience_mismatch');
 
-  const unknownKey = await verifyRoomCapabilityTokenDetailed(token, [oldTokenKey], { roomId: 'table' });
+  const unknownKey = await verifyRoomCapabilityTokenDetailed(token, [oldTokenKey], {
+    roomId: 'table',
+  });
   assert.equal(unknownKey.valid, false);
   assert.equal(unknownKey.code, 'unknown_key_id');
 
@@ -352,12 +481,23 @@ try {
   assert.equal(revoked.valid, false);
   assert.equal(revoked.code, 'token_revoked');
 
-  const rotatedToken = await createRoomCapabilityToken({
-    roomId: 'table', participantId: 'player', permissions: ['roll:create'],
-  }, oldTokenKey, { expiresInSeconds: 300, issuer: 'draftroll-test', audience: 'draftroll-room' });
-  assert.ok(await verifyRoomCapabilityToken(rotatedToken, [oldTokenKey, activeTokenKey], {
-    roomId: 'table', issuer: 'draftroll-test', audience: 'draftroll-room',
-  }), 'retired verification keys remain valid during rotation');
+  const rotatedToken = await createRoomCapabilityToken(
+    {
+      roomId: 'table',
+      participantId: 'player',
+      permissions: ['roll:create'],
+    },
+    oldTokenKey,
+    { expiresInSeconds: 300, issuer: 'draftroll-test', audience: 'draftroll-room' },
+  );
+  assert.ok(
+    await verifyRoomCapabilityToken(rotatedToken, [oldTokenKey, activeTokenKey], {
+      roomId: 'table',
+      issuer: 'draftroll-test',
+      audience: 'draftroll-room',
+    }),
+    'retired verification keys remain valid during rotation',
+  );
 
   const browserToken = 'signed-browser-token-value';
   MockWebSocket.requireToken = true;
@@ -372,9 +512,21 @@ try {
     WebSocketImpl: MockWebSocket,
   });
   const tokenSocket = MockWebSocket.instances.at(-1);
-  assert.equal(new URL(tokenSocket.url).searchParams.has('token'), false, 'capability tokens must not appear in WebSocket URLs');
-  assert.equal(new URL(tokenSocket.url).searchParams.get('authMode'), 'token', 'a non-secret auth-mode hint forces token authentication even when anonymous rooms are enabled');
-  assert.equal(tokenSocket.url.includes(browserToken), false, 'capability tokens must not leak into WebSocket URLs');
+  assert.equal(
+    new URL(tokenSocket.url).searchParams.has('token'),
+    false,
+    'capability tokens must not appear in WebSocket URLs',
+  );
+  assert.equal(
+    new URL(tokenSocket.url).searchParams.get('authMode'),
+    'token',
+    'a non-secret auth-mode hint forces token authentication even when anonymous rooms are enabled',
+  );
+  assert.equal(
+    tokenSocket.url.includes(browserToken),
+    false,
+    'capability tokens must not leak into WebSocket URLs',
+  );
   const tokenMessages = tokenSocket.sent.map((value) => JSON.parse(value));
   assert.deepEqual(
     tokenMessages.find((event) => event.type === 'authenticate_room_token'),
@@ -382,8 +534,14 @@ try {
     'capability token is submitted only after the encrypted WebSocket opens',
   );
   const authorizedUrl = tokenRoom.authorizeHttpUrl('https://draftroll.test/rooms/secure/history');
-  assert.equal(authorizedUrl.toString().includes(browserToken), false, 'capability tokens must not appear in HTTP URLs');
-  const authorizedRequest = tokenRoom.authorizeHttpRequest('https://draftroll.test/rooms/secure/history');
+  assert.equal(
+    authorizedUrl.toString().includes(browserToken),
+    false,
+    'capability tokens must not appear in HTTP URLs',
+  );
+  const authorizedRequest = tokenRoom.authorizeHttpRequest(
+    'https://draftroll.test/rooms/secure/history',
+  );
   assert.equal(authorizedRequest.headers.get('Authorization'), `Bearer ${browserToken}`);
   assert.equal(authorizedRequest.url.includes(browserToken), false);
   tokenRoom.close();
@@ -431,18 +589,23 @@ try {
   assert.equal(started.hidden, false);
   assert.equal(room.getLastEventSequence(), 3);
 
-  const updated = await room.updateRoll(started.rollId, { annotation: 'GM correction' }, {
-    expectedRevision: 0,
-    animate: false,
-  });
+  const updated = await room.updateRoll(
+    started.rollId,
+    { annotation: 'GM correction' },
+    {
+      expectedRevision: 0,
+      animate: false,
+    },
+  );
   assert.equal(updated.result.revision, 1);
   assert.equal(updated.result.annotation, 'GM correction');
 
   await assert.rejects(
     room.updateRoll(started.rollId, {}, { expectedRevision: 0 }),
-    (error) => error instanceof DiceRoomRequestError
-      && error.code === 'revision_conflict'
-      && error.currentRevision === 1,
+    (error) =>
+      error instanceof DiceRoomRequestError &&
+      error.code === 'revision_conflict' &&
+      error.currentRevision === 1,
   );
 
   const revealed = await room.revealRoll(started.rollId, { expectedRevision: 1 });
@@ -451,13 +614,22 @@ try {
 
   const hiddenEventPromise = once(room, 'rollStart');
   MockWebSocket.instances.at(-1).serverSend({
-    ...makeRoomEvent({ requestId: undefined, eventSequence: ++globalSequence, rollId: 'secret-other', revision: 0 }),
+    ...makeRoomEvent({
+      requestId: undefined,
+      eventSequence: ++globalSequence,
+      rollId: 'secret-other',
+      revision: 0,
+    }),
     hidden: true,
     visibility: { type: 'hidden' },
     result: null,
     actor: actor('other', 'Other'),
     summary: {
-      rollId: 'secret-other', sequence: 2, revision: 0, actor: actor('other', 'Other'), createdAt: now,
+      rollId: 'secret-other',
+      sequence: 2,
+      revision: 0,
+      actor: actor('other', 'Other'),
+      createdAt: now,
     },
     animationSeed: undefined,
     serverStartTimeMs: undefined,
@@ -483,7 +655,11 @@ try {
   assert.equal(session.policy.rateLimits.rollsPerMinutePerRoom, 42);
 
   const sdkRevocation = await session.revokeToken(
-    { type: 'participant', participantId: 'removed-player', issuedAtOrBefore: Math.floor(Date.now() / 1000) },
+    {
+      type: 'participant',
+      participantId: 'removed-player',
+      issuedAtOrBefore: Math.floor(Date.now() / 1000),
+    },
     { reason: 'Removed from table' },
   );
   assert.equal(sdkRevocation.target.type, 'participant');
@@ -502,34 +678,43 @@ try {
 
   const sent = MockWebSocket.instances.at(-1).sent.map((value) => JSON.parse(value));
   const updateRequest = sent.find((event) => event.type === 'update_roll');
-  assert.equal(updateRequest.expectedRevision, 0, 'room handles apply optimistic revision checks by default');
+  assert.equal(
+    updateRequest.expectedRevision,
+    0,
+    'room handles apply optimistic revision checks by default',
+  );
   const visibilityRequest = sent.find((event) => event.type === 'set_roll_visibility');
   assert.equal(visibilityRequest.expectedRevision, 1);
 
   room.close();
   session.close();
 
-  console.log(JSON.stringify({
-    ok: true,
-    tested: [
-      'signed room capability tokens',
-      'encrypted WebSocket token handshake without URL leakage',
-      'HTTP bearer-token authorization without URL leakage',
-      'issuer and audience validation',
-      'key IDs and verification-key rotation',
-      'exact and participant token revocation',
-      'participant identity',
-      'correlated request promises',
-      'client roll IDs',
-      'hidden projections',
-      'revision conflicts',
-      'visibility revisions',
-      'versioned room policy state and updates',
-      'policy revision correlation',
-      'stable high-level room handles',
-    ],
-  }, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        ok: true,
+        tested: [
+          'signed room capability tokens',
+          'encrypted WebSocket token handshake without URL leakage',
+          'HTTP bearer-token authorization without URL leakage',
+          'issuer and audience validation',
+          'key IDs and verification-key rotation',
+          'exact and participant token revocation',
+          'participant identity',
+          'correlated request promises',
+          'client roll IDs',
+          'hidden projections',
+          'revision conflicts',
+          'visibility revisions',
+          'versioned room policy state and updates',
+          'policy revision correlation',
+          'stable high-level room handles',
+        ],
+      },
+      null,
+      2,
+    ),
+  );
 } finally {
   await rm(tempRoot, { recursive: true, force: true });
 }
-

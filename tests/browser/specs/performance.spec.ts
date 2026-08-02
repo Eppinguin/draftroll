@@ -1,14 +1,16 @@
 import { expect, test } from '@playwright/test';
 
-test('idle-zero render loop and battery profile keep the overlay renderer quiescent', async ({ page }) => {
+// `window.draftrollDice` is typed by tests/browser/support/bridge.d.ts, which this project's
+// tsconfig includes, so no per-spec import is needed to reach the overlay bridge.
+
+test('idle-zero render loop and battery profile keep the overlay renderer quiescent', async ({
+  page,
+}) => {
   await page.goto('http://127.0.0.1:4174/overlay.html');
-  await page.waitForFunction(() => Boolean((window as unknown as { draftrollDice?: unknown }).draftrollDice));
+  await page.waitForFunction(() => Boolean(window.draftrollDice));
 
   const initial = await page.evaluate(() => {
-    const bridge = (window as unknown as { draftrollDice: {
-      configure(options: object): void;
-      getPerformanceSnapshot(): { renderLoopActive: boolean; physicalDice: number; fallbackVisuals: number };
-    } }).draftrollDice;
+    const bridge = window.draftrollDice;
     bridge.configure({ performanceProfile: 'battery' });
     return bridge.getPerformanceSnapshot();
   });
@@ -17,66 +19,44 @@ test('idle-zero render loop and battery profile keep the overlay renderer quiesc
   expect(initial.fallbackVisuals).toBe(0);
 
   await page.waitForTimeout(500);
-  const idle = await page.evaluate(() => (window as unknown as { draftrollDice: {
-    getPerformanceSnapshot(): { profile: string; renderLoopActive: boolean; targetFramesPerSecond: number; pixelRatio: number };
-  } }).draftrollDice.getPerformanceSnapshot());
+  const idle = await page.evaluate(() => window.draftrollDice.getPerformanceSnapshot());
   expect(idle.profile).toBe('battery');
   expect(idle.renderLoopActive).toBe(false);
   expect(idle.targetFramesPerSecond).toBe(30);
   expect(idle.pixelRatio).toBeLessThanOrEqual(1);
 });
 
-test('concurrent SDK presentations are serialized instead of failing with Renderer is busy', async ({ page }) => {
+test('concurrent SDK presentations are serialized instead of failing with Renderer is busy', async ({
+  page,
+}) => {
   await page.goto('http://127.0.0.1:4174/overlay.html');
-  await page.waitForFunction(() => Boolean((window as unknown as { draftrollDice?: unknown }).draftrollDice));
+  await page.waitForFunction(() => Boolean(window.draftrollDice));
 
   const results = await page.evaluate(async () => {
-    const bridge = (window as unknown as { draftrollDice: {
-      roll(request: object): Promise<{ total: number }>;
-      getPerformanceSnapshot(): { queuedPresentations: number };
-    } }).draftrollDice;
-    const calls = [1, 2, 3, 4, 5].map((value) => bridge.roll({
-      results: [value],
-      kinds: ['d6'],
-      settleImmediately: true,
-      seed: `queue-${value}`,
-    }));
+    const bridge = window.draftrollDice;
+    const calls = [1, 2, 3, 4, 5].map((value) =>
+      bridge.roll({
+        results: [value],
+        kinds: ['d6'],
+        settleImmediately: true,
+        seed: `queue-${value}`,
+      }),
+    );
     return Promise.all(calls);
   });
   expect(results).toHaveLength(5);
   expect(results.every((result) => Number.isFinite(result.total))).toBe(true);
 });
 
-test('30-dice benchmark exposes bounded frame and planning diagnostics', async ({ page }, testInfo) => {
+test('30-dice benchmark exposes bounded frame and planning diagnostics', async ({
+  page,
+}, testInfo) => {
   test.setTimeout(35_000);
   await page.goto('http://127.0.0.1:4174/overlay.html');
-  await page.waitForFunction(() => Boolean((window as unknown as { draftrollDice?: unknown }).draftrollDice));
+  await page.waitForFunction(() => Boolean(window.draftrollDice));
 
   const benchmark = await page.evaluate(async () => {
-    const bridge = (window as unknown as { draftrollDice: {
-      configure(options: object): void;
-      roll(request: object): Promise<{ total: number }>;
-      getPerformanceSnapshot(): {
-        renderedFrames: number;
-        averageFrameIntervalMs: number;
-        averageRenderCpuMs: number;
-        maximumFrameIntervalMs: number;
-        usedJsHeapSize: number | null;
-        jsHeapSizeLimit: number | null;
-        dynamicResolutionScale: number;
-        targetFramesPerSecond: number;
-        targeting: null | {
-          candidateAttempts: number;
-          candidateSearchMs: number;
-          naturalTrajectory: boolean;
-          naturalMatches: number;
-          assistedDiceCount: number;
-          maximumAssistAngleRadians: number;
-          minimumFinalAlignment: number;
-          targetSuccess: boolean;
-        };
-      };
-    } }).draftrollDice;
+    const bridge = window.draftrollDice;
     bridge.configure({ performanceProfile: 'auto', adaptiveQuality: true });
     const startedAt = performance.now();
     const completion = await bridge.roll({
@@ -102,39 +82,51 @@ test('30-dice benchmark exposes bounded frame and planning diagnostics', async (
   expect(benchmark.targetFramesPerSecond).toBe(30);
   expect(benchmark.dynamicResolutionScale).toBeGreaterThanOrEqual(0.7);
   if (benchmark.usedJsHeapSize !== null) expect(benchmark.usedJsHeapSize).toBeGreaterThan(0);
-  if (benchmark.jsHeapSizeLimit !== null) expect(benchmark.jsHeapSizeLimit).toBeGreaterThan(benchmark.usedJsHeapSize ?? 0);
+  if (benchmark.jsHeapSizeLimit !== null)
+    expect(benchmark.jsHeapSizeLimit).toBeGreaterThan(benchmark.usedJsHeapSize ?? 0);
   expect(benchmark.targeting).not.toBeNull();
   expect(benchmark.targeting?.targetSuccess).toBe(true);
   expect(benchmark.targeting?.candidateAttempts).toBeGreaterThan(0);
   expect(benchmark.targeting?.minimumFinalAlignment).toBeGreaterThanOrEqual(0.99);
 });
 
-
-test('mixed physical and fallback benchmark completes in one synchronized presentation', async ({ page }, testInfo) => {
+test('mixed physical and fallback benchmark completes in one synchronized presentation', async ({
+  page,
+}, testInfo) => {
   test.setTimeout(35_000);
   await page.goto('http://127.0.0.1:4174/overlay.html');
-  await page.waitForFunction(() => Boolean((window as unknown as { draftrollDice?: unknown }).draftrollDice));
+  await page.waitForFunction(() => Boolean(window.draftrollDice));
 
   const benchmark = await page.evaluate(async () => {
-    const bridge = (window as unknown as { draftrollDice: {
-      roll(request: object): Promise<{ total: number; results: Array<number | string> }>;
-      getPerformanceSnapshot(): { physicalDice: number; fallbackVisuals: number; averageFrameIntervalMs: number; usedJsHeapSize: number | null };
-    } }).draftrollDice;
+    const bridge = window.draftrollDice;
     const startedAt = performance.now();
     const completion = await bridge.roll({
       results: [6],
       kinds: ['d6'],
-      fallbacks: [{
-        id: 'weather-sun', type: 'weather', kind: 'token', result: 'sun', numericValue: 1,
-        title: 'Weather', label: 'Sun', theme: 'sunset', outcome: 'positive',
-      }],
+      fallbacks: [
+        {
+          id: 'weather-sun',
+          type: 'weather',
+          kind: 'token',
+          result: 'sun',
+          numericValue: 1,
+          title: 'Weather',
+          label: 'Sun',
+          theme: 'sunset',
+          outcome: 'positive',
+        },
+      ],
       visualOrder: [
         { kind: 'physical', index: 0, dieId: 'physical-d6' },
         { kind: 'fallback', index: 0, dieId: 'weather-sun' },
       ],
       seed: 'mixed-physical-fallback-performance',
     });
-    return { wallTimeMs: performance.now() - startedAt, completion, ...bridge.getPerformanceSnapshot() };
+    return {
+      wallTimeMs: performance.now() - startedAt,
+      completion,
+      ...bridge.getPerformanceSnapshot(),
+    };
   });
 
   await testInfo.attach('mixed-renderer-performance.json', {
@@ -148,24 +140,16 @@ test('mixed physical and fallback benchmark completes in one synchronized presen
   expect(Number.isFinite(benchmark.averageFrameIntervalMs)).toBe(true);
 });
 
-test('20d20 predetermined pool uses one continuous staged trajectory', async ({ page }, testInfo) => {
+test('20d20 predetermined pool uses one continuous staged trajectory', async ({
+  page,
+}, testInfo) => {
   test.setTimeout(35_000);
   await page.goto('http://127.0.0.1:4174/overlay.html');
-  await page.waitForFunction(() => Boolean((window as unknown as { draftrollDice?: unknown }).draftrollDice));
+  await page.waitForFunction(() => Boolean(window.draftrollDice));
 
   const report = await page.evaluate(async () => {
-    const requested = Array.from({ length: 20 }, (_, index) => (index * 7) % 20 + 1);
-    const bridge = (window as unknown as { draftrollDice: {
-      roll(request: object): Promise<{ results: Array<number | string> }>;
-      getLastReplay(): null | {
-        step: number;
-        frameCount: number;
-        quantity: number;
-        transforms: Float32Array;
-        activationDelays?: Float32Array;
-        results: number[];
-      };
-    } }).draftrollDice;
+    const requested = Array.from({ length: 20 }, (_, index) => ((index * 7) % 20) + 1);
+    const bridge = window.draftrollDice;
     const completion = await bridge.roll({
       results: requested,
       kinds: Array.from({ length: 20 }, () => 'd20'),

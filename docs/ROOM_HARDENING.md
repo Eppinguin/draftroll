@@ -15,10 +15,7 @@ Draftroll includes three generic presets:
 Create or customize a policy:
 
 ```ts
-import {
-  applyRoomPolicyPatch,
-  createRoomPolicy,
-} from '@draftroll/protocol';
+import { applyRoomPolicyPatch, createRoomPolicy } from '@draftroll/protocol';
 
 const base = createRoomPolicy('moderated-public-room');
 const policy = applyRoomPolicyPatch(base, {
@@ -39,16 +36,19 @@ A customized preset is reported as `preset: "custom"`.
 Policy changes require the `room:manage` capability and use optimistic concurrency:
 
 ```ts
-const updated = await room.setPolicy({
-  authorization: {
-    allowWhispers: false,
+const updated = await room.setPolicy(
+  {
+    authorization: {
+      allowWhispers: false,
+    },
+    limits: {
+      maximumParticipants: 12,
+    },
   },
-  limits: {
-    maximumParticipants: 12,
+  {
+    expectedRevision: room.policyRevision,
   },
-}, {
-  expectedRevision: room.policyRevision,
-});
+);
 
 console.log(updated.revision);
 console.log(updated.policy);
@@ -65,7 +65,6 @@ await session.setPolicy({
 ```
 
 Every successful update produces `room_policy_updated`. It is included in reconnect replay and in `room_state.recentEvents`. `room_state.recentRolls` remains available as a roll-only compatibility view.
-
 
 ## Optional room passwords
 
@@ -108,9 +107,9 @@ Passwords must contain 8 to 256 characters.
 Protected HTTP state/history requests use a header rather than a query parameter:
 
 ```ts
-const response = await fetch(room.authorizeHttpRequest(
-  'https://dice.example.com/rooms/table/history?limit=50',
-));
+const response = await fetch(
+  room.authorizeHttpRequest('https://dice.example.com/rooms/table/history?limit=50'),
+);
 ```
 
 The helper sends `X-Draftroll-Room-Password` when the room client was configured with `roomPassword`.

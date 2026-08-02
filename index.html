@@ -47,35 +47,110 @@
 
           <div class="rule"><span>Abilities</span></div>
           <div class="ability-grid" aria-label="Ability checks">
-            <button type="button" class="ability formula-preset" data-formula="1d20+3" data-action="Strength check"><span>STR</span><strong>16</strong><small>+3</small></button>
-            <button type="button" class="ability formula-preset" data-formula="1d20+4" data-action="Dexterity check"><span>DEX</span><strong>18</strong><small>+4</small></button>
-            <button type="button" class="ability formula-preset" data-formula="1d20+2" data-action="Constitution check"><span>CON</span><strong>14</strong><small>+2</small></button>
-            <button type="button" class="ability formula-preset" data-formula="1d20+1" data-action="Intelligence check"><span>INT</span><strong>12</strong><small>+1</small></button>
-            <button type="button" class="ability formula-preset" data-formula="1d20+3" data-action="Wisdom check"><span>WIS</span><strong>16</strong><small>+3</small></button>
-            <button type="button" class="ability formula-preset" data-formula="1d20" data-action="Charisma check"><span>CHA</span><strong>10</strong><small>+0</small></button>
+            <button
+              type="button"
+              class="ability formula-preset"
+              data-formula="1d20+3"
+              data-action="Strength check"
+            >
+              <span>STR</span><strong>16</strong><small>+3</small>
+            </button>
+            <button
+              type="button"
+              class="ability formula-preset"
+              data-formula="1d20+4"
+              data-action="Dexterity check"
+            >
+              <span>DEX</span><strong>18</strong><small>+4</small>
+            </button>
+            <button
+              type="button"
+              class="ability formula-preset"
+              data-formula="1d20+2"
+              data-action="Constitution check"
+            >
+              <span>CON</span><strong>14</strong><small>+2</small>
+            </button>
+            <button
+              type="button"
+              class="ability formula-preset"
+              data-formula="1d20+1"
+              data-action="Intelligence check"
+            >
+              <span>INT</span><strong>12</strong><small>+1</small>
+            </button>
+            <button
+              type="button"
+              class="ability formula-preset"
+              data-formula="1d20+3"
+              data-action="Wisdom check"
+            >
+              <span>WIS</span><strong>16</strong><small>+3</small>
+            </button>
+            <button
+              type="button"
+              class="ability formula-preset"
+              data-formula="1d20"
+              data-action="Charisma check"
+            >
+              <span>CHA</span><strong>10</strong><small>+0</small>
+            </button>
           </div>
 
           <div class="rule"><span>Actions</span></div>
           <div class="action-list">
-            <button type="button" class="action formula-preset" data-formula="1d20+7" data-action="Longbow attack">
-              <span><strong>Longbow</strong><small>Ranged attack</small></span><code>1d20+7</code>
+            <button
+              type="button"
+              class="action formula-preset"
+              data-formula="1d20+7"
+              data-action="Longbow attack"
+            >
+              <span><strong>Longbow</strong><small>Ranged attack</small></span
+              ><code>1d20+7</code>
             </button>
-            <button type="button" class="action formula-preset" data-formula="1d8+4" data-action="Longbow damage">
-              <span><strong>Longbow damage</strong><small>Piercing</small></span><code>1d8+4</code>
+            <button
+              type="button"
+              class="action formula-preset"
+              data-formula="1d8+4"
+              data-action="Longbow damage"
+            >
+              <span><strong>Longbow damage</strong><small>Piercing</small></span
+              ><code>1d8+4</code>
             </button>
-            <button type="button" class="action formula-preset" data-formula="1d20+7+1d4" data-action="Blessed attack">
-              <span><strong>Blessed shot</strong><small>Mixed physical dice</small></span><code>1d20+7+1d4</code>
+            <button
+              type="button"
+              class="action formula-preset"
+              data-formula="1d20+7+1d4"
+              data-action="Blessed attack"
+            >
+              <span><strong>Blessed shot</strong><small>Mixed physical dice</small></span
+              ><code>1d20+7+1d4</code>
             </button>
-            <button type="button" class="action formula-preset" data-formula="2d6+1d8+3" data-action="Mixed damage">
-              <span><strong>Mixed damage</strong><small>One synchronized throw</small></span><code>2d6+1d8+3</code>
+            <button
+              type="button"
+              class="action formula-preset"
+              data-formula="2d6+1d8+3"
+              data-action="Mixed damage"
+            >
+              <span><strong>Mixed damage</strong><small>One synchronized throw</small></span
+              ><code>2d6+1d8+3</code>
             </button>
-            <button type="button" class="action formula-preset" data-formula="1d20+1d2+1dF+1d9+1d100" data-action="Universal visual test">
-              <span><strong>Universal pool</strong><small>Physical dice + visual fallbacks</small></span><code>1d20+1d2+1dF+1d9+1d100</code>
+            <button
+              type="button"
+              class="action formula-preset"
+              data-formula="1d20+1d2+1dF+1d9+1d100"
+              data-action="Universal visual test"
+            >
+              <span
+                ><strong>Universal pool</strong
+                ><small>Physical dice + visual fallbacks</small></span
+              ><code>1d20+1d2+1dF+1d9+1d100</code>
             </button>
           </div>
 
           <div class="rule"><span>Notes</span></div>
-          <textarea class="notes" aria-label="Character notes">Hunter's Mark active. Longbow uses the Wyrmfire theme.</textarea>
+          <textarea class="notes" aria-label="Character notes">
+Hunter's Mark active. Longbow uses the Wyrmfire theme.</textarea>
         </section>
 
         <section class="sheet-page roller-column" aria-label="Draftroll roller and room controls">
@@ -100,7 +175,9 @@
               <span>Room password <small>(optional)</small></span>
               <input id="sdk-room-password" type="password" autocomplete="current-password" />
             </label>
-            <button id="sdk-room-connect" class="button secondary" type="button">Connect room</button>
+            <button id="sdk-room-connect" class="button secondary" type="button">
+              Connect room
+            </button>
           </div>
 
           <div class="roller-box">
@@ -127,11 +204,20 @@
               <div class="fixed-results-controls">
                 <label class="field">
                   <span>Values in roll order</span>
-                  <input id="sdk-fixed-results" value="20" placeholder="20, 6, 3" spellcheck="false" />
+                  <input
+                    id="sdk-fixed-results"
+                    value="20"
+                    placeholder="20, 6, 3"
+                    spellcheck="false"
+                  />
                 </label>
-                <button id="sdk-fixed-example" class="button text" type="button">Match formula</button>
+                <button id="sdk-fixed-example" class="button text" type="button">
+                  Match formula
+                </button>
               </div>
-              <p id="sdk-fixed-hint" class="fixed-results-hint">Enable to make the physical dice land on these exact values.</p>
+              <p id="sdk-fixed-hint" class="fixed-results-hint">
+                Enable to make the physical dice land on these exact values.
+              </p>
             </section>
 
             <label class="field">
@@ -149,17 +235,39 @@
               </select>
             </label>
             <div class="roller-actions">
-              <button id="sdk-room-roll" data-draftroll-preserve-table class="button primary" type="button" disabled>Roll in room</button>
-              <button id="sdk-roll" data-draftroll-preserve-table class="button secondary" type="button">Local preview</button>
-              <button id="sdk-update-roll" class="button secondary" type="button" disabled>Update + roll</button>
-              <button id="sdk-update-log" class="button text" type="button" disabled>Update log only</button>
+              <button
+                id="sdk-room-roll"
+                data-draftroll-preserve-table
+                class="button primary"
+                type="button"
+                disabled
+              >
+                Roll in room
+              </button>
+              <button
+                id="sdk-roll"
+                data-draftroll-preserve-table
+                class="button secondary"
+                type="button"
+              >
+                Local preview
+              </button>
+              <button id="sdk-update-roll" class="button secondary" type="button" disabled>
+                Update + roll
+              </button>
+              <button id="sdk-update-log" class="button text" type="button" disabled>
+                Update log only
+              </button>
               <button id="sdk-clear-table" class="button text" type="button">Clear table</button>
             </div>
           </div>
 
           <details class="table-test-panel" open>
             <summary>Simultaneous table-roll tester</summary>
-            <p class="table-test-copy">Use 0–140 ms for one fully dynamic simultaneous throw. Larger delays add the second handful while the first roll is already moving or settled.</p>
+            <p class="table-test-copy">
+              Use 0–140 ms for one fully dynamic simultaneous throw. Larger delays add the second
+              handful while the first roll is already moving or settled.
+            </p>
             <div class="two-fields">
               <label class="field">
                 <span>Second roller</span>
@@ -181,12 +289,28 @@
               </label>
               <label class="field field-small">
                 <span>Delay (ms)</span>
-                <input id="sdk-second-delay" type="number" min="0" max="3000" step="50" value="80" />
+                <input
+                  id="sdk-second-delay"
+                  type="number"
+                  min="0"
+                  max="3000"
+                  step="50"
+                  value="80"
+                />
               </label>
             </div>
             <div class="roller-actions">
-              <button id="sdk-stage-two-rolls" data-draftroll-preserve-table class="button primary" type="button">Roll two people on one table</button>
-              <span id="sdk-table-test-status" class="table-test-status" aria-live="polite">Ready</span>
+              <button
+                id="sdk-stage-two-rolls"
+                data-draftroll-preserve-table
+                class="button primary"
+                type="button"
+              >
+                Roll two people on one table
+              </button>
+              <span id="sdk-table-test-status" class="table-test-status" aria-live="polite"
+                >Ready</span
+              >
             </div>
           </details>
 

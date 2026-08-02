@@ -60,7 +60,10 @@ export const DRAFTROLL_HOST_SOURCE = 'draftroll-host' as const;
  *
  * @public
  */
-export interface OverlaySerializablePlayOptions extends Omit<RendererPlayOptions, 'outcomeResolver' | 'signal'> {}
+export interface OverlaySerializablePlayOptions extends Omit<
+  RendererPlayOptions,
+  'outcomeResolver' | 'signal'
+> {}
 
 /**
  * Controls overlay dismissal timing and animation.
@@ -279,7 +282,19 @@ interface PendingCommand {
  * @public
  */
 export class DraftrollOverlayRenderer implements DiceRenderer {
-  private readonly options: Required<Pick<DraftrollOverlayOptions, 'src' | 'title' | 'zIndex' | 'readyTimeoutMs' | 'dismissOnPointer' | 'dismissDurationMs' | 'dismissResultPanel'>> & DraftrollOverlayOptions;
+  private readonly options: Required<
+    Pick<
+      DraftrollOverlayOptions,
+      | 'src'
+      | 'title'
+      | 'zIndex'
+      | 'readyTimeoutMs'
+      | 'dismissOnPointer'
+      | 'dismissDurationMs'
+      | 'dismissResultPanel'
+    >
+  > &
+    DraftrollOverlayOptions;
   private iframe: HTMLIFrameElement | null = null;
   private readyPromise: Promise<void> | null = null;
   private readyResolve: (() => void) | null = null;
@@ -298,7 +313,10 @@ export class DraftrollOverlayRenderer implements DiceRenderer {
   private readonly installedThemes = new Set<string>();
   private readonly themeLoads = new Map<string, Promise<string>>();
   private performanceConfigurationPromise: Promise<void> | null = null;
-  private readonly lifecycleHandlers = new Map<RendererLifecycleEventName, Set<(payload: never) => void>>();
+  private readonly lifecycleHandlers = new Map<
+    RendererLifecycleEventName,
+    Set<(payload: never) => void>
+  >();
   private participantFilter?: RendererParticipantFilter;
 
   /**
@@ -339,18 +357,30 @@ export class DraftrollOverlayRenderer implements DiceRenderer {
     if (this.readyPromise) {
       if (!signal) return this.readyPromise;
       return new Promise<void>((resolve, reject) => {
-        const handleAbort = () => reject(new DraftrollAbortError('Overlay mount', signal.reason, 'overlay'));
+        const handleAbort = () =>
+          reject(new DraftrollAbortError('Overlay mount', signal.reason, 'overlay'));
         signal.addEventListener('abort', handleAbort, { once: true });
         this.readyPromise!.then(
-          () => { signal.removeEventListener('abort', handleAbort); resolve(); },
-          (error) => { signal.removeEventListener('abort', handleAbort); reject(error); },
+          () => {
+            signal.removeEventListener('abort', handleAbort);
+            resolve();
+          },
+          (error) => {
+            signal.removeEventListener('abort', handleAbort);
+            reject(error);
+          },
         );
       });
     }
     if (typeof document === 'undefined' || typeof window === 'undefined') {
-      throw new DraftrollError(DRAFTROLL_ERROR_CODES.overlayUnavailable, 'DraftrollOverlayRenderer requires a browser DOM', {
-        package: 'overlay', recoverable: false,
-      });
+      throw new DraftrollError(
+        DRAFTROLL_ERROR_CODES.overlayUnavailable,
+        'DraftrollOverlayRenderer requires a browser DOM',
+        {
+          package: 'overlay',
+          recoverable: false,
+        },
+      );
     }
 
     this.targetOrigin = this.options.targetOrigin ?? inferTargetOrigin(this.options.src);
@@ -426,7 +456,13 @@ export class DraftrollOverlayRenderer implements DiceRenderer {
     }
 
     const timeout = window.setTimeout(() => {
-      this.readyReject?.(new DraftrollError(DRAFTROLL_ERROR_CODES.overlayTimeout, `Draftroll overlay did not become ready within ${this.options.readyTimeoutMs}ms`, { package: 'overlay', recoverable: true }));
+      this.readyReject?.(
+        new DraftrollError(
+          DRAFTROLL_ERROR_CODES.overlayTimeout,
+          `Draftroll overlay did not become ready within ${this.options.readyTimeoutMs}ms`,
+          { package: 'overlay', recoverable: true },
+        ),
+      );
       this.readyReject = null;
       this.readyResolve = null;
     }, this.options.readyTimeoutMs);
@@ -441,7 +477,10 @@ export class DraftrollOverlayRenderer implements DiceRenderer {
   /**
    * Subscribes to an event and returns an unsubscribe function.
    */
-  on<K extends RendererLifecycleEventName>(event: K, handler: (payload: RendererLifecycleEventMap[K]) => void): () => void {
+  on<K extends RendererLifecycleEventName>(
+    event: K,
+    handler: (payload: RendererLifecycleEventMap[K]) => void,
+  ): () => void {
     const handlers = this.lifecycleHandlers.get(event) ?? new Set<(payload: never) => void>();
     handlers.add(handler);
     this.lifecycleHandlers.set(event, handlers);
@@ -481,9 +520,13 @@ export class DraftrollOverlayRenderer implements DiceRenderer {
   /**
    * Presents a normalized roll and waits for completion.
    */
-  async playRoll(result: NormalizedRollResult, options: RendererPlayOptions = {}): Promise<RendererCompletion> {
+  async playRoll(
+    result: NormalizedRollResult,
+    options: RendererPlayOptions = {},
+  ): Promise<RendererCompletion> {
     throwIfAborted(options.signal, 'Overlay presentation');
-    if (!this.shouldPresent(result)) return { results: result.dice.map((die) => die.result), total: result.total, replay: null };
+    if (!this.shouldPresent(result))
+      return { results: result.dice.map((die) => die.result), total: result.total, replay: null };
 
     // Claim the presentation synchronously. Pointer dismissal is deferred until
     // after host click handlers; incrementing only after mount/theme awaits let
@@ -501,7 +544,9 @@ export class DraftrollOverlayRenderer implements DiceRenderer {
     const themeIds = new Set<string>();
     if (result.themeId) themeIds.add(result.themeId);
     if (options.defaultThemeId) themeIds.add(options.defaultThemeId);
-    result.dice.forEach((die) => { if (die.themeId) themeIds.add(die.themeId); });
+    result.dice.forEach((die) => {
+      if (die.themeId) themeIds.add(die.themeId);
+    });
     for (const themeId of themeIds) await this.ensureTheme(themeId, options.signal);
     this.setIframeActive(true);
     this.panel?.show(result, 'rolling', options.dieIds);
@@ -530,24 +575,44 @@ export class DraftrollOverlayRenderer implements DiceRenderer {
 
     try {
       this.emitLifecycle('started', { result, options });
-      const response = await this.command({
-        type: 'play',
-        result,
-        options: serializableOptions,
-        outcomes,
-      }, options.signal);
+      const response = await this.command(
+        {
+          type: 'play',
+          result,
+          options: serializableOptions,
+          outcomes,
+        },
+        options.signal,
+      );
       const completion = response.completion;
       if (generation !== this.presentationGeneration) {
-        if (!completion) throw new DraftrollError(DRAFTROLL_ERROR_CODES.overlayProtocol, 'Draftroll overlay returned no roll completion', { package: 'overlay', recoverable: true });
+        if (!completion)
+          throw new DraftrollError(
+            DRAFTROLL_ERROR_CODES.overlayProtocol,
+            'Draftroll overlay returned no roll completion',
+            { package: 'overlay', recoverable: true },
+          );
         return completion;
       }
       this.panel?.show(result, 'complete');
-      if (!completion) throw new DraftrollError(DRAFTROLL_ERROR_CODES.overlayProtocol, 'Draftroll overlay returned no roll completion', { package: 'overlay', recoverable: true });
+      if (!completion)
+        throw new DraftrollError(
+          DRAFTROLL_ERROR_CODES.overlayProtocol,
+          'Draftroll overlay returned no roll completion',
+          { package: 'overlay', recoverable: true },
+        );
       this.dismissArmed = true;
       this.emitLifecycle('settled', { result, completion });
       this.emitLifecycle('completed', { result, completion });
-      if (typeof options.autoClearMs === 'number' && Number.isFinite(options.autoClearMs) && options.autoClearMs >= 0) {
-        setTimeout(() => { if (generation === this.presentationGeneration) void this.dismiss().catch(() => undefined); }, options.autoClearMs);
+      if (
+        typeof options.autoClearMs === 'number' &&
+        Number.isFinite(options.autoClearMs) &&
+        options.autoClearMs >= 0
+      ) {
+        setTimeout(() => {
+          if (generation === this.presentationGeneration)
+            void this.dismiss().catch(() => undefined);
+        }, options.autoClearMs);
       }
       return completion;
     } catch (error) {
@@ -564,7 +629,10 @@ export class DraftrollOverlayRenderer implements DiceRenderer {
   /**
    * Updates the displayed result without replaying the roll.
    */
-  async updateResult(result: NormalizedRollResult, options: RendererResultUpdateOptions = {}): Promise<void> {
+  async updateResult(
+    result: NormalizedRollResult,
+    options: RendererResultUpdateOptions = {},
+  ): Promise<void> {
     await this.mount();
     this.presentationGeneration += 1;
     this.panel?.show(result, options.state ?? 'updated');
@@ -623,7 +691,12 @@ export class DraftrollOverlayRenderer implements DiceRenderer {
    */
   async screenshot(): Promise<string> {
     const response = await this.command({ type: 'screenshot' });
-    if (!response.dataUrl) throw new DraftrollError('renderer_screenshot_unavailable', 'Overlay screenshot data was unavailable', { package: 'overlay', recoverable: true });
+    if (!response.dataUrl)
+      throw new DraftrollError(
+        'renderer_screenshot_unavailable',
+        'Overlay screenshot data was unavailable',
+        { package: 'overlay', recoverable: true },
+      );
     return response.dataUrl;
   }
 
@@ -654,7 +727,12 @@ export class DraftrollOverlayRenderer implements DiceRenderer {
   async preview(options: RendererPreviewOptions = {}): Promise<RendererCompletion> {
     const { signal, ...serializable } = options;
     const response = await this.command({ type: 'preview', options: serializable }, signal);
-    if (!response.completion) throw new DraftrollError(DRAFTROLL_ERROR_CODES.overlayProtocol, 'Overlay preview returned no completion', { package: 'overlay', recoverable: true });
+    if (!response.completion)
+      throw new DraftrollError(
+        DRAFTROLL_ERROR_CODES.overlayProtocol,
+        'Overlay preview returned no completion',
+        { package: 'overlay', recoverable: true },
+      );
     return response.completion;
   }
 
@@ -694,10 +772,12 @@ export class DraftrollOverlayRenderer implements DiceRenderer {
     this.performanceConfigurationPromise ??= this.command({
       type: 'configure',
       options: { ...this.options.performance },
-    }).then(() => undefined).catch((error) => {
-      this.performanceConfigurationPromise = null;
-      throw error;
-    });
+    })
+      .then(() => undefined)
+      .catch((error) => {
+        this.performanceConfigurationPromise = null;
+        throw error;
+      });
     await this.performanceConfigurationPromise;
   }
 
@@ -738,9 +818,12 @@ export class DraftrollOverlayRenderer implements DiceRenderer {
    * Destroys iframe, panel, listeners, and pending requests.
    */
   destroy(): void {
-    if (this.messageListener && typeof window !== 'undefined') window.removeEventListener('message', this.messageListener);
-    if (this.pointerDismissListener && typeof document !== 'undefined') document.removeEventListener('pointerdown', this.pointerDismissListener, true);
-    if (this.keyDismissListener && typeof document !== 'undefined') document.removeEventListener('keydown', this.keyDismissListener);
+    if (this.messageListener && typeof window !== 'undefined')
+      window.removeEventListener('message', this.messageListener);
+    if (this.pointerDismissListener && typeof document !== 'undefined')
+      document.removeEventListener('pointerdown', this.pointerDismissListener, true);
+    if (this.keyDismissListener && typeof document !== 'undefined')
+      document.removeEventListener('keydown', this.keyDismissListener);
     this.messageListener = null;
     this.pointerDismissListener = null;
     this.keyDismissListener = null;
@@ -752,7 +835,12 @@ export class DraftrollOverlayRenderer implements DiceRenderer {
     this.iframe = null;
     this.panel?.destroy();
     this.panel = null;
-    for (const pending of this.pending.values()) { pending.cleanupAbort?.(); pending.reject(new DraftrollStateError('Draftroll overlay was destroyed', { package: 'overlay' })); }
+    for (const pending of this.pending.values()) {
+      pending.cleanupAbort?.();
+      pending.reject(
+        new DraftrollStateError('Draftroll overlay was destroyed', { package: 'overlay' }),
+      );
+    }
     this.pending.clear();
     this.readyPromise = null;
     this.performanceConfigurationPromise = null;
@@ -766,7 +854,14 @@ export class DraftrollOverlayRenderer implements DiceRenderer {
   ): Promise<OverlayCompleteMessage> {
     throwIfAborted(signal, `Overlay command '${command.type}'`);
     const target = this.iframe?.contentWindow;
-    if (!target) return Promise.reject(new DraftrollError(DRAFTROLL_ERROR_CODES.overlayUnavailable, 'Draftroll overlay iframe is unavailable', { package: 'overlay', recoverable: true }));
+    if (!target)
+      return Promise.reject(
+        new DraftrollError(
+          DRAFTROLL_ERROR_CODES.overlayUnavailable,
+          'Draftroll overlay iframe is unavailable',
+          { package: 'overlay', recoverable: true },
+        ),
+      );
     const requestId = `overlay_${Date.now().toString(36)}_${(++this.commandCounter).toString(36)}`;
     const message = {
       ...command,
@@ -778,13 +873,21 @@ export class DraftrollOverlayRenderer implements DiceRenderer {
     return new Promise<OverlayCompleteMessage>((resolve, reject) => {
       const handleAbort = () => {
         this.pending.delete(requestId);
-        reject(new DraftrollAbortError(`Overlay command '${command.type}'`, signal?.reason, 'overlay'));
+        reject(
+          new DraftrollAbortError(`Overlay command '${command.type}'`, signal?.reason, 'overlay'),
+        );
       };
       const cleanupAbort = () => signal?.removeEventListener('abort', handleAbort);
       signal?.addEventListener('abort', handleAbort, { once: true });
       this.pending.set(requestId, {
-        resolve: (value) => { cleanupAbort(); resolve(value); },
-        reject: (error) => { cleanupAbort(); reject(error); },
+        resolve: (value) => {
+          cleanupAbort();
+          resolve(value);
+        },
+        reject: (error) => {
+          cleanupAbort();
+          reject(error);
+        },
         cleanupAbort,
       });
       target.postMessage(message, this.targetOrigin);
@@ -793,20 +896,32 @@ export class DraftrollOverlayRenderer implements DiceRenderer {
 
   private shouldPresent(result: NormalizedRollResult): boolean {
     if (!this.participantFilter) return true;
-    const participantId = typeof result.metadata?.participantId === 'string'
-      ? result.metadata.participantId
-      : typeof result.metadata?.actorParticipantId === 'string'
-        ? result.metadata.actorParticipantId
-        : undefined;
+    const participantId =
+      typeof result.metadata?.participantId === 'string'
+        ? result.metadata.participantId
+        : typeof result.metadata?.actorParticipantId === 'string'
+          ? result.metadata.actorParticipantId
+          : undefined;
     if (typeof this.participantFilter !== 'function') {
       return participantId !== undefined && this.participantFilter.includes(participantId);
     }
     return this.participantFilter({ participantId, result });
   }
 
-  private emitLifecycle<K extends RendererLifecycleEventName>(event: K, payload: RendererLifecycleEventMap[K]): void {
+  private emitLifecycle<K extends RendererLifecycleEventName>(
+    event: K,
+    payload: RendererLifecycleEventMap[K],
+  ): void {
     for (const handler of this.lifecycleHandlers.get(event) ?? []) {
-      try { (handler as (value: RendererLifecycleEventMap[K]) => void)(payload); } catch { /* observer isolation */ }
+      try {
+        // Handlers are stored contravariantly at `never` so one map can hold every event's
+        // handler. `on` only ever files a handler under its own key, so widening back to this
+        // key's payload type restores the signature the caller registered.
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+        (handler as (value: RendererLifecycleEventMap[K]) => void)(payload);
+      } catch {
+        /* observer isolation */
+      }
     }
   }
 
@@ -827,7 +942,13 @@ export class DraftrollOverlayRenderer implements DiceRenderer {
     const pending = this.pending.get(message.requestId);
     if (!pending) return;
     this.pending.delete(message.requestId);
-    if (message.type === 'error') pending.reject(new DraftrollError(DRAFTROLL_ERROR_CODES.overlayProtocol, message.message, { package: 'overlay', recoverable: true }));
+    if (message.type === 'error')
+      pending.reject(
+        new DraftrollError(DRAFTROLL_ERROR_CODES.overlayProtocol, message.message, {
+          package: 'overlay',
+          recoverable: true,
+        }),
+      );
     else pending.resolve(message);
   }
 }
@@ -862,7 +983,10 @@ export class DraftrollResultPanel {
     };
     this.host = document.createElement('div');
     this.host.dataset.draftrollResultPanel = '';
-    Object.assign(this.host.style, panelPosition(this.options.position, this.options.zIndex, container !== document.body));
+    Object.assign(
+      this.host.style,
+      panelPosition(this.options.position, this.options.zIndex, container !== document.body),
+    );
     this.host.hidden = true;
     this.root = this.host.attachShadow({ mode: 'open' });
     this.root.append(createPanelStyle());
@@ -903,16 +1027,26 @@ export class DraftrollResultPanel {
     header.className = 'header';
     const heading = document.createElement('div');
     heading.className = 'heading';
-    heading.textContent = result.name ? `${result.name} · ${this.options.title}` : this.options.title;
+    heading.textContent = result.name
+      ? `${result.name} · ${this.options.title}`
+      : this.options.title;
     const status = document.createElement('span');
     status.className = `status ${state}`;
-    status.textContent = state === 'rolling' ? 'Rolling' : state === 'updated' ? `Updated r${result.revision ?? 1}` : result.authority;
+    status.textContent =
+      state === 'rolling'
+        ? 'Rolling'
+        : state === 'updated'
+          ? `Updated r${result.revision ?? 1}`
+          : result.authority;
     header.append(heading, status);
 
     const total = document.createElement('div');
     total.className = 'total';
     total.textContent = state === 'rolling' ? '…' : String(result.total);
-    total.setAttribute('aria-label', state === 'rolling' ? 'Dice rolling' : `Total ${result.total}`);
+    total.setAttribute(
+      'aria-label',
+      state === 'rolling' ? 'Dice rolling' : `Total ${result.total}`,
+    );
 
     this.content.append(header, total);
     if (this.options.showExpression && result.expression) {
@@ -939,7 +1073,8 @@ export class DraftrollResultPanel {
       this.content.append(dice);
     }
 
-    const actionName = typeof result.metadata?.actionName === 'string' ? result.metadata.actionName : undefined;
+    const actionName =
+      typeof result.metadata?.actionName === 'string' ? result.metadata.actionName : undefined;
     if (this.options.showAuthority || result.annotation || actionName) {
       const footer = document.createElement('div');
       footer.className = 'footer';
@@ -949,9 +1084,10 @@ export class DraftrollResultPanel {
       this.content.append(footer);
     }
 
-    this.live.textContent = state === 'rolling'
-      ? 'Dice rolling. Results hidden until all dice settle.'
-      : `Roll total ${result.total}. ${result.dice.map((die) => `${die.type} ${String(die.result)}`).join(', ')}`;
+    this.live.textContent =
+      state === 'rolling'
+        ? 'Dice rolling. Results hidden until all dice settle.'
+        : `Roll total ${result.total}. ${result.dice.map((die) => `${die.type} ${String(die.result)}`).join(', ')}`;
   }
 
   /**
@@ -1016,10 +1152,13 @@ export class DraftrollResultPanel {
       meta.append(theme);
     }
 
-    const canReroll = state !== 'rolling'
-      && this.options.allowReroll
-      && Boolean(this.rerollHandler)
-      && (die.generatedBy === 'initial' || die.generatedBy === 'external' || die.generatedBy === undefined);
+    const canReroll =
+      state !== 'rolling' &&
+      this.options.allowReroll &&
+      Boolean(this.rerollHandler) &&
+      (die.generatedBy === 'initial' ||
+        die.generatedBy === 'external' ||
+        die.generatedBy === undefined);
     if (canReroll) {
       const button = document.createElement('button');
       button.type = 'button';
@@ -1058,7 +1197,7 @@ function normalizeResultOptions(
 ): Required<DraftrollResultPanelOptions> {
   const options = typeof input === 'object' ? input : {};
   return {
-    enabled: input === false ? false : options.enabled ?? true,
+    enabled: input === false ? false : (options.enabled ?? true),
     position: options.position ?? 'top-right',
     title: options.title ?? 'Roll result',
     showExpression: options.showExpression ?? true,
@@ -1069,7 +1208,11 @@ function normalizeResultOptions(
   };
 }
 
-function panelPosition(position: DraftrollResultPanelOptions['position'], zIndex: number, absolute: boolean): Partial<CSSStyleDeclaration> {
+function panelPosition(
+  position: DraftrollResultPanelOptions['position'],
+  zIndex: number,
+  absolute: boolean,
+): Partial<CSSStyleDeclaration> {
   const style: Partial<CSSStyleDeclaration> = {
     position: absolute ? 'absolute' : 'fixed',
     zIndex: String(zIndex),
@@ -1138,9 +1281,11 @@ function inferTargetOrigin(src: string): string {
 function isOverlayMessage(value: unknown): value is DraftrollOverlayMessage {
   if (!value || typeof value !== 'object') return false;
   const candidate = value as Partial<DraftrollOverlayMessage>;
-  return candidate.source === DRAFTROLL_OVERLAY_SOURCE
-    && candidate.version === DRAFTROLL_OVERLAY_PROTOCOL_VERSION
-    && (candidate.type === 'ready' || candidate.type === 'complete' || candidate.type === 'error');
+  return (
+    candidate.source === DRAFTROLL_OVERLAY_SOURCE &&
+    candidate.version === DRAFTROLL_OVERLAY_PROTOCOL_VERSION &&
+    (candidate.type === 'ready' || candidate.type === 'complete' || candidate.type === 'error')
+  );
 }
 
 function asError(value: unknown): Error {

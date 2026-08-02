@@ -82,10 +82,7 @@ const result = decoded.data;
 Applications that prefer exceptions can use:
 
 ```ts
-import {
-  assertNormalizedRollResult,
-  unwrapDecode,
-} from '@draftroll/protocol';
+import { assertNormalizedRollResult, unwrapDecode } from '@draftroll/protocol';
 
 const result = assertNormalizedRollResult(value);
 const input = unwrapDecode(decodeRollInput(value));

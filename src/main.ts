@@ -8,14 +8,35 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { DraftrollAudio } from './audio';
 import { DraftrollEffects, type EffectOutcome, type ThemeEffectSlots } from './effects';
-import { DieInstance, THEMES, invalidateDiceThemeResources, prewarmDiceTheme, type DieKind, type ThemeName } from './dice';
-import { DIE_COLLIDER_RADIUS, DIE_RADIUS } from './physics-shapes';
+import {
+  DieInstance,
+  THEMES,
+  invalidateDiceThemeResources,
+  prewarmDiceTheme,
+  type DieKind,
+  type ThemeName,
+} from './dice';
+import { DIE_COLLIDER_RADIUS, DIE_RADIUS, isDieKind } from './physics-shapes';
 import { THEME_MANIFESTS, type ThemeManifest } from './themes';
 import { FallbackVisualInstance } from './fallback-visuals';
 import { consumeSettledVisualIndexes, deriveDieSettleTimes } from './settlement';
-import type { DraftrollFallbackVisual, DraftrollVisualOrderEntry, DraftrollThemeManifest, RendererCameraOptions, RendererInteractionOptions, RendererLateEventMode, RendererPreviewOptions } from '../packages/renderer/src/index';
-import { AdaptiveResolutionController, resolveRendererPerformanceBudget } from '../packages/renderer/src/performance';
-import { resolveOrthographicViewport, resolveRendererViewport } from '../packages/renderer/src/viewport';
+import type {
+  DraftrollFallbackVisual,
+  DraftrollVisualOrderEntry,
+  DraftrollThemeManifest,
+  RendererCameraOptions,
+  RendererInteractionOptions,
+  RendererLateEventMode,
+  RendererPreviewOptions,
+} from '../packages/renderer/src/index';
+import {
+  AdaptiveResolutionController,
+  resolveRendererPerformanceBudget,
+} from '../packages/renderer/src/performance';
+import {
+  resolveOrthographicViewport,
+  resolveRendererViewport,
+} from '../packages/renderer/src/viewport';
 import type { RuntimeThemeBundle } from '../packages/themes/src/index';
 import type { DicePhysicsProperties } from '../packages/protocol/src/index';
 import {
@@ -23,6 +44,7 @@ import {
   getRuntimeThemeEffects,
   getRuntimeThemePhysics,
   installRuntimeThemeBundle,
+  isRecord,
   uninstallRuntimeTheme,
 } from './runtime-themes';
 
@@ -132,8 +154,6 @@ export interface DiceEngineConfig {
   activeFramesPerSecond?: number;
 }
 
-
-
 export interface RollReplayEvent {
   time: number;
   type: 'impact' | 'result';
@@ -193,7 +213,10 @@ declare global {
       configure: (config: DiceEngineConfig) => void;
       configureThemeEffects: (theme: ThemeName, slots: ThemeEffectSlots) => void;
       getLastReplay: () => RollReplay | null;
-      playReplay: (replay: RollReplay, options?: DiceReplayOptions) => Promise<DraftrollRollCompletion>;
+      playReplay: (
+        replay: RollReplay,
+        options?: DiceReplayOptions,
+      ) => Promise<DraftrollRollCompletion>;
       dismiss: (options?: DiceDismissOptions) => Promise<void>;
       clear: () => void;
       // These mirror `DraftrollBridge`, whose contract allows either a sync or async
@@ -203,7 +226,9 @@ declare global {
       screenshot: () => Promise<string>;
       configureCamera: (options: RendererCameraOptions) => void | Promise<void>;
       resetCamera: () => void | Promise<void>;
-      preview: (options?: Omit<RendererPreviewOptions, 'signal'>) => Promise<DraftrollRollCompletion>;
+      preview: (
+        options?: Omit<RendererPreviewOptions, 'signal'>,
+      ) => Promise<DraftrollRollCompletion>;
       configureInteractions: (options: RendererInteractionOptions) => void | Promise<void>;
       getPerformanceSnapshot: () => DicePerformanceSnapshot;
     };
@@ -298,11 +323,49 @@ const PLANNER_STEP = 1 / 120;
 const PLANNER_RECORD_EVERY = 1;
 const PLANNER_RECORD_STEP = PLANNER_STEP * PLANNER_RECORD_EVERY;
 type DicePhysicsPreset = NonNullable<DiceRollRequest['physicsPreset']>;
-const PHYSICS_PRESETS: Record<DicePhysicsPreset, { gravity: number; massScale: number; sizeScale: number; inertiaScale: number; linearDamping: number; angularDamping: number }> = {
-  standard: { gravity: 20.5, massScale: 1, sizeScale: 1, inertiaScale: 1, linearDamping: 0.095, angularDamping: 0.085 },
-  compact: { gravity: 22, massScale: 0.9, sizeScale: 0.86, inertiaScale: 0.9, linearDamping: 0.11, angularDamping: 0.1 },
-  heavy: { gravity: 22.5, massScale: 1.65, sizeScale: 1.05, inertiaScale: 1.35, linearDamping: 0.08, angularDamping: 0.075 },
-  'low-gravity': { gravity: 11.5, massScale: 0.85, sizeScale: 1, inertiaScale: 0.85, linearDamping: 0.06, angularDamping: 0.055 },
+const PHYSICS_PRESETS: Record<
+  DicePhysicsPreset,
+  {
+    gravity: number;
+    massScale: number;
+    sizeScale: number;
+    inertiaScale: number;
+    linearDamping: number;
+    angularDamping: number;
+  }
+> = {
+  standard: {
+    gravity: 20.5,
+    massScale: 1,
+    sizeScale: 1,
+    inertiaScale: 1,
+    linearDamping: 0.095,
+    angularDamping: 0.085,
+  },
+  compact: {
+    gravity: 22,
+    massScale: 0.9,
+    sizeScale: 0.86,
+    inertiaScale: 0.9,
+    linearDamping: 0.11,
+    angularDamping: 0.1,
+  },
+  heavy: {
+    gravity: 22.5,
+    massScale: 1.65,
+    sizeScale: 1.05,
+    inertiaScale: 1.35,
+    linearDamping: 0.08,
+    angularDamping: 0.075,
+  },
+  'low-gravity': {
+    gravity: 11.5,
+    massScale: 0.85,
+    sizeScale: 1,
+    inertiaScale: 0.85,
+    linearDamping: 0.06,
+    angularDamping: 0.055,
+  },
 };
 
 const camera = new THREE.OrthographicCamera(-5, 5, 5, -5, 0.05, 40);
@@ -330,7 +393,10 @@ if (OVERLAY_MODE) renderer.setClearColor(0x000000, 0);
 const initialCanvasRect = canvas.getBoundingClientRect();
 const initialViewport = resolveRendererViewport({
   canvas: { width: initialCanvasRect.width, height: initialCanvasRect.height },
-  document: { width: document.documentElement.clientWidth, height: document.documentElement.clientHeight },
+  document: {
+    width: document.documentElement.clientWidth,
+    height: document.documentElement.clientHeight,
+  },
   window: { width: window.innerWidth, height: window.innerHeight },
 });
 renderer.setSize(initialViewport.width, initialViewport.height, false);
@@ -347,12 +413,20 @@ pmrem.dispose();
 let bloomResolutionScale = 0.68;
 const bloom: UnrealBloomPass | { strength: number } = OVERLAY_MODE
   ? { strength: 0 }
-  : new UnrealBloomPass(new THREE.Vector2(initialViewport.width, initialViewport.height), 0.18, 0.62, 0.9);
+  : new UnrealBloomPass(
+      new THREE.Vector2(initialViewport.width, initialViewport.height),
+      0.18,
+      0.62,
+      0.9,
+    );
 const composer = OVERLAY_MODE ? null : new EffectComposer(renderer);
 if (composer && bloom instanceof UnrealBloomPass) {
   composer.addPass(new RenderPass(scene, camera));
   composer.addPass(bloom);
-  bloom.setSize(Math.ceil(initialViewport.width * bloomResolutionScale), Math.ceil(initialViewport.height * bloomResolutionScale));
+  bloom.setSize(
+    Math.ceil(initialViewport.width * bloomResolutionScale),
+    Math.ceil(initialViewport.height * bloomResolutionScale),
+  );
   composer.addPass(new OutputPass());
 }
 
@@ -366,24 +440,32 @@ const tablePhysicsMaterial = new CANNON.Material('draftroll-table');
 function configureWorld(target: CANNON.World): void {
   target.allowSleep = true;
   target.broadphase = new CANNON.SAPBroadphase(target);
+  // Cannon types `World.solver` as the abstract `Solver`, which has no iteration controls.
+  // The default this build never replaces is a `GSSolver`, whose tuning the throw quality
+  // depends on.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion
   const solver = target.solver as CANNON.GSSolver;
   solver.iterations = 32;
   solver.tolerance = 0.00025;
-  target.addContactMaterial(new CANNON.ContactMaterial(dicePhysicsMaterial, tablePhysicsMaterial, {
-    friction: 0.28,
-    restitution: 0.24,
-    contactEquationStiffness: 2e7,
-    contactEquationRelaxation: 4,
-    frictionEquationStiffness: 1.5e7,
-  }));
-  target.addContactMaterial(new CANNON.ContactMaterial(dicePhysicsMaterial, dicePhysicsMaterial, {
-    friction: 0.19,
-    restitution: 0.14,
-    contactEquationStiffness: 4e7,
-    contactEquationRelaxation: 3,
-    frictionEquationStiffness: 2.2e7,
-    frictionEquationRelaxation: 3,
-  }));
+  target.addContactMaterial(
+    new CANNON.ContactMaterial(dicePhysicsMaterial, tablePhysicsMaterial, {
+      friction: 0.28,
+      restitution: 0.24,
+      contactEquationStiffness: 2e7,
+      contactEquationRelaxation: 4,
+      frictionEquationStiffness: 1.5e7,
+    }),
+  );
+  target.addContactMaterial(
+    new CANNON.ContactMaterial(dicePhysicsMaterial, dicePhysicsMaterial, {
+      friction: 0.19,
+      restitution: 0.14,
+      contactEquationStiffness: 4e7,
+      contactEquationRelaxation: 3,
+      frictionEquationStiffness: 2.2e7,
+      frictionEquationRelaxation: 3,
+    }),
+  );
 }
 
 const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -20.5, 0) });
@@ -392,14 +474,26 @@ configureWorld(world);
 const screenBounds = { x: 5, z: 5 };
 const visibleBounds = { x: 5, z: 5 };
 let rendererViewport = initialViewport;
-const floorBody = new CANNON.Body({ mass: 0, material: tablePhysicsMaterial, shape: new CANNON.Plane() });
+const floorBody = new CANNON.Body({
+  mass: 0,
+  material: tablePhysicsMaterial,
+  shape: new CANNON.Plane(),
+});
 floorBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
 world.addBody(floorBody);
 
 let wallBodies: CANNON.Body[] = [];
 
-function addWallTo(target: CANNON.World, position: CANNON.Vec3, halfExtents: CANNON.Vec3): CANNON.Body {
-  const body = new CANNON.Body({ mass: 0, material: tablePhysicsMaterial, shape: new CANNON.Box(halfExtents) });
+function addWallTo(
+  target: CANNON.World,
+  position: CANNON.Vec3,
+  halfExtents: CANNON.Vec3,
+): CANNON.Body {
+  const body = new CANNON.Body({
+    mass: 0,
+    material: tablePhysicsMaterial,
+    shape: new CANNON.Box(halfExtents),
+  });
   body.position.copy(position);
   target.addBody(body);
   return body;
@@ -410,10 +504,26 @@ function addCurrentWalls(target: CANNON.World): CANNON.Body[] {
   const wallHalfHeight = 5.5;
   const wallCenterY = wallHalfHeight - 0.05;
   return [
-    addWallTo(target, new CANNON.Vec3(-screenBounds.x - wallThickness, wallCenterY, 0), new CANNON.Vec3(wallThickness, wallHalfHeight, screenBounds.z + 1.6)),
-    addWallTo(target, new CANNON.Vec3(screenBounds.x + wallThickness, wallCenterY, 0), new CANNON.Vec3(wallThickness, wallHalfHeight, screenBounds.z + 1.6)),
-    addWallTo(target, new CANNON.Vec3(0, wallCenterY, -screenBounds.z - wallThickness), new CANNON.Vec3(screenBounds.x + 1.6, wallHalfHeight, wallThickness)),
-    addWallTo(target, new CANNON.Vec3(0, wallCenterY, screenBounds.z + wallThickness), new CANNON.Vec3(screenBounds.x + 1.6, wallHalfHeight, wallThickness)),
+    addWallTo(
+      target,
+      new CANNON.Vec3(-screenBounds.x - wallThickness, wallCenterY, 0),
+      new CANNON.Vec3(wallThickness, wallHalfHeight, screenBounds.z + 1.6),
+    ),
+    addWallTo(
+      target,
+      new CANNON.Vec3(screenBounds.x + wallThickness, wallCenterY, 0),
+      new CANNON.Vec3(wallThickness, wallHalfHeight, screenBounds.z + 1.6),
+    ),
+    addWallTo(
+      target,
+      new CANNON.Vec3(0, wallCenterY, -screenBounds.z - wallThickness),
+      new CANNON.Vec3(screenBounds.x + 1.6, wallHalfHeight, wallThickness),
+    ),
+    addWallTo(
+      target,
+      new CANNON.Vec3(0, wallCenterY, screenBounds.z + wallThickness),
+      new CANNON.Vec3(screenBounds.x + 1.6, wallHalfHeight, wallThickness),
+    ),
   ];
 }
 
@@ -421,7 +531,10 @@ function measureRendererViewport() {
   const rect = canvas.getBoundingClientRect();
   return resolveRendererViewport({
     canvas: { width: rect.width, height: rect.height },
-    document: { width: document.documentElement.clientWidth, height: document.documentElement.clientHeight },
+    document: {
+      width: document.documentElement.clientWidth,
+      height: document.documentElement.clientHeight,
+    },
     window: { width: window.innerWidth, height: window.innerHeight },
   });
 }
@@ -451,7 +564,14 @@ function createScreenTexture(): THREE.CanvasTexture {
   const context = canvasTexture.getContext('2d');
   if (!context) throw new Error('Canvas 2D context unavailable.');
 
-  const base = context.createRadialGradient(size * 0.52, size * 0.44, 20, size * 0.5, size * 0.5, size * 0.78);
+  const base = context.createRadialGradient(
+    size * 0.52,
+    size * 0.44,
+    20,
+    size * 0.5,
+    size * 0.5,
+    size * 0.78,
+  );
   base.addColorStop(0, '#22324f');
   base.addColorStop(0.38, '#142038');
   base.addColorStop(1, '#08111e');
@@ -502,7 +622,13 @@ function createScreenTexture(): THREE.CanvasTexture {
 function createScreenSurface(): void {
   const surface = new THREE.Mesh(
     new THREE.PlaneGeometry(32, 32),
-    new THREE.MeshStandardMaterial({ map: createScreenTexture(), color: 0xffffff, roughness: 0.95, metalness: 0.01, envMapIntensity: 0.04 }),
+    new THREE.MeshStandardMaterial({
+      map: createScreenTexture(),
+      color: 0xffffff,
+      roughness: 0.95,
+      metalness: 0.01,
+      envMapIntensity: 0.04,
+    }),
   );
   surface.rotation.x = -Math.PI / 2;
   surface.position.y = -0.055;
@@ -616,7 +742,6 @@ const replayQuaternionA = new THREE.Quaternion();
 const replayQuaternionB = new THREE.Quaternion();
 const dynamicBodies: CANNON.Body[] = [];
 
-
 interface RendererTask<T> {
   run: () => Promise<T>;
   resolve: (value: T) => void;
@@ -641,9 +766,14 @@ function waitForRendererIdle(): Promise<void> {
 
 function enqueueRendererTask<T>(run: () => Promise<T>): Promise<T> {
   if (rendererTaskQueue.length >= MAX_RENDERER_QUEUE) {
-    return Promise.reject(new Error(`Renderer presentation queue exceeded ${MAX_RENDERER_QUEUE} entries`));
+    return Promise.reject(
+      new Error(`Renderer presentation queue exceeded ${MAX_RENDERER_QUEUE} entries`),
+    );
   }
   const promise = new Promise<T>((resolve, reject) => {
+    // The queue is heterogeneous, so entries store their resolver at `unknown`. Each entry is
+    // only ever settled with the value its own `run` produced, which is this promise's `T`.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion
     rendererTaskQueue.push({ run, resolve: resolve as (value: unknown) => void, reject });
   });
   void drainRendererTaskQueue();
@@ -662,7 +792,9 @@ async function drainRendererTaskQueue(): Promise<void> {
     task.reject(error instanceof Error ? error : new Error(String(error)));
   } finally {
     rendererTaskRunning = false;
-    queueMicrotask(() => { void drainRendererTaskQueue(); });
+    queueMicrotask(() => {
+      void drainRendererTaskQueue();
+    });
   }
 }
 
@@ -694,13 +826,53 @@ function qualityForCount(count: number): RuntimeQuality {
   const overlayShadowSize = OVERLAY_MODE ? 1024 : 2048;
   let quality: RuntimeQuality;
   if (!adaptiveQuality || count <= 8) {
-    quality = { shadowsEnabled: true, shadowMapSize: overlayShadowSize, bloomScale: 0.68, impactEffectsPerDie: 5, particleScale: 0.92, motifScale: 0.92, lightningScale: 0.9, maxDynamicLights: 6, heroEffectLimit: 2 };
+    quality = {
+      shadowsEnabled: true,
+      shadowMapSize: overlayShadowSize,
+      bloomScale: 0.68,
+      impactEffectsPerDie: 5,
+      particleScale: 0.92,
+      motifScale: 0.92,
+      lightningScale: 0.9,
+      maxDynamicLights: 6,
+      heroEffectLimit: 2,
+    };
   } else if (count <= 16) {
-    quality = { shadowsEnabled: true, shadowMapSize: 1024, bloomScale: 0.62, impactEffectsPerDie: 3, particleScale: 0.68, motifScale: 0.72, lightningScale: 0.68, maxDynamicLights: 4, heroEffectLimit: 2 };
+    quality = {
+      shadowsEnabled: true,
+      shadowMapSize: 1024,
+      bloomScale: 0.62,
+      impactEffectsPerDie: 3,
+      particleScale: 0.68,
+      motifScale: 0.72,
+      lightningScale: 0.68,
+      maxDynamicLights: 4,
+      heroEffectLimit: 2,
+    };
   } else if (count <= 24) {
-    quality = { shadowsEnabled: !OVERLAY_MODE, shadowMapSize: 1024, bloomScale: 0.56, impactEffectsPerDie: 2, particleScale: 0.48, motifScale: 0.52, lightningScale: 0.48, maxDynamicLights: 2, heroEffectLimit: 1 };
+    quality = {
+      shadowsEnabled: !OVERLAY_MODE,
+      shadowMapSize: 1024,
+      bloomScale: 0.56,
+      impactEffectsPerDie: 2,
+      particleScale: 0.48,
+      motifScale: 0.52,
+      lightningScale: 0.48,
+      maxDynamicLights: 2,
+      heroEffectLimit: 1,
+    };
   } else {
-    quality = { shadowsEnabled: false, shadowMapSize: 512, bloomScale: 0.5, impactEffectsPerDie: 1, particleScale: 0.34, motifScale: 0.4, lightningScale: 0.36, maxDynamicLights: 1, heroEffectLimit: 1 };
+    quality = {
+      shadowsEnabled: false,
+      shadowMapSize: 512,
+      bloomScale: 0.5,
+      impactEffectsPerDie: 1,
+      particleScale: 0.34,
+      motifScale: 0.4,
+      lightningScale: 0.36,
+      maxDynamicLights: 1,
+      heroEffectLimit: 1,
+    };
   }
 
   if (OVERLAY_MODE) {
@@ -802,7 +974,10 @@ function applyRuntimeQuality(count: number): void {
   }
   bloomResolutionScale = runtimeQuality.bloomScale;
   if (bloom instanceof UnrealBloomPass) {
-    bloom.setSize(Math.ceil(rendererViewport.width * bloomResolutionScale), Math.ceil(rendererViewport.height * bloomResolutionScale));
+    bloom.setSize(
+      Math.ceil(rendererViewport.width * bloomResolutionScale),
+      Math.ceil(rendererViewport.height * bloomResolutionScale),
+    );
   }
   effects.setQuality({
     particleScale: runtimeQuality.particleScale,
@@ -817,12 +992,16 @@ function applyRuntimeQuality(count: number): void {
 function makeRandomSeed(): string {
   const values = new Uint32Array(4);
   if (globalThis.crypto?.getRandomValues) globalThis.crypto.getRandomValues(values);
-  else for (let index = 0; index < values.length; index += 1) values[index] = Math.floor(Math.random() * 0xffffffff);
+  else
+    for (let index = 0; index < values.length; index += 1)
+      values[index] = Math.floor(Math.random() * 0xffffffff);
   return Array.from(values, (value) => value.toString(16).padStart(8, '0')).join('');
 }
 
 function normalizeSeed(seed: string | number | null | undefined): string {
-  return seed === null || seed === undefined || String(seed).length === 0 ? makeRandomSeed() : String(seed);
+  return seed === null || seed === undefined || String(seed).length === 0
+    ? makeRandomSeed()
+    : String(seed);
 }
 
 function hashSeed(seed: string): number {
@@ -855,7 +1034,10 @@ function cloneReplay(replay: RollReplay): RollReplay {
     impacts: replay.impacts.slice(),
     results: replay.results.slice(),
     outcomes: replay.outcomes.slice(),
-    fallbacks: replay.fallbacks?.map((fallback) => ({ ...fallback, metadata: fallback.metadata ? { ...fallback.metadata } : undefined })),
+    fallbacks: replay.fallbacks?.map((fallback) => ({
+      ...fallback,
+      metadata: fallback.metadata ? { ...fallback.metadata } : undefined,
+    })),
     visualOrder: replay.visualOrder?.map((entry) => ({ ...entry })),
     themes: replay.themes?.slice(),
     dieKinds: replay.dieKinds?.slice(),
@@ -864,7 +1046,6 @@ function cloneReplay(replay: RollReplay): RollReplay {
     effectTimeline: replay.effectTimeline.map((event) => ({ ...event })),
   };
 }
-
 
 function clearFallbackVisuals(): void {
   for (const visual of fallbackVisuals) {
@@ -900,7 +1081,6 @@ function spawnFallbackVisuals(specs: readonly DraftrollFallbackVisual[], seed: s
   });
 }
 
-
 function resetDissolveVisuals(): void {
   dissolveAnimation?.cancel();
   dissolveAnimation = null;
@@ -919,7 +1099,11 @@ async function dissolveDice(options: DiceDismissOptions = {}): Promise<void> {
   if (isRolling || isPlanning) return;
   const durationMs = THREE.MathUtils.clamp(Math.round(options.durationMs ?? 320), 0, 2_000);
   const generation = ++dissolveGeneration;
-  if ((dice.length === 0 && fallbackVisuals.length === 0) || durationMs === 0 || typeof canvas.animate !== 'function') {
+  if (
+    (dice.length === 0 && fallbackVisuals.length === 0) ||
+    durationMs === 0 ||
+    typeof canvas.animate !== 'function'
+  ) {
     clearDice();
     hasCast = false;
     resultPanel.classList.remove('revealed', 'critical');
@@ -930,15 +1114,18 @@ async function dissolveDice(options: DiceDismissOptions = {}): Promise<void> {
   }
 
   resetDissolveVisuals();
-  dissolveAnimation = canvas.animate([
-    { opacity: 1, filter: 'blur(0px)', transform: 'scale(1)' },
-    { opacity: 0.72, filter: 'blur(2px)', transform: 'scale(.995)', offset: 0.45 },
-    { opacity: 0, filter: 'blur(12px)', transform: 'scale(.975)' },
-  ], {
-    duration: durationMs,
-    easing: 'cubic-bezier(.22,.8,.25,1)',
-    fill: 'forwards',
-  });
+  dissolveAnimation = canvas.animate(
+    [
+      { opacity: 1, filter: 'blur(0px)', transform: 'scale(1)' },
+      { opacity: 0.72, filter: 'blur(2px)', transform: 'scale(.995)', offset: 0.45 },
+      { opacity: 0, filter: 'blur(12px)', transform: 'scale(.975)' },
+    ],
+    {
+      duration: durationMs,
+      easing: 'cubic-bezier(.22,.8,.25,1)',
+      fill: 'forwards',
+    },
+  );
 
   try {
     await dissolveAnimation.finished;
@@ -965,10 +1152,16 @@ function clampDieToVisibleArea(die: DieInstance): void {
   const previousZ = die.body.position.z;
   die.body.position.x = THREE.MathUtils.clamp(previousX, -maximumX, maximumX);
   die.body.position.z = THREE.MathUtils.clamp(previousZ, -maximumZ, maximumZ);
-  if (die.body.position.x !== previousX && Math.sign(die.body.velocity.x) === Math.sign(previousX)) {
+  if (
+    die.body.position.x !== previousX &&
+    Math.sign(die.body.velocity.x) === Math.sign(previousX)
+  ) {
     die.body.velocity.x *= -0.08;
   }
-  if (die.body.position.z !== previousZ && Math.sign(die.body.velocity.z) === Math.sign(previousZ)) {
+  if (
+    die.body.position.z !== previousZ &&
+    Math.sign(die.body.velocity.z) === Math.sign(previousZ)
+  ) {
     die.body.velocity.z *= -0.08;
   }
 }
@@ -1035,15 +1228,26 @@ function enforceBodiesBounds(bodies: CANNON.Body[], simulationTime = 0): void {
       if (simulationTime > 4.6 && speed < 0.22 && angularSpeed < 0.46) {
         body.velocity.scale(0.72, body.velocity);
         body.angularVelocity.scale(0.62, body.angularVelocity);
-        if (simulationTime > 5.25 && body.velocity.length() < 0.075 && body.angularVelocity.length() < 0.16) body.sleep();
+        if (
+          simulationTime > 5.25 &&
+          body.velocity.length() < 0.075 &&
+          body.angularVelocity.length() < 0.16
+        )
+          body.sleep();
       }
     }
 
-    body.velocity.y = THREE.MathUtils.clamp(body.velocity.y, -maximumVerticalSpeed, maximumVerticalSpeed);
+    body.velocity.y = THREE.MathUtils.clamp(
+      body.velocity.y,
+      -maximumVerticalSpeed,
+      maximumVerticalSpeed,
+    );
     const linearSpeed = body.velocity.length();
-    if (linearSpeed > maximumLinearSpeed) body.velocity.scale(maximumLinearSpeed / linearSpeed, body.velocity);
+    if (linearSpeed > maximumLinearSpeed)
+      body.velocity.scale(maximumLinearSpeed / linearSpeed, body.velocity);
     const angularSpeed = body.angularVelocity.length();
-    if (angularSpeed > maximumAngularSpeed) body.angularVelocity.scale(maximumAngularSpeed / angularSpeed, body.angularVelocity);
+    if (angularSpeed > maximumAngularSpeed)
+      body.angularVelocity.scale(maximumAngularSpeed / angularSpeed, body.angularVelocity);
   }
 }
 
@@ -1055,7 +1259,10 @@ function attachCollisionAudio(die: DieInstance): void {
   });
 }
 
-function spawnPreview(kinds: readonly DieKind[] = Array.from({ length: quantity }, () => selectedKind), force = false): void {
+function spawnPreview(
+  kinds: readonly DieKind[] = Array.from({ length: quantity }, () => selectedKind),
+  force = false,
+): void {
   quantity = THREE.MathUtils.clamp(kinds.length, 0, 30);
   activeKinds = Array.from({ length: quantity }, (_, index) => kinds[index] ?? selectedKind);
   quantityValue.textContent = String(quantity);
@@ -1096,8 +1303,16 @@ function spawnPreview(kinds: readonly DieKind[] = Array.from({ length: quantity 
     const x = (column - (rowCount - 1) / 2) * spacing;
     const z = (row - (rows - 1) / 2) * spacing * 0.9;
     die.body.position.set(x, 1.05 + row * 0.12, z);
-    die.body.quaternion.setFromEuler(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
-    die.body.angularVelocity.set((Math.random() - 0.5) * 0.22, (Math.random() - 0.5) * 0.22, (Math.random() - 0.5) * 0.22);
+    die.body.quaternion.setFromEuler(
+      Math.random() * Math.PI,
+      Math.random() * Math.PI,
+      Math.random() * Math.PI,
+    );
+    die.body.angularVelocity.set(
+      (Math.random() - 0.5) * 0.22,
+      (Math.random() - 0.5) * 0.22,
+      (Math.random() - 0.5) * 0.22,
+    );
     world.addBody(die.body);
     scene.add(die.group);
     attachCollisionAudio(die);
@@ -1126,12 +1341,16 @@ function setStatus(text: string, rolling: boolean): void {
 
 function normalizeRequestedResults(values: number[]): number[] | null {
   if (values.length === 0) return [];
-  const expanded = values.length === 1 ? Array.from({ length: quantity }, () => values[0]) : values.slice();
+  const expanded =
+    values.length === 1 ? Array.from({ length: quantity }, () => values[0]) : values.slice();
   if (expanded.length !== quantity) return null;
-  if (expanded.some((value, index) => {
-    const maximum = Number((activeKinds[index] ?? selectedKind).slice(1));
-    return !Number.isInteger(value) || value < 1 || value > maximum;
-  })) return null;
+  if (
+    expanded.some((value, index) => {
+      const maximum = Number((activeKinds[index] ?? selectedKind).slice(1));
+      return !Number.isInteger(value) || value < 1 || value > maximum;
+    })
+  )
+    return null;
   return expanded;
 }
 
@@ -1147,11 +1366,17 @@ function readRequestedResults(): number[] | null {
   }
   const raw = presetInput.value.trim();
   if (!raw) return [];
-  const values = raw.split(/[\s,;|/]+/).filter(Boolean).map((token) => Number(token));
+  const values = raw
+    .split(/[\s,;|/]+/)
+    .filter(Boolean)
+    .map((token) => Number(token));
   return normalizeRequestedResults(values);
 }
 
-function normalizeOutcomes(values: EffectOutcome[] | EffectOutcome | null, count: number): EffectOutcome[] | null {
+function normalizeOutcomes(
+  values: EffectOutcome[] | EffectOutcome | null,
+  count: number,
+): EffectOutcome[] | null {
   if (values === null) return null;
   const source = Array.isArray(values) ? values : [values];
   const valid = new Set<EffectOutcome>(['positive', 'neutral', 'negative', 'none']);
@@ -1177,13 +1402,16 @@ function resolveOutcomes(results: number[]): EffectOutcome[] {
   if (explicit) return explicit;
 
   if (outcomeResolver) {
-    const resolved = normalizeOutcomes(outcomeResolver({
-      results: results.slice(),
-      dieKind: activeKinds[0] ?? selectedKind,
-      dieKinds: activeKinds.slice(),
-      quantity,
-      context: { ...activeContext },
-    }), results.length);
+    const resolved = normalizeOutcomes(
+      outcomeResolver({
+        results: results.slice(),
+        dieKind: activeKinds[0] ?? selectedKind,
+        dieKinds: activeKinds.slice(),
+        quantity,
+        context: { ...activeContext },
+      }),
+      results.length,
+    );
     if (resolved) return resolved;
   }
   return defaultOutcomeResolver(results);
@@ -1196,8 +1424,12 @@ function showPresetError(): void {
   presetInput.focus();
 }
 
-function normalizeThemes(values: ThemeName[] | ThemeName | null, count: number): ThemeName[] | null {
-  if (count === 0) return values === null || (Array.isArray(values) && values.length === 0) ? [] : null;
+function normalizeThemes(
+  values: ThemeName[] | ThemeName | null,
+  count: number,
+): ThemeName[] | null {
+  if (count === 0)
+    return values === null || (Array.isArray(values) && values.length === 0) ? [] : null;
   if (values === null) return Array.from({ length: count }, () => selectedTheme);
   const source = Array.isArray(values) ? values : [values];
   if (source.some((value) => !THEME_MANIFESTS[value])) return null;
@@ -1206,8 +1438,12 @@ function normalizeThemes(values: ThemeName[] | ThemeName | null, count: number):
   return source.slice();
 }
 
-function normalizeKinds(values: DieKind[] | DieKind | null, expectedCount: number): DieKind[] | null {
-  if (expectedCount === 0) return values === null || (Array.isArray(values) && values.length === 0) ? [] : null;
+function normalizeKinds(
+  values: DieKind[] | DieKind | null,
+  expectedCount: number,
+): DieKind[] | null {
+  if (expectedCount === 0)
+    return values === null || (Array.isArray(values) && values.length === 0) ? [] : null;
   if (values === null) return Array.from({ length: expectedCount }, () => selectedKind);
   const source = Array.isArray(values) ? values : [values];
   const valid = new Set<DieKind>(['d4', 'd6', 'd8', 'd10', 'd12', 'd20']);
@@ -1229,9 +1465,21 @@ function normalizePhysicalProperties(
     const theme = getRuntimeThemePhysics(themes[index] ?? selectedTheme, kind) ?? {};
     const override = explicit?.[index] ?? {};
     return {
-      sizeScale: THREE.MathUtils.clamp((override.sizeScale ?? theme.sizeScale ?? 1) * preset.sizeScale, 0.5, 2),
-      massScale: THREE.MathUtils.clamp((override.massScale ?? theme.massScale ?? 1) * preset.massScale, 0.25, 4),
-      inertiaScale: THREE.MathUtils.clamp((override.inertiaScale ?? theme.inertiaScale ?? 1) * preset.inertiaScale, 0.25, 4),
+      sizeScale: THREE.MathUtils.clamp(
+        (override.sizeScale ?? theme.sizeScale ?? 1) * preset.sizeScale,
+        0.5,
+        2,
+      ),
+      massScale: THREE.MathUtils.clamp(
+        (override.massScale ?? theme.massScale ?? 1) * preset.massScale,
+        0.25,
+        4,
+      ),
+      inertiaScale: THREE.MathUtils.clamp(
+        (override.inertiaScale ?? theme.inertiaScale ?? 1) * preset.inertiaScale,
+        0.25,
+        4,
+      ),
     };
   });
 }
@@ -1245,11 +1493,14 @@ function applyDiePhysicsRuntime(die: DieInstance, presetName: DicePhysicsPreset)
 function prepareTargets(): boolean {
   const explicitResultCount = queuedApiResults !== null ? queuedApiResults.length : null;
   const explicitKindCount = Array.isArray(queuedKinds) ? queuedKinds.length : null;
-  const fallbackOnlyRequest = queuedFallbacks !== null
-    && queuedFallbacks.length > 0
-    && queuedApiResults === null
-    && queuedKinds === null;
-  const requestedCount = fallbackOnlyRequest ? 0 : explicitKindCount ?? explicitResultCount ?? quantity;
+  const fallbackOnlyRequest =
+    queuedFallbacks !== null &&
+    queuedFallbacks.length > 0 &&
+    queuedApiResults === null &&
+    queuedKinds === null;
+  const requestedCount = fallbackOnlyRequest
+    ? 0
+    : (explicitKindCount ?? explicitResultCount ?? quantity);
   const kinds = normalizeKinds(queuedKinds, requestedCount);
   queuedKinds = null;
   if (!kinds) {
@@ -1290,7 +1541,12 @@ function prepareTargets(): boolean {
   }
   activeThemes = themes;
   activePhysicsPreset = queuedPhysicsPreset;
-  const physics = normalizePhysicalProperties(queuedPhysics, activeKinds, activeThemes, activePhysicsPreset);
+  const physics = normalizePhysicalProperties(
+    queuedPhysics,
+    activeKinds,
+    activeThemes,
+    activePhysicsPreset,
+  );
   queuedPhysics = null;
   queuedPhysicsPreset = 'standard';
   if (!physics) {
@@ -1301,7 +1557,10 @@ function prepareTargets(): boolean {
   world.gravity.set(0, -PHYSICS_PRESETS[activePhysicsPreset].gravity, 0);
   spawnPreview(kinds, true);
   dice.forEach((die) => applyDiePhysicsRuntime(die, activePhysicsPreset));
-  activeTargets = requested.length > 0 ? requested.map((value) => value) : Array.from({ length: quantity }, () => null);
+  activeTargets =
+    requested.length > 0
+      ? requested.map((value) => value)
+      : Array.from({ length: quantity }, () => null);
   activeFallbackSpecs = fallbacks;
   activeVisualOrder = normalizeVisualOrder(queuedVisualOrder, quantity, fallbacks.length);
   queuedVisualOrder = null;
@@ -1337,8 +1596,16 @@ function normalizeVisualOrder(
   defaultIdPrefix = '',
 ): DraftrollVisualOrderEntry[] {
   const fallbackOrder: DraftrollVisualOrderEntry[] = [
-    ...Array.from({ length: physicalCount }, (_, index) => ({ kind: 'physical' as const, index, dieId: `${defaultIdPrefix}physical_${index}` })),
-    ...Array.from({ length: fallbackCount }, (_, index) => ({ kind: 'fallback' as const, index, dieId: `${defaultIdPrefix}fallback_${index}` })),
+    ...Array.from({ length: physicalCount }, (_, index) => ({
+      kind: 'physical' as const,
+      index,
+      dieId: `${defaultIdPrefix}physical_${index}`,
+    })),
+    ...Array.from({ length: fallbackCount }, (_, index) => ({
+      kind: 'fallback' as const,
+      index,
+      dieId: `${defaultIdPrefix}fallback_${index}`,
+    })),
   ];
   if (!order) return fallbackOrder;
   if (order.length !== physicalCount + fallbackCount) return [];
@@ -1346,10 +1613,12 @@ function normalizeVisualOrder(
   const fallbackIndexes = new Set<number>();
   for (const entry of order) {
     if (entry.kind === 'physical') {
-      if (entry.index < 0 || entry.index >= physicalCount || physicalIndexes.has(entry.index)) return [];
+      if (entry.index < 0 || entry.index >= physicalCount || physicalIndexes.has(entry.index))
+        return [];
       physicalIndexes.add(entry.index);
     } else {
-      if (entry.index < 0 || entry.index >= fallbackCount || fallbackIndexes.has(entry.index)) return [];
+      if (entry.index < 0 || entry.index >= fallbackCount || fallbackIndexes.has(entry.index))
+        return [];
       fallbackIndexes.add(entry.index);
     }
   }
@@ -1401,7 +1670,8 @@ function createOrganicPointCloud(
       const nx = (candidate.x - (bounds.minX + bounds.maxX) * 0.5) / width;
       const nz = (candidate.y - (bounds.minZ + bounds.maxZ) * 0.5) / depth;
       const centerPenalty = (nx * nx + nz * nz) * minimumDistance * minimumDistance * 0.025;
-      const score = (points.length === 0 ? minimumDistance * minimumDistance : nearest) - centerPenalty;
+      const score =
+        (points.length === 0 ? minimumDistance * minimumDistance : nearest) - centerPenalty;
       if (score > bestScore) {
         bestScore = score;
         best = candidate;
@@ -1517,10 +1787,17 @@ function createHandCluster(
   // are already separated before the first visible frame. This avoids the
   // stack-then-explode effect that made 20d20 look like teleporting sprites.
   let halfX = Math.min(screenBounds.x - 0.9, largePool ? 1.48 + root * 0.58 : 0.92 + root * 0.39);
-  let halfZ = Math.min(largePool ? 2.42 : 1.92, largePool ? 0.82 + root * 0.31 : 0.58 + root * 0.235);
+  let halfZ = Math.min(
+    largePool ? 2.42 : 1.92,
+    largePool ? 0.82 + root * 0.31 : 0.58 + root * 0.235,
+  );
   let halfY = Math.min(largePool ? 2.1 : 2.8, largePool ? 0.72 + root * 0.29 : 0.52 + root * 0.39);
   const centerXLimit = Math.max(0, screenBounds.x - halfX - 0.92);
-  const centerX = THREE.MathUtils.clamp(horizontalBias * screenBounds.x * 0.32, -centerXLimit, centerXLimit);
+  const centerX = THREE.MathUtils.clamp(
+    horizontalBias * screenBounds.x * 0.32,
+    -centerXLimit,
+    centerXLimit,
+  );
   const centerZ = screenBounds.z - halfZ - 0.82;
   const centerY = (largePool ? 1.06 : 1.18) + halfY;
   let bounds: HandClusterBounds = { centerX, centerY, centerZ, halfX, halfY, halfZ };
@@ -1624,7 +1901,10 @@ function createHandCluster(
     // activation frame. The complete 20d20 release still fits inside roughly
     // half a second, but no inactive stack is ever visible.
     const ordered = result
-      .map((spawn, index) => ({ index, key: spawn.position.x * 0.72 - spawn.position.z * 0.28 + spawn.position.y * 0.08 }))
+      .map((spawn, index) => ({
+        index,
+        key: spawn.position.x * 0.72 - spawn.position.z * 0.28 + spawn.position.y * 0.08,
+      }))
       .toSorted((left, right) => left.key - right.key);
     const waveSize = count >= 24 ? 7 : 6;
     const waveInterval = count >= 24 ? 0.105 : 0.115;
@@ -1643,21 +1923,37 @@ function createHandTargets(
 ): THREE.Vector2[] {
   const count = spawns.length;
   if (count === 0) return [];
-  const handCenter = spawns.reduce(
-    (sum, spawn) => sum.add(new THREE.Vector2(spawn.position.x, spawn.position.z)),
-    new THREE.Vector2(),
-  ).multiplyScalar(1 / count);
+  const handCenter = spawns
+    .reduce(
+      (sum, spawn) => sum.add(new THREE.Vector2(spawn.position.x, spawn.position.z)),
+      new THREE.Vector2(),
+    )
+    .multiplyScalar(1 / count);
   const side = new THREE.Vector2(-throwDirection.y, throwDirection.x);
   const root = Math.sqrt(count);
-  const travel = THREE.MathUtils.clamp((count >= 12 ? 4.35 : 4.9) + root * (count >= 12 ? 0.16 : 0.18), count >= 12 ? 4.35 : 4.9, count >= 12 ? 5.35 : 6.0);
+  const travel = THREE.MathUtils.clamp(
+    (count >= 12 ? 4.35 : 4.9) + root * (count >= 12 ? 0.16 : 0.18),
+    count >= 12 ? 4.35 : 4.9,
+    count >= 12 ? 5.35 : 6.0,
+  );
   const destination = handCenter.clone().addScaledVector(throwDirection, travel);
   destination.x = THREE.MathUtils.clamp(destination.x, -screenBounds.x + 2.0, screenBounds.x - 2.0);
-  destination.y = THREE.MathUtils.clamp(destination.y, -screenBounds.z + 1.75, screenBounds.z - 2.0);
+  destination.y = THREE.MathUtils.clamp(
+    destination.y,
+    -screenBounds.z + 1.75,
+    screenBounds.z - 2.0,
+  );
 
   const radius = Math.max(...activeKinds.map((kind) => DIE_COLLIDER_RADIUS[kind]));
   const targetSpacing = Math.max(0.76, radius * (count > 20 ? 1.16 : count > 12 ? 1.24 : 1.3));
-  const sideSpread = Math.min(screenBounds.x * 0.78, (count >= 12 ? 1.62 : 1.18) + root * (count >= 12 ? 0.55 : 0.51));
-  const depthSpread = Math.min(count >= 12 ? 2.65 : 2.2, (count >= 12 ? 1.02 : 0.78) + root * (count >= 12 ? 0.31 : 0.27));
+  const sideSpread = Math.min(
+    screenBounds.x * 0.78,
+    (count >= 12 ? 1.62 : 1.18) + root * (count >= 12 ? 0.55 : 0.51),
+  );
+  const depthSpread = Math.min(
+    count >= 12 ? 2.65 : 2.2,
+    (count >= 12 ? 1.02 : 0.78) + root * (count >= 12 ? 0.31 : 0.27),
+  );
   const localCloud = createOrganicPointCloud(
     count,
     { minX: -sideSpread, maxX: sideSpread, minZ: -depthSpread, maxZ: depthSpread },
@@ -1693,7 +1989,8 @@ function createHandTargets(
   for (let rank = 0; rank < count; rank += 1) {
     const spawnIndex = spawnOrder[rank].index;
     const local = localCloud[targetOrder[rank].index];
-    const target = destination.clone()
+    const target = destination
+      .clone()
       .addScaledVector(side, local.x)
       .addScaledVector(throwDirection, local.y);
     targets[spawnIndex].set(
@@ -1727,26 +2024,33 @@ function readActiveTableRolls(): ActiveTableRollGroup[] {
   const raw = activeContext.tableRolls;
   if (!Array.isArray(raw)) return [];
   return raw.flatMap((value) => {
-    if (!value || typeof value !== 'object') return [];
-    const entry = value as Record<string, unknown>;
+    if (!isRecord(value)) return [];
+    const entry = value;
     const physicalStart = Number(entry.physicalStart);
     const physicalCount = Number(entry.physicalCount);
     const fallbackStart = Number(entry.fallbackStart);
     const fallbackCount = Number(entry.fallbackCount);
     const visualCount = Number(entry.visualCount);
     const total = Number(entry.total);
-    if (![physicalStart, physicalCount, fallbackStart, fallbackCount, visualCount, total].every(Number.isFinite)) return [];
-    return [{
-      groupId: typeof entry.groupId === 'string' ? entry.groupId : `table-roll-${physicalStart}`,
-      actorLabel: typeof entry.actorLabel === 'string' ? entry.actorLabel : undefined,
-      rollLabel: typeof entry.rollLabel === 'string' ? entry.rollLabel : undefined,
-      total,
-      physicalStart: Math.max(0, Math.floor(physicalStart)),
-      physicalCount: Math.max(0, Math.floor(physicalCount)),
-      fallbackStart: Math.max(0, Math.floor(fallbackStart)),
-      fallbackCount: Math.max(0, Math.floor(fallbackCount)),
-      visualCount: Math.max(0, Math.floor(visualCount)),
-    }];
+    if (
+      ![physicalStart, physicalCount, fallbackStart, fallbackCount, visualCount, total].every(
+        Number.isFinite,
+      )
+    )
+      return [];
+    return [
+      {
+        groupId: typeof entry.groupId === 'string' ? entry.groupId : `table-roll-${physicalStart}`,
+        actorLabel: typeof entry.actorLabel === 'string' ? entry.actorLabel : undefined,
+        rollLabel: typeof entry.rollLabel === 'string' ? entry.rollLabel : undefined,
+        total,
+        physicalStart: Math.max(0, Math.floor(physicalStart)),
+        physicalCount: Math.max(0, Math.floor(physicalCount)),
+        fallbackStart: Math.max(0, Math.floor(fallbackStart)),
+        fallbackCount: Math.max(0, Math.floor(fallbackCount)),
+        visualCount: Math.max(0, Math.floor(visualCount)),
+      },
+    ];
   });
 }
 
@@ -1758,17 +2062,39 @@ function createLaunchStatesForGroup(
 ): LaunchState[] {
   const spawns = createHandCluster(groupDice.length, random, handBias);
   const targets = createHandTargets(spawns, random, throwDirection);
-  const handCenter = spawns.reduce(
-    (sum, spawn) => sum.add(new THREE.Vector3(spawn.position.x, spawn.position.y, spawn.position.z)),
-    new THREE.Vector3(),
-  ).multiplyScalar(1 / Math.max(1, spawns.length));
+  const handCenter = spawns
+    .reduce(
+      (sum, spawn) =>
+        sum.add(new THREE.Vector3(spawn.position.x, spawn.position.y, spawn.position.z)),
+      new THREE.Vector3(),
+    )
+    .multiplyScalar(1 / Math.max(1, spawns.length));
   const side = new THREE.Vector2(-throwDirection.y, throwDirection.x);
   const crowded = groupDice.length > 15;
   const largePool = groupDice.length >= 12;
-  const maximumHorizontalSpeed = crowded ? 7.35 : largePool ? 7.75 : groupDice.length > 8 ? 8.55 : 9.4;
-  const minimumHorizontalSpeed = crowded ? 4.65 : largePool ? 4.95 : groupDice.length > 8 ? 5.7 : 6.25;
+  const maximumHorizontalSpeed = crowded
+    ? 7.35
+    : largePool
+      ? 7.75
+      : groupDice.length > 8
+        ? 8.55
+        : 9.4;
+  const minimumHorizontalSpeed = crowded
+    ? 4.65
+    : largePool
+      ? 4.95
+      : groupDice.length > 8
+        ? 5.7
+        : 6.25;
   const globalWristTwist = (random() - 0.5) * (crowded ? 2.2 : 3.1);
-  const releaseWindow = groupDice.length <= 2 ? 0 : THREE.MathUtils.lerp(0.024, largePool ? 0.09 : 0.056, THREE.MathUtils.clamp((groupDice.length - 3) / 27, 0, 1));
+  const releaseWindow =
+    groupDice.length <= 2
+      ? 0
+      : THREE.MathUtils.lerp(
+          0.024,
+          largePool ? 0.09 : 0.056,
+          THREE.MathUtils.clamp((groupDice.length - 3) / 27, 0, 1),
+        );
 
   return groupDice.map((die, index) => {
     const spawn = spawns[index];
@@ -1791,7 +2117,10 @@ function createLaunchStatesForGroup(
     const localSide = relativeX * side.x + relativeZ * side.y;
     const localForward = relativeX * throwDirection.x + relativeZ * throwDirection.y;
     const normalish = random() + random() + random() - 1.5;
-    const desiredVelocityY = (largePool ? 1.72 : 2.15) + random() * (largePool ? 1.05 : 1.25) + THREE.MathUtils.clamp(relativeY * 0.1, -0.18, 0.25);
+    const desiredVelocityY =
+      (largePool ? 1.72 : 2.15) +
+      random() * (largePool ? 1.05 : 1.25) +
+      THREE.MathUtils.clamp(relativeY * 0.1, -0.18, 0.25);
     const headroom = Math.max(0.18, 9.0 - position.y);
     const ceilingSafeVelocityY = Math.sqrt(2 * 20.5 * headroom) * 0.72;
     const velocityY = Math.max(0.72, Math.min(desiredVelocityY, ceilingSafeVelocityY));
@@ -1823,18 +2152,25 @@ function createLaunchStatesForGroup(
     const rollingBlend = crowded ? 0.82 : largePool ? 0.77 : 0.7;
     const tumble = crowded ? 4.15 : largePool ? 4.45 : 4.25;
     const angularVelocity = new CANNON.Vec3(
-      rollingX * rollingBlend + (random() - 0.5) * tumble + throwDirection.y * globalWristTwist * 0.34,
+      rollingX * rollingBlend +
+        (random() - 0.5) * tumble +
+        throwDirection.y * globalWristTwist * 0.34,
       globalWristTwist + (random() - 0.5) * (crowded ? 3.0 : 4.0),
-      rollingZ * rollingBlend + (random() - 0.5) * tumble - throwDirection.x * globalWristTwist * 0.34,
+      rollingZ * rollingBlend +
+        (random() - 0.5) * tumble -
+        throwDirection.x * globalWristTwist * 0.34,
     );
 
     const forwardPhase = THREE.MathUtils.clamp((localForward + 1.4) / 2.8, 0, 1);
     const heightPhase = THREE.MathUtils.clamp((relativeY + 2.2) / 4.4, 0, 1);
-    const delay = spawn.releaseDelay + releaseWindow * THREE.MathUtils.clamp(
-      (1 - forwardPhase) * 0.42 + heightPhase * 0.38 + random() * 0.2,
-      0,
-      1,
-    );
+    const delay =
+      spawn.releaseDelay +
+      releaseWindow *
+        THREE.MathUtils.clamp(
+          (1 - forwardPhase) * 0.42 + heightPhase * 0.38 + random() * 0.2,
+          0,
+          1,
+        );
 
     return {
       position,
@@ -1851,7 +2187,10 @@ function createLaunchStates(swipe: THREE.Vector2 | undefined, seed: string): Lau
   if (tableRolls.length > 1) {
     const states: LaunchState[] = [];
     tableRolls.forEach((group, index) => {
-      const lane = tableRolls.length === 1 ? 0 : THREE.MathUtils.lerp(-0.82, 0.82, index / (tableRolls.length - 1));
+      const lane =
+        tableRolls.length === 1
+          ? 0
+          : THREE.MathUtils.lerp(-0.82, 0.82, index / (tableRolls.length - 1));
       const random = createSeededRandom(`${seed}:${group.groupId}`);
       const throwDirection = new THREE.Vector2(-lane * 0.28, -1)
         .normalize()
@@ -1876,7 +2215,11 @@ function createLaunchStates(swipe: THREE.Vector2 | undefined, seed: string): Lau
 function cloneDynamicBody(source: CANNON.Body, state: LaunchState): CANNON.Body {
   const clone = new CANNON.Body({ mass: source.mass, material: dicePhysicsMaterial });
   for (let index = 0; index < source.shapes.length; index += 1) {
-    clone.addShape(source.shapes[index], source.shapeOffsets[index].clone(), source.shapeOrientations[index].clone());
+    clone.addShape(
+      source.shapes[index],
+      source.shapeOffsets[index].clone(),
+      source.shapeOrientations[index].clone(),
+    );
   }
   clone.linearDamping = source.linearDamping;
   clone.angularDamping = source.angularDamping;
@@ -1912,17 +2255,26 @@ function contactSimilarity(a: number[], b: number[]): number {
   let right = 0;
   let intersection = 0;
   while (left < a.length && right < b.length) {
-    if (a[left] === b[right]) { intersection += 1; left += 1; right += 1; }
-    else if (a[left] < b[right]) left += 1;
+    if (a[left] === b[right]) {
+      intersection += 1;
+      left += 1;
+      right += 1;
+    } else if (a[left] < b[right]) left += 1;
     else right += 1;
   }
   return intersection / Math.max(1, Math.max(a.length, b.length));
 }
 
 function buildRollPlanSync(states: LaunchState[]): RollPlan {
-  const planner = new CANNON.World({ gravity: new CANNON.Vec3(0, -PHYSICS_PRESETS[activePhysicsPreset].gravity, 0) });
+  const planner = new CANNON.World({
+    gravity: new CANNON.Vec3(0, -PHYSICS_PRESETS[activePhysicsPreset].gravity, 0),
+  });
   configureWorld(planner);
-  const plannerFloor = new CANNON.Body({ mass: 0, material: tablePhysicsMaterial, shape: new CANNON.Plane() });
+  const plannerFloor = new CANNON.Body({
+    mass: 0,
+    material: tablePhysicsMaterial,
+    shape: new CANNON.Plane(),
+  });
   plannerFloor.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
   planner.addBody(plannerFloor);
   const staticBodies = [plannerFloor, ...addCurrentWalls(planner)];
@@ -1980,18 +2332,20 @@ function buildRollPlanSync(states: LaunchState[]): RollPlan {
     return Array.from(new Set(keys)).toSorted((a, b) => a - b);
   };
   const stablePositions = new Float32Array(plannerDice.length * 3);
-  const copyStablePositions = (): void => plannerDice.forEach((body, index) => {
-    stablePositions[index * 3] = body.position.x;
-    stablePositions[index * 3 + 1] = body.position.y;
-    stablePositions[index * 3 + 2] = body.position.z;
-  });
-  const maxDisplacementSquared = (): number => plannerDice.reduce((maximum, body, index) => {
-    if (!activeFlags[index]) return maximum;
-    const dx = body.position.x - stablePositions[index * 3];
-    const dy = body.position.y - stablePositions[index * 3 + 1];
-    const dz = body.position.z - stablePositions[index * 3 + 2];
-    return Math.max(maximum, dx * dx + dy * dy + dz * dz);
-  }, 0);
+  const copyStablePositions = (): void =>
+    plannerDice.forEach((body, index) => {
+      stablePositions[index * 3] = body.position.x;
+      stablePositions[index * 3 + 1] = body.position.y;
+      stablePositions[index * 3 + 2] = body.position.z;
+    });
+  const maxDisplacementSquared = (): number =>
+    plannerDice.reduce((maximum, body, index) => {
+      if (!activeFlags[index]) return maximum;
+      const dx = body.position.x - stablePositions[index * 3];
+      const dy = body.position.y - stablePositions[index * 3 + 1];
+      const dz = body.position.z - stablePositions[index * 3 + 2];
+      return Math.max(maximum, dx * dx + dy * dy + dz * dz);
+    }, 0);
 
   const frameData: number[] = [];
   appendFrame(frameData, plannerDice);
@@ -2036,14 +2390,21 @@ function buildRollPlanSync(states: LaunchState[]): RollPlan {
       const angularSpeed = body.angularVelocity.length();
       linearSum += speed;
       angularSum += angularSpeed;
-      if (!(body.sleepState === CANNON.Body.SLEEPING || (speed < 0.2 && angularSpeed < 0.28))) allSlow = false;
+      if (!(body.sleepState === CANNON.Body.SLEEPING || (speed < 0.2 && angularSpeed < 0.28)))
+        allSlow = false;
     });
     slowTime = allSlow ? slowTime + PLANNER_STEP : 0;
     const contacts = getContacts();
     if (contactSimilarity(contacts, previousContacts) >= 0.82) contactStableTime += PLANNER_STEP;
-    else { previousContacts = contacts; contactStableTime = 0; }
+    else {
+      previousContacts = contacts;
+      contactStableTime = 0;
+    }
     if (maxDisplacementSquared() <= 0.009 * 0.009) displacementStableTime += PLANNER_STEP;
-    else { copyStablePositions(); displacementStableTime = 0; }
+    else {
+      copyStablePositions();
+      displacementStableTime = 0;
+    }
 
     if (currentStep % recordEvery === 0) {
       appendFrame(frameData, plannerDice);
@@ -2052,10 +2413,23 @@ function buildRollPlanSync(states: LaunchState[]): RollPlan {
       const averageLinear = linearSum / Math.max(1, activeCount);
       const averageAngular = angularSum / Math.max(1, activeCount);
       const sleepSettled = afterLastActivation && slowTime > 0.5;
-      const contactSettled = afterLastActivation && averageLinear < 0.11 && averageAngular < 0.18 && contactStableTime > 0.24 && displacementStableTime > 0.22;
-      const microMotionSettled = afterLastActivation && averageLinear < 0.035 && averageAngular < 0.065 && displacementStableTime > 0.2;
+      const contactSettled =
+        afterLastActivation &&
+        averageLinear < 0.11 &&
+        averageAngular < 0.18 &&
+        contactStableTime > 0.24 &&
+        displacementStableTime > 0.22;
+      const microMotionSettled =
+        afterLastActivation &&
+        averageLinear < 0.035 &&
+        averageAngular < 0.065 &&
+        displacementStableTime > 0.2;
       if (currentStep >= minSteps && (sleepSettled || contactSettled || microMotionSettled)) {
-        settleReason = contactSettled ? 'stable-contact-graph' : microMotionSettled ? 'micro-motion-stable' : 'sleep-threshold';
+        settleReason = contactSettled
+          ? 'stable-contact-graph'
+          : microMotionSettled
+            ? 'micro-motion-stable'
+            : 'sleep-threshold';
         break;
       }
     }
@@ -2068,7 +2442,12 @@ function buildRollPlanSync(states: LaunchState[]): RollPlan {
   dice.forEach((die, index) => {
     die.resetNumbering();
     const offset = lastFrameOffset + index * 7;
-    const quaternion = { x: transforms[offset + 3], y: transforms[offset + 4], z: transforms[offset + 5], w: transforms[offset + 6] };
+    const quaternion = {
+      x: transforms[offset + 3],
+      y: transforms[offset + 4],
+      z: transforms[offset + 5],
+      w: transforms[offset + 6],
+    };
     const landingFace = die.getTopFaceIndex(quaternion);
     results.push(die.getValueForFaceIndex(landingFace));
   });
@@ -2086,7 +2465,6 @@ function buildRollPlanSync(states: LaunchState[]): RollPlan {
     physicsSteps: currentStep,
   };
 }
-
 
 interface WorkerPlanResponse {
   id: number;
@@ -2134,14 +2512,17 @@ function getRollWorker(): Worker | null {
     if (!pending) return;
     pendingPlans.delete(response.id);
     const impactData = new Float32Array(response.impacts);
-    const impacts: RollImpact[] = Array.from({ length: Math.floor(impactData.length / 3) }, (_, index) => {
-      const offset = index * 3;
-      return {
-        time: impactData[offset],
-        dieIndex: Math.round(impactData[offset + 1]),
-        strength: impactData[offset + 2],
-      };
-    });
+    const impacts: RollImpact[] = Array.from(
+      { length: Math.floor(impactData.length / 3) },
+      (_, index) => {
+        const offset = index * 3;
+        return {
+          time: impactData[offset],
+          dieIndex: Math.round(impactData[offset + 1]),
+          strength: impactData[offset + 2],
+        };
+      },
+    );
     pending.resolve({
       step: response.step,
       frameCount: response.frameCount,
@@ -2187,8 +2568,6 @@ function packLaunchStates(states: LaunchState[]): Float32Array {
   return packed;
 }
 
-
-
 function readLandingValue(plan: RollPlan, transforms: Float32Array, dieIndex: number): number {
   const stride = plan.dieCount * 7;
   const offset = (plan.frameCount - 1) * stride + dieIndex * 7;
@@ -2218,10 +2597,7 @@ function readLandingValue(plan: RollPlan, transforms: Float32Array, dieIndex: nu
  * dice can follow a preserved kinematic trajectory; settled dice can re-enter
  * as ordinary dynamic bodies and be knocked naturally by the new handful.
  */
-function applyShapeSymmetryTargets(
-  plan: RollPlan,
-  preservedCount = 0,
-): RollPlan {
+function applyShapeSymmetryTargets(plan: RollPlan, preservedCount = 0): RollPlan {
   const transforms = plan.transforms.slice();
   const frameStride = plan.dieCount * 7;
   const retargetedDice: number[] = [];
@@ -2248,12 +2624,15 @@ function applyShapeSymmetryTargets(
     retargetedDice.push(dieIndex);
     for (let frame = 0; frame < plan.frameCount; frame += 1) {
       const offset = frame * frameStride + dieIndex * 7;
-      baseQuaternion.set(
-        transforms[offset + 3],
-        transforms[offset + 4],
-        transforms[offset + 5],
-        transforms[offset + 6],
-      ).multiply(symmetry).normalize();
+      baseQuaternion
+        .set(
+          transforms[offset + 3],
+          transforms[offset + 4],
+          transforms[offset + 5],
+          transforms[offset + 6],
+        )
+        .multiply(symmetry)
+        .normalize();
       transforms[offset + 3] = baseQuaternion.x;
       transforms[offset + 4] = baseQuaternion.y;
       transforms[offset + 5] = baseQuaternion.z;
@@ -2261,14 +2640,18 @@ function applyShapeSymmetryTargets(
     }
   }
 
-  const results = dice.slice(0, plan.dieCount).map((_die, index) => readLandingValue(plan, transforms, index));
+  const results = dice
+    .slice(0, plan.dieCount)
+    .map((_die, index) => readLandingValue(plan, transforms, index));
   const failures: number[] = [];
   for (let index = preservedCount; index < plan.dieCount; index += 1) {
     const target = activeTargets[index];
     if (target !== null && target !== undefined && results[index] !== target) failures.push(index);
   }
   if (failures.length > 0) {
-    throw new Error(`Shape-symmetry targeting failed for dice ${failures.map((index) => index + 1).join(', ')}.`);
+    throw new Error(
+      `Shape-symmetry targeting failed for dice ${failures.map((index) => index + 1).join(', ')}.`,
+    );
   }
 
   for (let index = 0; index < plan.dieCount; index += 1) {
@@ -2284,14 +2667,17 @@ function applyShapeSymmetryTargets(
       transforms[offset + 5],
       transforms[offset + 6],
     );
-    finalTargetDots.push(dice[index].getTargetNormal(target).applyQuaternion(finalQuaternion).normalize().dot(up));
+    finalTargetDots.push(
+      dice[index].getTargetNormal(target).applyQuaternion(finalQuaternion).normalize().dot(up),
+    );
   }
 
   const completedPlan: RollPlan = {
     ...plan,
     transforms,
     results,
-    settleReason: retargetedDice.length > 0 ? `${plan.settleReason}+shape-symmetry` : plan.settleReason,
+    settleReason:
+      retargetedDice.length > 0 ? `${plan.settleReason}+shape-symmetry` : plan.settleReason,
     diagnostics: {
       ...plan.diagnostics,
       targetingMethod: 'shape-symmetry',
@@ -2328,24 +2714,30 @@ async function buildRollPlan(
   if (lockedTransforms) transfer.push(lockedTransforms.buffer);
   const basePlan = await new Promise<Omit<RollPlan, 'results'>>((resolve, reject) => {
     pendingPlans.set(id, { resolve, reject });
-    worker.postMessage({
-      id,
-      kinds: activeKinds.slice(),
-      count: states.length,
-      boundsX: screenBounds.x,
-      boundsZ: screenBounds.z,
-      states: packed.buffer,
-      lockedCount,
-      lockedTrajectory: lockedTransforms?.buffer,
-      lockedTrajectoryStep: lockedTrajectory?.step,
-      lockedTrajectoryFrameCount: lockedTrajectory?.frameCount,
-    }, transfer);
+    worker.postMessage(
+      {
+        id,
+        kinds: activeKinds.slice(),
+        count: states.length,
+        boundsX: screenBounds.x,
+        boundsZ: screenBounds.z,
+        states: packed.buffer,
+        lockedCount,
+        lockedTrajectory: lockedTransforms?.buffer,
+        lockedTrajectoryStep: lockedTrajectory?.step,
+        lockedTrajectoryFrameCount: lockedTrajectory?.frameCount,
+      },
+      transfer,
+    );
   });
-  return applyShapeSymmetryTargets({
-    ...basePlan,
-    results: [],
-    activationDelays: Float32Array.from(states, (state) => state.delay),
-  }, preservedCount);
+  return applyShapeSymmetryTargets(
+    {
+      ...basePlan,
+      results: [],
+      activationDelays: Float32Array.from(states, (state) => state.delay),
+    },
+    preservedCount,
+  );
 }
 
 function applyPlanTransform(plan: RollPlan, time: number): void {
@@ -2357,8 +2749,12 @@ function applyPlanTransform(plan: RollPlan, time: number): void {
   const firstFrameOffset = firstIndex * frameStride;
   const secondFrameOffset = secondIndex * frameStride;
 
-  const scaleX = plan.sourceBounds ? Math.min(1, (screenBounds.x - 0.15) / Math.max(0.01, plan.sourceBounds.x)) : 1;
-  const scaleZ = plan.sourceBounds ? Math.min(1, (screenBounds.z - 0.15) / Math.max(0.01, plan.sourceBounds.z)) : 1;
+  const scaleX = plan.sourceBounds
+    ? Math.min(1, (screenBounds.x - 0.15) / Math.max(0.01, plan.sourceBounds.x))
+    : 1;
+  const scaleZ = plan.sourceBounds
+    ? Math.min(1, (screenBounds.z - 0.15) / Math.max(0.01, plan.sourceBounds.z))
+    : 1;
   dice.forEach((die, index) => {
     const activationDelay = plan.activationDelays?.[index] ?? 0;
     die.group.visible = time + plan.step * 0.5 >= activationDelay;
@@ -2369,10 +2765,25 @@ function applyPlanTransform(plan: RollPlan, time: number): void {
       THREE.MathUtils.lerp(plan.transforms[a + 1], plan.transforms[b + 1], alpha),
       THREE.MathUtils.lerp(plan.transforms[a + 2], plan.transforms[b + 2], alpha) * scaleZ,
     );
-    replayQuaternionA.set(plan.transforms[a + 3], plan.transforms[a + 4], plan.transforms[a + 5], plan.transforms[a + 6]);
-    replayQuaternionB.set(plan.transforms[b + 3], plan.transforms[b + 4], plan.transforms[b + 5], plan.transforms[b + 6]);
+    replayQuaternionA.set(
+      plan.transforms[a + 3],
+      plan.transforms[a + 4],
+      plan.transforms[a + 5],
+      plan.transforms[a + 6],
+    );
+    replayQuaternionB.set(
+      plan.transforms[b + 3],
+      plan.transforms[b + 4],
+      plan.transforms[b + 5],
+      plan.transforms[b + 6],
+    );
     replayQuaternionA.slerp(replayQuaternionB, alpha);
-    die.body.quaternion.set(replayQuaternionA.x, replayQuaternionA.y, replayQuaternionA.z, replayQuaternionA.w);
+    die.body.quaternion.set(
+      replayQuaternionA.x,
+      replayQuaternionA.y,
+      replayQuaternionA.z,
+      replayQuaternionA.w,
+    );
     clampDieToVisibleArea(die);
     die.syncVisual();
   });
@@ -2387,7 +2798,11 @@ function playImpacts(plan: RollPlan, previousTime: number, currentTime: number):
       audio.playImpact(impact.strength, THEME_MANIFESTS[impactTheme].surfaceAudio, impactTheme);
       if (collisionSparkBudget > 0 && impact.strength > 3.4) {
         collisionSparkBudget -= 1;
-        effects.impact(dice[impact.dieIndex].getWorldPosition(), THEMES[impactTheme].particle, impact.strength);
+        effects.impact(
+          dice[impact.dieIndex].getWorldPosition(),
+          THEMES[impactTheme].particle,
+          impact.strength,
+        );
       }
     }
     nextImpactIndex += 1;
@@ -2412,34 +2827,40 @@ function createEffectTimeline(plan: RollPlan, outcomes: EffectOutcome[]): RollRe
     dieIndex: impact.dieIndex,
     strength: impact.strength,
   }));
-  const settleTimes = plan.settleTimes?.length === plan.dieCount
-    ? plan.settleTimes
-    : deriveDieSettleTimes(plan);
+  const settleTimes =
+    plan.settleTimes?.length === plan.dieCount ? plan.settleTimes : deriveDieSettleTimes(plan);
   outcomes.forEach((outcome, dieIndex) => {
-    events.push({ time: settleTimes[dieIndex] ?? plan.duration, type: 'result', dieIndex, outcome });
+    events.push({
+      time: settleTimes[dieIndex] ?? plan.duration,
+      type: 'result',
+      dieIndex,
+      outcome,
+    });
   });
   return events.toSorted((a, b) => a.time - b.time || a.dieIndex - b.dieIndex);
 }
 
 function captureReplay(plan: RollPlan): void {
   const diagnostics = plan.diagnostics;
-  lastTargetingSnapshot = diagnostics ? {
-    method: 'shape-symmetry',
-    planningMs: diagnostics.candidateSearchMs ?? 0,
-    retargetedDiceCount: diagnostics.retargetedDice?.length ?? 0,
-    preservedTrajectoryDiceCount: diagnostics.lockedKinematicDice ?? 0,
-    naturalMatches: diagnostics.naturalMatches ?? 0,
-    minimumFinalAlignment: diagnostics.finalTargetDots?.length
-      ? Math.min(...diagnostics.finalTargetDots)
-      : 1,
-    targetSuccess: diagnostics.targetSuccess !== false,
-    naturalTrajectory: diagnostics.naturalTrajectory === true,
-    candidateAttempts: diagnostics.candidateAttempts ?? 0,
-    candidateSearchMs: diagnostics.candidateSearchMs ?? 0,
-    assistedDiceCount: diagnostics.assistedDice?.length ?? 0,
-    maximumAssistAngleRadians: diagnostics.maximumAssistAngle ?? 0,
-    continuityBlendedDiceCount: diagnostics.continuityBlendedDice?.length ?? 0,
-  } : null;
+  lastTargetingSnapshot = diagnostics
+    ? {
+        method: 'shape-symmetry',
+        planningMs: diagnostics.candidateSearchMs ?? 0,
+        retargetedDiceCount: diagnostics.retargetedDice?.length ?? 0,
+        preservedTrajectoryDiceCount: diagnostics.lockedKinematicDice ?? 0,
+        naturalMatches: diagnostics.naturalMatches ?? 0,
+        minimumFinalAlignment: diagnostics.finalTargetDots?.length
+          ? Math.min(...diagnostics.finalTargetDots)
+          : 1,
+        targetSuccess: diagnostics.targetSuccess !== false,
+        naturalTrajectory: diagnostics.naturalTrajectory === true,
+        candidateAttempts: diagnostics.candidateAttempts ?? 0,
+        candidateSearchMs: diagnostics.candidateSearchMs ?? 0,
+        assistedDiceCount: diagnostics.assistedDice?.length ?? 0,
+        maximumAssistAngleRadians: diagnostics.maximumAssistAngle ?? 0,
+        continuityBlendedDiceCount: diagnostics.continuityBlendedDice?.length ?? 0,
+      }
+    : null;
   lastReplay = {
     formatVersion: 1,
     engineVersion: ENGINE_VERSION,
@@ -2462,7 +2883,10 @@ function captureReplay(plan: RollPlan): void {
     impacts: packImpacts(plan.impacts),
     results: plan.results.slice(),
     outcomes: activeOutcomes.slice(),
-    fallbacks: activeFallbackSpecs.map((fallback) => ({ ...fallback, metadata: fallback.metadata ? { ...fallback.metadata } : undefined })),
+    fallbacks: activeFallbackSpecs.map((fallback) => ({
+      ...fallback,
+      metadata: fallback.metadata ? { ...fallback.metadata } : undefined,
+    })),
     visualOrder: activeVisualOrder.map((entry) => ({ ...entry })),
     context: { ...activeContext },
     effectTimeline: createEffectTimeline(plan, activeOutcomes),
@@ -2483,26 +2907,43 @@ function beginPlanPlayback(
   hasCast = true;
   gestureHint.classList.add('hidden');
   isRolling = true;
-  collisionSparkBudget = Math.max(6, Math.min(48, (quantity + activeFallbackSpecs.length) * runtimeQuality.impactEffectsPerDie));
+  collisionSparkBudget = Math.max(
+    6,
+    Math.min(48, (quantity + activeFallbackSpecs.length) * runtimeQuality.impactEffectsPerDie),
+  );
   resultPanel.classList.remove('revealed', 'critical');
   resultTotal.textContent = '…';
   const tableRolls = readActiveTableRolls();
-  resultDetail.textContent = tableRolls.length > 1
-    ? `${tableRolls.length} simultaneous table rolls in motion`
-    : settleImmediately
-      ? 'Late event · presenting settled result'
-      : catchingUp
-        ? 'Synchronizing with roll already in progress'
-        : replaying
-          ? 'Replaying verified trajectory'
-          : activeFallbackSpecs.length > 0 ? 'Dice and result tokens in motion' : 'Dice in motion';
+  resultDetail.textContent =
+    tableRolls.length > 1
+      ? // Name the rollers while the throw is still in motion, matching the settled
+        // panel's separator so the label does not change shape once the dice land.
+        tableRolls
+          .map((entry) => [entry.actorLabel, entry.rollLabel].filter(Boolean).join(' · ') || 'Roll')
+          .join('  •  ')
+      : settleImmediately
+        ? 'Late event · presenting settled result'
+        : catchingUp
+          ? 'Synchronizing with roll already in progress'
+          : replaying
+            ? 'Replaying verified trajectory'
+            : activeFallbackSpecs.length > 0
+              ? 'Dice and result tokens in motion'
+              : 'Dice in motion';
   setStatus(
-    tableRolls.length > 1 ? `${tableRolls.length} rollers casting`
-      : settleImmediately ? 'Presenting settled result'
-        : catchingUp ? 'Catching up to synchronized roll'
-          : replaying ? 'Replaying verified roll'
-            : quantity === 0 ? 'Presenting fallback results'
-              : activeTargets.some((target) => target !== null) ? 'Resolving exact physical throw' : 'Resolving physics',
+    tableRolls.length > 1
+      ? `${tableRolls.length} rollers casting`
+      : settleImmediately
+        ? 'Presenting settled result'
+        : catchingUp
+          ? 'Catching up to synchronized roll'
+          : replaying
+            ? 'Replaying verified roll'
+            : quantity === 0
+              ? 'Presenting fallback results'
+              : activeTargets.some((target) => target !== null)
+                ? 'Resolving exact physical throw'
+                : 'Resolving physics',
     !settleImmediately,
   );
   activePlan = plan;
@@ -2544,11 +2985,16 @@ function applyReplayNumbering(plan: RollPlan): void {
     });
     return die.getValueForFaceIndex(landingIndex) === plan.results[index];
   });
-  if (!matches) throw new Error('Replay trajectory does not physically match its recorded results.');
+  if (!matches)
+    throw new Error('Replay trajectory does not physically match its recorded results.');
 }
 
-function playRecordedReplay(replay: RollReplay, options: DiceReplayOptions = {}): Promise<DraftrollRollCompletion> {
-  if (isRolling || isPlanning || replay.formatVersion !== 1) return Promise.reject(new Error('Renderer is busy or replay format is unsupported'));
+function playRecordedReplay(
+  replay: RollReplay,
+  options: DiceReplayOptions = {},
+): Promise<DraftrollRollCompletion> {
+  if (isRolling || isPlanning || replay.formatVersion !== 1)
+    return Promise.reject(new Error('Renderer is busy or replay format is unsupported'));
   rebuildScreenBounds();
   applyRendererResolution();
   // Defensive copy of the caller-supplied replay payload.
@@ -2557,33 +3003,50 @@ function playRecordedReplay(replay: RollReplay, options: DiceReplayOptions = {})
     ...fallback,
     metadata: fallback.metadata ? { ...fallback.metadata } : undefined,
   }));
-  const replayKinds = replay.dieKinds?.length === replay.quantity
-    ? replay.dieKinds.slice()
-    : Array.from({ length: replay.quantity }, () => replay.dieKind);
+  const replayKinds =
+    replay.dieKinds?.length === replay.quantity
+      ? replay.dieKinds.slice()
+      : Array.from({ length: replay.quantity }, () => replay.dieKind);
   const supportedKinds = new Set<DieKind>(['d4', 'd6', 'd8', 'd10', 'd12', 'd20']);
-  if (replayKinds.some((kind) => !supportedKinds.has(kind))) return Promise.reject(new Error('Replay die type is unsupported'));
+  if (replayKinds.some((kind) => !supportedKinds.has(kind)))
+    return Promise.reject(new Error('Replay die type is unsupported'));
   const totalVisuals = replay.quantity + replayFallbacks.length;
-  if (!THEME_MANIFESTS[replay.theme] || totalVisuals < 1 || totalVisuals > 30) return Promise.reject(new Error('Replay theme or visual count is invalid'));
+  if (!THEME_MANIFESTS[replay.theme] || totalVisuals < 1 || totalVisuals > 30)
+    return Promise.reject(new Error('Replay theme or visual count is invalid'));
   const expectedTransforms = replay.frameCount * replay.quantity * 7;
-  if (replay.transforms.length !== expectedTransforms || replay.results.length !== replay.quantity) return Promise.reject(new Error('Replay buffers are invalid'));
+  if (replay.transforms.length !== expectedTransforms || replay.results.length !== replay.quantity)
+    return Promise.reject(new Error('Replay buffers are invalid'));
 
   selectedKind = replayKinds[0] ?? replay.dieKind;
   selectedTheme = replay.theme;
-  activeThemes = normalizeThemes(replay.themes ?? (replay.quantity > 0 ? replay.theme : []), replay.quantity)
-    ?? Array.from({ length: replay.quantity }, () => replay.theme);
+  activeThemes =
+    normalizeThemes(replay.themes ?? (replay.quantity > 0 ? replay.theme : []), replay.quantity) ??
+    Array.from({ length: replay.quantity }, () => replay.theme);
   activeKinds = replayKinds;
   activePhysicsPreset = replay.physicsPreset ?? 'standard';
-  activePhysics = normalizePhysicalProperties(replay.physics ?? null, replayKinds, activeThemes, activePhysicsPreset)
-    ?? Array.from({ length: replay.quantity }, () => ({}));
+  activePhysics =
+    normalizePhysicalProperties(
+      replay.physics ?? null,
+      replayKinds,
+      activeThemes,
+      activePhysicsPreset,
+    ) ?? Array.from({ length: replay.quantity }, () => ({}));
   world.gravity.set(0, -PHYSICS_PRESETS[activePhysicsPreset].gravity, 0);
   spawnPreview(replayKinds, true);
   applyRuntimeQuality(totalVisuals);
   activeSeed = replay.seed;
   activeTargets = replay.results.slice();
-  activeOutcomes = normalizeOutcomes(replay.outcomes, replay.quantity) ?? Array.from({ length: replay.quantity }, () => 'neutral');
+  activeOutcomes =
+    normalizeOutcomes(replay.outcomes, replay.quantity) ??
+    Array.from({ length: replay.quantity }, () => 'neutral');
   activeFallbackSpecs = replayFallbacks;
-  activeVisualOrder = normalizeVisualOrder(replay.visualOrder ?? null, replay.quantity, replayFallbacks.length);
-  if (activeVisualOrder.length !== totalVisuals) return Promise.reject(new Error('Replay visual ordering is invalid'));
+  activeVisualOrder = normalizeVisualOrder(
+    replay.visualOrder ?? null,
+    replay.quantity,
+    replayFallbacks.length,
+  );
+  if (activeVisualOrder.length !== totalVisuals)
+    return Promise.reject(new Error('Replay visual ordering is invalid'));
   spawnFallbackVisuals(activeFallbackSpecs, activeSeed);
   dice.forEach((die, index) => {
     die.setTheme(activeThemes[index] ?? replay.theme);
@@ -2592,15 +3055,23 @@ function playRecordedReplay(replay: RollReplay, options: DiceReplayOptions = {})
   activeContext = { ...replay.context };
   const impacts: RollImpact[] = [];
   for (let index = 0; index + 2 < replay.impacts.length; index += 3) {
-    impacts.push({ time: replay.impacts[index], dieIndex: Math.round(replay.impacts[index + 1]), strength: replay.impacts[index + 2] });
+    impacts.push({
+      time: replay.impacts[index],
+      dieIndex: Math.round(replay.impacts[index + 1]),
+      strength: replay.impacts[index + 2],
+    });
   }
   const plan: RollPlan = {
     step: replay.step,
     frameCount: replay.frameCount,
     dieCount: replay.quantity,
     transforms: replay.transforms.slice(),
-    activationDelays: replay.activationDelays?.length === replay.quantity ? replay.activationDelays.slice() : undefined,
-    settleTimes: replay.settleTimes?.length === replay.quantity ? replay.settleTimes.slice() : undefined,
+    activationDelays:
+      replay.activationDelays?.length === replay.quantity
+        ? replay.activationDelays.slice()
+        : undefined,
+    settleTimes:
+      replay.settleTimes?.length === replay.quantity ? replay.settleTimes.slice() : undefined,
     impacts,
     duration: replay.duration,
     results: replay.results.slice(),
@@ -2616,14 +3087,17 @@ function playRecordedReplay(replay: RollReplay, options: DiceReplayOptions = {})
   const elapsedMs = Math.max(0, options.seekToMs ?? 0);
   const progress = elapsedMs / sourceDurationMs;
   const settleAfter = THREE.MathUtils.clamp(options.settleAfterProgress ?? 0.78, 0, 1);
-  const settleImmediately = options.settleImmediately === true
-    || (options.lateMode === 'auto' && progress >= settleAfter);
+  const settleImmediately =
+    options.settleImmediately === true || (options.lateMode === 'auto' && progress >= settleAfter);
   const initialTime = options.lateMode === 'replay' ? 0 : Math.min(1, progress) * plan.duration;
   beginPlanPlayback(plan, { replaying: true, initialTime, settleImmediately });
   return completion;
 }
 
-function registerRollCompletion(): { promise: Promise<DraftrollRollCompletion>; pending: PendingRollCompletion } {
+function registerRollCompletion(): {
+  promise: Promise<DraftrollRollCompletion>;
+  pending: PendingRollCompletion;
+} {
   let pending!: PendingRollCompletion;
   const promise = new Promise<DraftrollRollCompletion>((resolve, reject) => {
     pending = { resolve, reject };
@@ -2651,7 +3125,6 @@ function createFallbackOnlyPlan(count: number): RollPlan {
     physicsSteps: 0,
   };
 }
-
 
 function createStaticTablePlan(duration: number): RollPlan {
   const step = FIXED_STEP;
@@ -2702,38 +3175,83 @@ interface AdditivePhysicalRequest {
   animationDurationMs: number | null;
 }
 
-function normalizeAdditivePhysicalRequest(request: DiceRollRequest): AdditivePhysicalRequest | null {
-  if (request.settleImmediately || request.lateMode === 'settled' || request.lateMode === 'replay') return null;
+function normalizeAdditivePhysicalRequest(
+  request: DiceRollRequest,
+): AdditivePhysicalRequest | null {
+  if (request.settleImmediately || request.lateMode === 'settled' || request.lateMode === 'replay')
+    return null;
   const rawResults = request.results;
-  const results = rawResults === undefined
-    ? []
-    : (Array.isArray(rawResults) ? rawResults : [rawResults]).map((value) => Math.round(value));
+  const results =
+    rawResults === undefined
+      ? []
+      : (Array.isArray(rawResults) ? rawResults : [rawResults]).map((value) => Math.round(value));
   if (results.some((value) => !Number.isFinite(value))) return null;
-  const fallbacks = request.fallbacks?.map((fallback) => ({
-    ...fallback,
-    metadata: fallback.metadata ? { ...fallback.metadata } : undefined,
-  })) ?? [];
+  const fallbacks =
+    request.fallbacks?.map((fallback) => ({
+      ...fallback,
+      metadata: fallback.metadata ? { ...fallback.metadata } : undefined,
+    })) ?? [];
   if (results.length === 0 && fallbacks.length === 0) return null;
   const context = { ...request.context };
   const seed = String(request.seed ?? `table-add:${Date.now()}`);
-  const defaultVisualPrefix = typeof context.rollId === 'string' ? `${context.rollId}:` : `${seed}:`;
-  const visualOrder = normalizeVisualOrder(request.visualOrder ?? null, results.length, fallbacks.length, defaultVisualPrefix);
+  const defaultVisualPrefix =
+    typeof context.rollId === 'string' ? `${context.rollId}:` : `${seed}:`;
+  const visualOrder = normalizeVisualOrder(
+    request.visualOrder ?? null,
+    results.length,
+    fallbacks.length,
+    defaultVisualPrefix,
+  );
   if (visualOrder.length !== results.length + fallbacks.length) return null;
 
-  const rawKinds = request.kinds === undefined ? [selectedKind] : Array.isArray(request.kinds) ? request.kinds : [request.kinds];
-  const kinds = rawKinds.length === 1 ? Array.from({ length: results.length }, () => rawKinds[0]) : rawKinds.slice();
+  const rawKinds =
+    request.kinds === undefined
+      ? [selectedKind]
+      : Array.isArray(request.kinds)
+        ? request.kinds
+        : [request.kinds];
+  const kinds =
+    rawKinds.length === 1
+      ? Array.from({ length: results.length }, () => rawKinds[0])
+      : rawKinds.slice();
   if (kinds.length !== results.length) return null;
   const supported = new Set<DieKind>(['d4', 'd6', 'd8', 'd10', 'd12', 'd20']);
-  if (kinds.some((kind, index) => !supported.has(kind) || results[index] < 1 || results[index] > Number(kind.slice(1)))) return null;
+  if (
+    kinds.some(
+      (kind, index) =>
+        !supported.has(kind) || results[index] < 1 || results[index] > Number(kind.slice(1)),
+    )
+  )
+    return null;
 
-  const rawThemes = request.themes === undefined ? [selectedTheme] : Array.isArray(request.themes) ? request.themes : [request.themes];
-  const themes = rawThemes.length === 1 ? Array.from({ length: results.length }, () => rawThemes[0]) : rawThemes.slice();
-  if (themes.length !== results.length || themes.some((theme) => !THEME_MANIFESTS[theme])) return null;
+  const rawThemes =
+    request.themes === undefined
+      ? [selectedTheme]
+      : Array.isArray(request.themes)
+        ? request.themes
+        : [request.themes];
+  const themes =
+    rawThemes.length === 1
+      ? Array.from({ length: results.length }, () => rawThemes[0])
+      : rawThemes.slice();
+  if (themes.length !== results.length || themes.some((theme) => !THEME_MANIFESTS[theme]))
+    return null;
 
-  const rawOutcomes = request.outcomes === undefined ? [] : Array.isArray(request.outcomes) ? request.outcomes : [request.outcomes];
+  const rawOutcomes =
+    request.outcomes === undefined
+      ? []
+      : Array.isArray(request.outcomes)
+        ? request.outcomes
+        : [request.outcomes];
   const outcomes = results.map((value, index) => {
     const explicit = rawOutcomes.length === 1 ? rawOutcomes[0] : rawOutcomes[index];
-    if (explicit === 'positive' || explicit === 'negative' || explicit === 'neutral' || explicit === 'none') return explicit;
+    if (
+      explicit === 'positive' ||
+      explicit === 'negative' ||
+      explicit === 'neutral' ||
+      explicit === 'none'
+    )
+      return explicit;
     const maximum = Number(kinds[index].slice(1));
     if (value === maximum) return 'positive';
     if (value === 1 && maximum !== 2) return 'negative';
@@ -2741,7 +3259,12 @@ function normalizeAdditivePhysicalRequest(request: DiceRollRequest): AdditivePhy
   });
 
   const physicsPreset = request.physicsPreset ?? activePhysicsPreset;
-  const physics = normalizePhysicalProperties(request.physics ?? null, kinds, themes, physicsPreset);
+  const physics = normalizePhysicalProperties(
+    request.physics ?? null,
+    kinds,
+    themes,
+    physicsPreset,
+  );
   if (!physics) return null;
 
   return {
@@ -2755,14 +3278,23 @@ function normalizeAdditivePhysicalRequest(request: DiceRollRequest): AdditivePhy
     visualOrder,
     context,
     seed,
-    startAtMs: typeof request.startAtMs === 'number' && Number.isFinite(request.startAtMs) ? request.startAtMs : null,
-    animationDurationMs: typeof request.animationDurationMs === 'number' && Number.isFinite(request.animationDurationMs)
-      ? Math.max(1, request.animationDurationMs)
-      : null,
+    startAtMs:
+      typeof request.startAtMs === 'number' && Number.isFinite(request.startAtMs)
+        ? request.startAtMs
+        : null,
+    animationDurationMs:
+      typeof request.animationDurationMs === 'number' &&
+      Number.isFinite(request.animationDurationMs)
+        ? Math.max(1, request.animationDurationMs)
+        : null,
   };
 }
 
-function samplePlanTransform(plan: RollPlan, time: number, dieIndex: number): { position: THREE.Vector3; quaternion: THREE.Quaternion } {
+function samplePlanTransform(
+  plan: RollPlan,
+  time: number,
+  dieIndex: number,
+): { position: THREE.Vector3; quaternion: THREE.Quaternion } {
   const framePosition = THREE.MathUtils.clamp(time / plan.step, 0, plan.frameCount - 1);
   const firstIndex = Math.floor(framePosition);
   const secondIndex = Math.min(firstIndex + 1, plan.frameCount - 1);
@@ -2770,15 +3302,29 @@ function samplePlanTransform(plan: RollPlan, time: number, dieIndex: number): { 
   const frameStride = plan.dieCount * 7;
   const a = firstIndex * frameStride + dieIndex * 7;
   const b = secondIndex * frameStride + dieIndex * 7;
-  const scaleX = plan.sourceBounds ? Math.min(1, (screenBounds.x - 0.15) / Math.max(0.01, plan.sourceBounds.x)) : 1;
-  const scaleZ = plan.sourceBounds ? Math.min(1, (screenBounds.z - 0.15) / Math.max(0.01, plan.sourceBounds.z)) : 1;
+  const scaleX = plan.sourceBounds
+    ? Math.min(1, (screenBounds.x - 0.15) / Math.max(0.01, plan.sourceBounds.x))
+    : 1;
+  const scaleZ = plan.sourceBounds
+    ? Math.min(1, (screenBounds.z - 0.15) / Math.max(0.01, plan.sourceBounds.z))
+    : 1;
   const position = new THREE.Vector3(
     THREE.MathUtils.lerp(plan.transforms[a], plan.transforms[b], alpha) * scaleX,
     THREE.MathUtils.lerp(plan.transforms[a + 1], plan.transforms[b + 1], alpha),
     THREE.MathUtils.lerp(plan.transforms[a + 2], plan.transforms[b + 2], alpha) * scaleZ,
   );
-  const qa = new THREE.Quaternion(plan.transforms[a + 3], plan.transforms[a + 4], plan.transforms[a + 5], plan.transforms[a + 6]);
-  const qb = new THREE.Quaternion(plan.transforms[b + 3], plan.transforms[b + 4], plan.transforms[b + 5], plan.transforms[b + 6]);
+  const qa = new THREE.Quaternion(
+    plan.transforms[a + 3],
+    plan.transforms[a + 4],
+    plan.transforms[a + 5],
+    plan.transforms[a + 6],
+  );
+  const qb = new THREE.Quaternion(
+    plan.transforms[b + 3],
+    plan.transforms[b + 4],
+    plan.transforms[b + 5],
+    plan.transforms[b + 6],
+  );
   qa.slerp(qb, alpha);
   return { position, quaternion: qa.normalize() };
 }
@@ -2799,17 +3345,23 @@ function sampleActiveLaunchStates(plan: RollPlan, time: number): LaunchState[] {
     if (delta.w < 0) delta.set(-delta.x, -delta.y, -delta.z, -delta.w);
     const angle = 2 * Math.acos(THREE.MathUtils.clamp(delta.w, -1, 1));
     const denominator = Math.sqrt(Math.max(1e-10, 1 - delta.w * delta.w));
-    const axis = denominator > 1e-5
-      ? new THREE.Vector3(delta.x / denominator, delta.y / denominator, delta.z / denominator)
-      : new THREE.Vector3(0, 1, 0);
+    const axis =
+      denominator > 1e-5
+        ? new THREE.Vector3(delta.x / denominator, delta.y / denominator, delta.z / denominator)
+        : new THREE.Vector3(0, 1, 0);
     const angularVelocity = new CANNON.Vec3(
-      axis.x * angle / deltaTime,
-      axis.y * angle / deltaTime,
-      axis.z * angle / deltaTime,
+      (axis.x * angle) / deltaTime,
+      (axis.y * angle) / deltaTime,
+      (axis.z * angle) / deltaTime,
     );
     return {
       position: new CANNON.Vec3(current.position.x, current.position.y, current.position.z),
-      quaternion: new CANNON.Quaternion(current.quaternion.x, current.quaternion.y, current.quaternion.z, current.quaternion.w),
+      quaternion: new CANNON.Quaternion(
+        current.quaternion.x,
+        current.quaternion.y,
+        current.quaternion.z,
+        current.quaternion.w,
+      ),
       velocity,
       angularVelocity,
       delay: 0,
@@ -2817,8 +3369,11 @@ function sampleActiveLaunchStates(plan: RollPlan, time: number): LaunchState[] {
   });
 }
 
-
-function createLockedTableTrajectory(plan: RollPlan, time: number, count: number): LockedTableTrajectory {
+function createLockedTableTrajectory(
+  plan: RollPlan,
+  time: number,
+  count: number,
+): LockedTableTrajectory {
   const step = plan.step;
   const remaining = Math.max(0, plan.duration - time);
   const frameCount = Math.max(2, Math.ceil(remaining / step) + 1);
@@ -2840,7 +3395,11 @@ function createLockedTableTrajectory(plan: RollPlan, time: number, count: number
   return { count, step, frameCount, transforms };
 }
 
-function appendPhysicalDice(kinds: readonly DieKind[], themes: readonly ThemeName[], physics: readonly DicePhysicsProperties[] = []): DieInstance[] {
+function appendPhysicalDice(
+  kinds: readonly DieKind[],
+  themes: readonly ThemeName[],
+  physics: readonly DicePhysicsProperties[] = [],
+): DieInstance[] {
   const appended: DieInstance[] = [];
   kinds.forEach((kind, index) => {
     const properties = physics[index] ?? {};
@@ -2860,7 +3419,10 @@ function appendPhysicalDice(kinds: readonly DieKind[], themes: readonly ThemeNam
   return appended;
 }
 
-function appendFallbackVisuals(specs: readonly DraftrollFallbackVisual[], seed: string): FallbackVisualInstance[] {
+function appendFallbackVisuals(
+  specs: readonly DraftrollFallbackVisual[],
+  seed: string,
+): FallbackVisualInstance[] {
   if (specs.length === 0) return [];
   const start = fallbackVisuals.length;
   const total = start + specs.length;
@@ -2902,39 +3464,46 @@ function incomingTableRolls(
   const raw = Array.isArray(context.tableRolls) ? context.tableRolls : [];
   if (raw.length > 0) {
     return raw.flatMap((value, index) => {
-      if (!value || typeof value !== 'object') return [];
-      const entry = value as Record<string, unknown>;
-      return [{
-        groupId: typeof entry.groupId === 'string' ? entry.groupId : `table-add-${physicalStart}-${index}`,
-        actorLabel: typeof entry.actorLabel === 'string' ? entry.actorLabel : undefined,
-        rollLabel: typeof entry.rollLabel === 'string' ? entry.rollLabel : undefined,
-        total: Number.isFinite(Number(entry.total)) ? Number(entry.total) : 0,
-        physicalStart: physicalStart + Math.max(0, Math.floor(Number(entry.physicalStart) || 0)),
-        physicalCount: Math.max(0, Math.floor(Number(entry.physicalCount) || physicalCount)),
-        fallbackStart: fallbackStart + Math.max(0, Math.floor(Number(entry.fallbackStart) || 0)),
-        fallbackCount: Math.max(0, Math.floor(Number(entry.fallbackCount) || fallbackCount)),
-        visualCount: Math.max(0, Math.floor(Number(entry.visualCount) || (physicalCount + fallbackCount))),
-      }];
+      if (!isRecord(value)) return [];
+      const entry = value;
+      return [
+        {
+          groupId:
+            typeof entry.groupId === 'string'
+              ? entry.groupId
+              : `table-add-${physicalStart}-${index}`,
+          actorLabel: typeof entry.actorLabel === 'string' ? entry.actorLabel : undefined,
+          rollLabel: typeof entry.rollLabel === 'string' ? entry.rollLabel : undefined,
+          total: Number.isFinite(Number(entry.total)) ? Number(entry.total) : 0,
+          physicalStart: physicalStart + Math.max(0, Math.floor(Number(entry.physicalStart) || 0)),
+          physicalCount: Math.max(0, Math.floor(Number(entry.physicalCount) || physicalCount)),
+          fallbackStart: fallbackStart + Math.max(0, Math.floor(Number(entry.fallbackStart) || 0)),
+          fallbackCount: Math.max(0, Math.floor(Number(entry.fallbackCount) || fallbackCount)),
+          visualCount: Math.max(
+            0,
+            Math.floor(Number(entry.visualCount) || physicalCount + fallbackCount),
+          ),
+        },
+      ];
     });
   }
-  const metadata = context.metadata && typeof context.metadata === 'object' ? context.metadata as Record<string, unknown> : undefined;
-  return [{
-    groupId: typeof context.rollId === 'string' ? context.rollId : `table-add-${physicalStart}`,
-    actorLabel: typeof context.name === 'string' ? context.name : undefined,
-    rollLabel: typeof metadata?.actionName === 'string' ? metadata.actionName : undefined,
-    total: Number.isFinite(Number(context.normalizedTotal)) ? Number(context.normalizedTotal) : 0,
-    physicalStart,
-    physicalCount,
-    fallbackStart,
-    fallbackCount,
-    visualCount: physicalCount + fallbackCount,
-  }];
+  const metadata = isRecord(context.metadata) ? context.metadata : undefined;
+  return [
+    {
+      groupId: typeof context.rollId === 'string' ? context.rollId : `table-add-${physicalStart}`,
+      actorLabel: typeof context.name === 'string' ? context.name : undefined,
+      rollLabel: typeof metadata?.actionName === 'string' ? metadata.actionName : undefined,
+      total: Number.isFinite(Number(context.normalizedTotal)) ? Number(context.normalizedTotal) : 0,
+      physicalStart,
+      physicalCount,
+      fallbackStart,
+      fallbackCount,
+      visualCount: physicalCount + fallbackCount,
+    },
+  ];
 }
 
-function mergeRenderedDieIds(
-  current: unknown,
-  incoming: unknown,
-): string[] {
+function mergeRenderedDieIds(current: unknown, incoming: unknown): string[] {
   const ids = [
     ...(Array.isArray(current) ? current : []),
     ...(Array.isArray(incoming) ? incoming : []),
@@ -2942,18 +3511,15 @@ function mergeRenderedDieIds(
   return [...new Set(ids)];
 }
 
-function mergeRenderedDiceState(
-  current: unknown,
-  incoming: unknown,
-): Record<string, unknown>[] {
+function mergeRenderedDiceState(current: unknown, incoming: unknown): Record<string, unknown>[] {
   const orderedIds: string[] = [];
   const byId = new Map<string, Record<string, unknown>>();
   for (const value of [
     ...(Array.isArray(current) ? current : []),
     ...(Array.isArray(incoming) ? incoming : []),
   ]) {
-    if (!value || typeof value !== 'object') continue;
-    const die = value as Record<string, unknown>;
+    if (!isRecord(value)) continue;
+    const die = value;
     if (typeof die.id !== 'string') continue;
     if (!byId.has(die.id)) orderedIds.push(die.id);
     byId.set(die.id, { ...die });
@@ -3001,26 +3567,33 @@ function mergeAdditiveContext(
   fallbackStart: number,
   fallbackCount: number,
 ): void {
-  const incomingSequenceId = typeof context.modifierSequenceId === 'string'
-    ? context.modifierSequenceId
-    : undefined;
+  const incomingSequenceId =
+    typeof context.modifierSequenceId === 'string' ? context.modifierSequenceId : undefined;
   const renderedDieIds = mergeRenderedDieIds(activeContext.renderedDieIds, context.renderedDieIds);
   const renderedDice = mergeRenderedDiceState(activeContext.renderedDice, context.renderedDice);
   const recordedTableRolls = readActiveTableRolls();
-  const existing = recordedTableRolls.length > 0 || typeof activeContext.rollId !== 'string'
-    ? recordedTableRolls
-    : incomingTableRolls(activeContext, 0, physicalStart, 0, fallbackStart);
-  const incoming = incomingTableRolls(context, physicalStart, physicalCount, fallbackStart, fallbackCount);
+  const existing =
+    recordedTableRolls.length > 0 || typeof activeContext.rollId !== 'string'
+      ? recordedTableRolls
+      : incomingTableRolls(activeContext, 0, physicalStart, 0, fallbackStart);
+  const incoming = incomingTableRolls(
+    context,
+    physicalStart,
+    physicalCount,
+    fallbackStart,
+    fallbackCount,
+  );
   const normalizedTotal = Number(context.normalizedTotal);
   const completedTotal = Number.isFinite(normalizedTotal) ? normalizedTotal : null;
   const updated = mergeTableRollGroups(existing, incoming, completedTotal);
-  const displayName = updated.length > 1
-    ? `${updated.length} table rolls`
-    : typeof context.name === 'string'
-      ? context.name
-      : typeof activeContext.name === 'string'
-        ? activeContext.name
-        : undefined;
+  const displayName =
+    updated.length > 1
+      ? `${updated.length} table rolls`
+      : typeof context.name === 'string'
+        ? context.name
+        : typeof activeContext.name === 'string'
+          ? activeContext.name
+          : undefined;
 
   activeContext = {
     ...activeContext,
@@ -3031,25 +3604,39 @@ function mergeAdditiveContext(
     tableRolls: updated,
     renderedDieIds,
     renderedDice,
-    ...(incomingSequenceId ? {
-      modifierSequenceId: incomingSequenceId,
-      modifierSequenceStage: context.modifierSequenceStage,
-      modifierSequenceStages: context.modifierSequenceStages,
-      modifierSequencePending: context.modifierSequencePending,
-      modifierSequenceGeneratedBy: context.modifierSequenceGeneratedBy,
-      rollId: context.rollId,
-    } : {}),
+    ...(incomingSequenceId
+      ? {
+          modifierSequenceId: incomingSequenceId,
+          modifierSequenceStage: context.modifierSequenceStage,
+          modifierSequenceStages: context.modifierSequenceStages,
+          modifierSequencePending: context.modifierSequencePending,
+          modifierSequenceGeneratedBy: context.modifierSequenceGeneratedBy,
+          rollId: context.rollId,
+        }
+      : {}),
   };
 }
 
 async function appendTableRoll(request: DiceRollRequest): Promise<DraftrollRollCompletion> {
   const normalized = normalizeAdditivePhysicalRequest(request);
-  if (!normalized || !activePlan || (!isRolling && !hasCast) || isPlanning || (dice.length === 0 && activeFallbackSpecs.length === 0)) {
+  if (
+    !normalized ||
+    !activePlan ||
+    (!isRolling && !hasCast) ||
+    isPlanning ||
+    (dice.length === 0 && activeFallbackSpecs.length === 0)
+  ) {
     throw new Error('Active table roll cannot accept this presentation');
   }
   if (dissolveAnimation) cancelDissolve(false);
   const existingCount = dice.length;
-  if (existingCount + activeFallbackSpecs.length + normalized.results.length + normalized.fallbacks.length > 30) {
+  if (
+    existingCount +
+      activeFallbackSpecs.length +
+      normalized.results.length +
+      normalized.fallbacks.length >
+    30
+  ) {
     throw new Error('Active table visual limit exceeded');
   }
   const existingFallbackCount = activeFallbackSpecs.length;
@@ -3063,7 +3650,10 @@ async function appendTableRoll(request: DiceRollRequest): Promise<DraftrollRollC
     activeTargets: activeTargets.slice(),
     activeOutcomes: activeOutcomes.slice(),
     activeVisualOrder: activeVisualOrder.map((entry) => ({ ...entry })),
-    activeFallbackSpecs: activeFallbackSpecs.map((entry) => ({ ...entry, metadata: entry.metadata ? { ...entry.metadata } : undefined })),
+    activeFallbackSpecs: activeFallbackSpecs.map((entry) => ({
+      ...entry,
+      metadata: entry.metadata ? { ...entry.metadata } : undefined,
+    })),
     activeContext: { ...activeContext },
     activeSeed,
     activeAnimationDurationMs,
@@ -3083,9 +3673,13 @@ async function appendTableRoll(request: DiceRollRequest): Promise<DraftrollRollC
     activeTargets.push(...normalized.results);
     activeOutcomes.push(...normalized.outcomes);
     activeFallbackSpecs.push(...normalized.fallbacks);
-    normalized.visualOrder.forEach((entry) => activeVisualOrder.push(entry.kind === 'physical'
-      ? { kind: 'physical', index: existingCount + entry.index, dieId: entry.dieId }
-      : { kind: 'fallback', index: existingFallbackCount + entry.index, dieId: entry.dieId }));
+    normalized.visualOrder.forEach((entry) =>
+      activeVisualOrder.push(
+        entry.kind === 'physical'
+          ? { kind: 'physical', index: existingCount + entry.index, dieId: entry.dieId }
+          : { kind: 'fallback', index: existingFallbackCount + entry.index, dieId: entry.dieId },
+      ),
+    );
     quantity = dice.length;
     quantityValue.textContent = String(quantity);
     mergeAdditiveContext(
@@ -3096,24 +3690,39 @@ async function appendTableRoll(request: DiceRollRequest): Promise<DraftrollRollC
       normalized.fallbacks.length,
     );
     activeSeed = `${activeSeed}|${normalized.seed}`;
-    activeAnimationDurationMs = Math.max(activeAnimationDurationMs ?? 0, normalized.animationDurationMs ?? 0) || null;
+    activeAnimationDurationMs =
+      Math.max(activeAnimationDurationMs ?? 0, normalized.animationDurationMs ?? 0) || null;
     applyRuntimeQuality(quantity + activeFallbackSpecs.length);
 
     const groupIndex = Math.max(0, readActiveTableRolls().length - 1);
     const random = createSeededRandom(normalized.seed);
-    const lane = THREE.MathUtils.clamp(((groupIndex % 5) - 2) / 2.4 + (random() - 0.5) * 0.12, -0.88, 0.88);
-    const direction = new THREE.Vector2(-lane * 0.32, -1).normalize().rotateAround(new THREE.Vector2(), (random() - 0.5) * 0.1);
+    const lane = THREE.MathUtils.clamp(
+      ((groupIndex % 5) - 2) / 2.4 + (random() - 0.5) * 0.12,
+      -0.88,
+      0.88,
+    );
+    const direction = new THREE.Vector2(-lane * 0.32, -1)
+      .normalize()
+      .rotateAround(new THREE.Vector2(), (random() - 0.5) * 0.1);
     const newStates = createLaunchStatesForGroup(appended, random, direction, lane);
-    const scheduledDelay = normalized.startAtMs === null ? 0 : Math.max(0, (normalized.startAtMs - Date.now()) / 1_000);
-    newStates.forEach((state) => { state.delay += scheduledDelay; });
+    const scheduledDelay =
+      normalized.startAtMs === null ? 0 : Math.max(0, (normalized.startAtMs - Date.now()) / 1_000);
+    newStates.forEach((state) => {
+      state.delay += scheduledDelay;
+    });
 
     tableReplanPaused = true;
     isPlanning = true;
     setStatus(`${readActiveTableRolls().length} rollers sharing the table`, true);
-    const plan = newStates.length > 0
-      ? await buildRollPlan([...existingStates, ...newStates], existingCount, lockedTrajectory)
-      : createStaticTablePlan(createFallbackOnlyPlan(Math.max(1, appendedFallbacks.length)).duration);
-    appended.forEach((die) => { die.group.visible = true; });
+    const plan =
+      newStates.length > 0
+        ? await buildRollPlan([...existingStates, ...newStates], existingCount, lockedTrajectory)
+        : createStaticTablePlan(
+            createFallbackOnlyPlan(Math.max(1, appendedFallbacks.length)).duration,
+          );
+    appended.forEach((die) => {
+      die.group.visible = true;
+    });
     activeOutcomes = activeOutcomes.slice(0, plan.results.length);
     captureReplay(plan);
     beginPlanPlayback(plan, { initialTime: 0, settleImmediately: false });
@@ -3144,12 +3753,14 @@ async function appendTableRoll(request: DiceRollRequest): Promise<DraftrollRollC
 }
 
 function canAppendTableRequest(request: DiceRollRequest): boolean {
-  return request.tableMode === 'add'
-    && (isRolling || hasCast)
-    && !isPlanning
-    && activePlan !== null
-    && (dice.length > 0 || activeFallbackSpecs.length > 0)
-    && normalizeAdditivePhysicalRequest(request) !== null;
+  return (
+    request.tableMode === 'add' &&
+    (isRolling || hasCast) &&
+    !isPlanning &&
+    activePlan !== null &&
+    (dice.length > 0 || activeFallbackSpecs.length > 0) &&
+    normalizeAdditivePhysicalRequest(request) !== null
+  );
 }
 
 async function castDice(swipe?: THREE.Vector2): Promise<DraftrollRollCompletion> {
@@ -3160,7 +3771,8 @@ async function castDice(swipe?: THREE.Vector2): Promise<DraftrollRollCompletion>
   rebuildScreenBounds();
   applyRendererResolution();
   if (dissolveAnimation) cancelDissolve(true);
-  const hasQueuedVisualRequest = queuedApiResults !== null || queuedKinds !== null || queuedFallbacks !== null;
+  const hasQueuedVisualRequest =
+    queuedApiResults !== null || queuedKinds !== null || queuedFallbacks !== null;
   if (dice.length === 0 && !hasQueuedVisualRequest) spawnPreview();
   if (!prepareTargets()) throw new Error('Roll request is invalid');
 
@@ -3177,7 +3789,12 @@ async function castDice(swipe?: THREE.Vector2): Promise<DraftrollRollCompletion>
     // committed trajectory, which removes large-pool grid/cluster flicker.
     setPhysicalDiceVisible(false);
     isPlanning = true;
-    setStatus(activeTargets.some((target) => target !== null) ? 'Planning exact physical throw' : 'Planning throw', true);
+    setStatus(
+      activeTargets.some((target) => target !== null)
+        ? 'Planning exact physical throw'
+        : 'Planning throw',
+      true,
+    );
     try {
       plan = await buildRollPlan(states);
     } catch (error) {
@@ -3200,16 +3817,18 @@ async function castDice(swipe?: THREE.Vector2): Promise<DraftrollRollCompletion>
   captureReplay(plan);
   const scheduledStartAtMs = activeStartAtMs;
   const scheduledDelay = scheduledStartAtMs === null ? 0 : scheduledStartAtMs - Date.now();
-  if (scheduledDelay > 0) await new Promise<void>((resolve) => window.setTimeout(resolve, scheduledDelay));
+  if (scheduledDelay > 0)
+    await new Promise<void>((resolve) => window.setTimeout(resolve, scheduledDelay));
 
   const authoritativeDurationMs = Math.max(1, activeAnimationDurationMs ?? plan.duration * 1_000);
-  const startLatenessMs = scheduledStartAtMs === null || activeLateMode === 'replay'
-    ? 0
-    : Math.max(0, Date.now() - scheduledStartAtMs);
+  const startLatenessMs =
+    scheduledStartAtMs === null || activeLateMode === 'replay'
+      ? 0
+      : Math.max(0, Date.now() - scheduledStartAtMs);
   const elapsedMs = activeLateMode === 'replay' ? 0 : Math.max(activeSeekToMs, startLatenessMs);
   const progress = elapsedMs / authoritativeDurationMs;
-  const settleImmediately = activeSettleImmediately
-    || (activeLateMode === 'auto' && progress >= activeSettleAfterProgress);
+  const settleImmediately =
+    activeSettleImmediately || (activeLateMode === 'auto' && progress >= activeSettleAfterProgress);
   const initialTime = activeLateMode === 'replay' ? 0 : Math.min(1, progress) * plan.duration;
 
   activeStartAtMs = null;
@@ -3226,22 +3845,28 @@ async function castDice(swipe?: THREE.Vector2): Promise<DraftrollRollCompletion>
 }
 
 function collectOrderedVisualResults(physicalValues: readonly number[]): Array<number | string> {
-  return activeVisualOrder.map((entry) => entry.kind === 'physical'
-    ? physicalValues[entry.index] ?? 0
-    : activeFallbackSpecs[entry.index]?.result ?? '');
+  return activeVisualOrder.map((entry) =>
+    entry.kind === 'physical'
+      ? (physicalValues[entry.index] ?? 0)
+      : (activeFallbackSpecs[entry.index]?.result ?? ''),
+  );
 }
 
-function formatVisualResult(entry: DraftrollVisualOrderEntry, physicalValues: readonly number[]): string {
+function formatVisualResult(
+  entry: DraftrollVisualOrderEntry,
+  physicalValues: readonly number[],
+): string {
   const state = readRenderedDieState(entry.dieId);
-  const suffix = state?.kept === false
-    ? ' (discarded)'
-    : state?.generatedBy === 'reroll'
-      ? ' (reroll)'
-      : state?.generatedBy === 'reroll-add'
-        ? ' (reroll + add)'
-        : state?.generatedBy === 'explosion'
-          ? ' (explosion)'
-          : '';
+  const suffix =
+    state?.kept === false
+      ? ' (discarded)'
+      : state?.generatedBy === 'reroll'
+        ? ' (reroll)'
+        : state?.generatedBy === 'reroll-add'
+          ? ' (reroll + add)'
+          : state?.generatedBy === 'explosion'
+            ? ' (explosion)'
+            : '';
   if (entry.kind === 'physical') {
     const kind = activeKinds[entry.index] ?? selectedKind;
     return `${kind.toUpperCase()} ${physicalValues[entry.index] ?? 0}${suffix}`;
@@ -3255,8 +3880,8 @@ function readRenderedDieState(dieId: string): { kept?: boolean; generatedBy?: st
   if (!Array.isArray(raw)) return undefined;
   for (let index = raw.length - 1; index >= 0; index -= 1) {
     const value = raw[index];
-    if (!value || typeof value !== 'object') continue;
-    const candidate = value as Record<string, unknown>;
+    if (!isRecord(value)) continue;
+    const candidate = value;
     if (candidate.id !== dieId) continue;
     return {
       kept: typeof candidate.kept === 'boolean' ? candidate.kept : undefined,
@@ -3267,20 +3892,26 @@ function readRenderedDieState(dieId: string): { kept?: boolean; generatedBy?: st
 }
 
 function physicalVisualId(index: number): string {
-  return activeVisualOrder.find((entry) => entry.kind === 'physical' && entry.index === index)?.dieId
-    ?? `physical_${index}`;
+  return (
+    activeVisualOrder.find((entry) => entry.kind === 'physical' && entry.index === index)?.dieId ??
+    `physical_${index}`
+  );
 }
 
 function fallbackVisualId(index: number): string {
-  return activeVisualOrder.find((entry) => entry.kind === 'fallback' && entry.index === index)?.dieId
-    ?? activeFallbackSpecs[index]?.id
-    ?? `fallback_${index}`;
+  return (
+    activeVisualOrder.find((entry) => entry.kind === 'fallback' && entry.index === index)?.dieId ??
+    activeFallbackSpecs[index]?.id ??
+    `fallback_${index}`
+  );
 }
 
 function effectGroupId(kind: 'physical' | 'fallback', index: number): string {
-  const group = readActiveTableRolls().find((entry) => kind === 'physical'
-    ? index >= entry.physicalStart && index < entry.physicalStart + entry.physicalCount
-    : index >= entry.fallbackStart && index < entry.fallbackStart + entry.fallbackCount);
+  const group = readActiveTableRolls().find((entry) =>
+    kind === 'physical'
+      ? index >= entry.physicalStart && index < entry.physicalStart + entry.physicalCount
+      : index >= entry.fallbackStart && index < entry.fallbackStart + entry.fallbackCount,
+  );
   if (group) return group.groupId;
   if (typeof activeContext.rollId === 'string') return activeContext.rollId;
   if (typeof activeContext.modifierSequenceId === 'string') return activeContext.modifierSequenceId;
@@ -3297,9 +3928,8 @@ function reserveHeroEffect(groupId: string, outcome: EffectOutcome): boolean {
 }
 
 function markOutcomeEffectsThrough(plan: RollPlan, time: number): void {
-  const settleTimes = plan.settleTimes?.length === plan.dieCount
-    ? plan.settleTimes
-    : deriveDieSettleTimes(plan);
+  const settleTimes =
+    plan.settleTimes?.length === plan.dieCount ? plan.settleTimes : deriveDieSettleTimes(plan);
   plan.settleTimes = settleTimes;
   consumeSettledVisualIndexes(
     Array.from({ length: plan.dieCount }, (_value, index) => physicalVisualId(index)),
@@ -3322,9 +3952,8 @@ function markOutcomeEffectsThrough(plan: RollPlan, time: number): void {
  * explosions cannot replay an old effect.
  */
 function playSettledOutcomeEffects(plan: RollPlan, currentTime: number): void {
-  const settleTimes = plan.settleTimes?.length === plan.dieCount
-    ? plan.settleTimes
-    : deriveDieSettleTimes(plan);
+  const settleTimes =
+    plan.settleTimes?.length === plan.dieCount ? plan.settleTimes : deriveDieSettleTimes(plan);
   plan.settleTimes = settleTimes;
   const physicalIndexes = consumeSettledVisualIndexes(
     Array.from({ length: plan.dieCount }, (_value, index) => physicalVisualId(index)),
@@ -3360,16 +3989,11 @@ function playSettledOutcomeEffects(plan: RollPlan, currentTime: number): void {
       const spec = activeFallbackSpecs[index];
       const visual = fallbackVisuals[index];
       if (!spec || !visual) return;
-      effects.playOutcome(
-        spec.theme,
-        spec.outcome,
-        visual.getWorldPosition().setY(0.05),
-        {
-          kind: 'd6',
-          value: spec.numericValue ?? 0,
-          hero: reserveHeroEffect(effectGroupId('fallback', index), spec.outcome),
-        },
-      );
+      effects.playOutcome(spec.theme, spec.outcome, visual.getWorldPosition().setY(0.05), {
+        kind: 'd6',
+        value: spec.numericValue ?? 0,
+        hero: reserveHeroEffect(effectGroupId('fallback', index), spec.outcome),
+      });
     });
   } finally {
     effects.endBatch();
@@ -3377,15 +4001,26 @@ function playSettledOutcomeEffects(plan: RollPlan, currentTime: number): void {
   requestRender();
 }
 
-function outcomeSummaryForGroups(groups: readonly ActiveTableRollGroup[]): { positive: boolean; negative: boolean } {
+function outcomeSummaryForGroups(groups: readonly ActiveTableRollGroup[]): {
+  positive: boolean;
+  negative: boolean;
+} {
   let positive = false;
   let negative = false;
   for (const group of groups) {
-    for (let index = group.physicalStart; index < group.physicalStart + group.physicalCount; index += 1) {
+    for (
+      let index = group.physicalStart;
+      index < group.physicalStart + group.physicalCount;
+      index += 1
+    ) {
       if (activeOutcomes[index] === 'positive') positive = true;
       if (activeOutcomes[index] === 'negative') negative = true;
     }
-    for (let index = group.fallbackStart; index < group.fallbackStart + group.fallbackCount; index += 1) {
+    for (
+      let index = group.fallbackStart;
+      index < group.fallbackStart + group.fallbackCount;
+      index += 1
+    ) {
       if (activeFallbackSpecs[index]?.outcome === 'positive') positive = true;
       if (activeFallbackSpecs[index]?.outcome === 'negative') negative = true;
     }
@@ -3394,15 +4029,23 @@ function outcomeSummaryForGroups(groups: readonly ActiveTableRollGroup[]): { pos
 }
 
 function announceCompletedOutcomeOnce(tableRolls: readonly ActiveTableRollGroup[]): void {
-  const groups = tableRolls.length > 0 ? tableRolls : [{
-    groupId: typeof activeContext.rollId === 'string' ? activeContext.rollId : activeSeed || 'active-roll',
-    total: 0,
-    physicalStart: 0,
-    physicalCount: activeOutcomes.length,
-    fallbackStart: 0,
-    fallbackCount: activeFallbackSpecs.length,
-    visualCount: activeOutcomes.length + activeFallbackSpecs.length,
-  }];
+  const groups =
+    tableRolls.length > 0
+      ? tableRolls
+      : [
+          {
+            groupId:
+              typeof activeContext.rollId === 'string'
+                ? activeContext.rollId
+                : activeSeed || 'active-roll',
+            total: 0,
+            physicalStart: 0,
+            physicalCount: activeOutcomes.length,
+            fallbackStart: 0,
+            fallbackCount: activeFallbackSpecs.length,
+            visualCount: activeOutcomes.length + activeFallbackSpecs.length,
+          },
+        ];
   const newlyCompleted = groups.filter((group) => !announcedOutcomeGroupIds.has(group.groupId));
   if (newlyCompleted.length === 0) return;
   newlyCompleted.forEach((group) => announcedOutcomeGroupIds.add(group.groupId));
@@ -3416,36 +4059,43 @@ function revealResults(): void {
   if (!isRolling) return;
   isRolling = false;
   const physicalValues = activePlan?.results.slice() ?? dice.map((die) => die.getTopValue());
-  const fallbackTotal = activeFallbackSpecs.reduce((sum, fallback) => sum + (fallback.numericValue ?? 0), 0);
+  const fallbackTotal = activeFallbackSpecs.reduce(
+    (sum, fallback) => sum + (fallback.numericValue ?? 0),
+    0,
+  );
   const physicalTotal = physicalValues.reduce((sum, value) => sum + value, 0);
   const normalizedTotal = Number(activeContext.normalizedTotal);
   const total = Number.isFinite(normalizedTotal) ? normalizedTotal : physicalTotal + fallbackTotal;
   const tableRolls = readActiveTableRolls();
   const modifierSequencePending = activeContext.modifierSequencePending === true;
   if (modifierSequencePending) {
-    const generatedBy = typeof activeContext.modifierSequenceGeneratedBy === 'string'
-      ? activeContext.modifierSequenceGeneratedBy
-      : 'modifier';
+    const generatedBy =
+      typeof activeContext.modifierSequenceGeneratedBy === 'string'
+        ? activeContext.modifierSequenceGeneratedBy
+        : 'modifier';
     resultTotal.textContent = '…';
-    resultDetail.textContent = generatedBy === 'explosion'
-      ? 'Maximum rolled · adding exploding dice'
-      : generatedBy === 'reroll' || generatedBy === 'reroll-add'
-        ? 'Reroll triggered · rolling follow-up dice'
-        : 'Resolving follow-up dice';
+    resultDetail.textContent =
+      generatedBy === 'explosion'
+        ? 'Maximum rolled · adding exploding dice'
+        : generatedBy === 'reroll' || generatedBy === 'reroll-add'
+          ? 'Reroll triggered · rolling follow-up dice'
+          : 'Resolving follow-up dice';
     resultPanel.classList.remove('revealed', 'critical');
     setStatus('Follow-up dice required', false);
   } else if (tableRolls.length > 1) {
     resultTotal.textContent = `${tableRolls.length}`;
-    resultDetail.textContent = tableRolls.map((entry) => {
-      const label = [entry.actorLabel, entry.rollLabel].filter(Boolean).join(' · ') || 'Roll';
-      return `${label}: ${entry.total}`;
-    }).join('  •  ');
+    resultDetail.textContent = tableRolls
+      .map((entry) => {
+        const label = [entry.actorLabel, entry.rollLabel].filter(Boolean).join(' · ') || 'Roll';
+        return `${label}: ${entry.total}`;
+      })
+      .join('  •  ');
     setStatus(`Cast complete · ${tableRolls.length} rollers`, false);
   } else {
     resultTotal.textContent = String(total);
     const resultParts = activeVisualOrder.map((entry) => formatVisualResult(entry, physicalValues));
     const actor = typeof activeContext.name === 'string' ? activeContext.name : '';
-    const metadata = activeContext.metadata && typeof activeContext.metadata === 'object' ? activeContext.metadata as Record<string, unknown> : undefined;
+    const metadata = isRecord(activeContext.metadata) ? activeContext.metadata : undefined;
     const action = typeof metadata?.actionName === 'string' ? metadata.actionName : '';
     const prefix = [actor, action].filter(Boolean).join(' · ');
     resultDetail.textContent = `${prefix ? `${prefix} · ` : ''}${resultParts.join(' + ')}`;
@@ -3465,20 +4115,29 @@ function revealResults(): void {
   // throw can sample these settled transforms and add new dynamic dice without
   // clearing or reconstructing the visible table.
 
-  const allOutcomes = outcomeSummaryForGroups(tableRolls.length > 0 ? tableRolls : [{
-    groupId: 'active-roll',
-    total,
-    physicalStart: 0,
-    physicalCount: activeOutcomes.length,
-    fallbackStart: 0,
-    fallbackCount: activeFallbackSpecs.length,
-    visualCount: activeOutcomes.length + activeFallbackSpecs.length,
-  }]);
+  const allOutcomes = outcomeSummaryForGroups(
+    tableRolls.length > 0
+      ? tableRolls
+      : [
+          {
+            groupId: 'active-roll',
+            total,
+            physicalStart: 0,
+            physicalCount: activeOutcomes.length,
+            fallbackStart: 0,
+            fallbackCount: activeFallbackSpecs.length,
+            visualCount: activeOutcomes.length + activeFallbackSpecs.length,
+          },
+        ],
+  );
   if (allOutcomes.positive || allOutcomes.negative) resultPanel.classList.add('critical');
   if (!modifierSequencePending) {
-    if (allOutcomes.positive && !allOutcomes.negative) resultDetail.textContent = `${resultDetail.textContent} · POSITIVE`;
-    else if (allOutcomes.negative && !allOutcomes.positive) resultDetail.textContent = `${resultDetail.textContent} · NEGATIVE`;
-    else if (allOutcomes.positive && allOutcomes.negative) resultDetail.textContent = `${resultDetail.textContent} · MIXED`;
+    if (allOutcomes.positive && !allOutcomes.negative)
+      resultDetail.textContent = `${resultDetail.textContent} · POSITIVE`;
+    else if (allOutcomes.negative && !allOutcomes.positive)
+      resultDetail.textContent = `${resultDetail.textContent} · NEGATIVE`;
+    else if (allOutcomes.positive && allOutcomes.negative)
+      resultDetail.textContent = `${resultDetail.textContent} · MIXED`;
     announceCompletedOutcomeOnce(tableRolls);
   }
 
@@ -3521,7 +4180,10 @@ function selectTheme(theme: ThemeName): void {
   });
   for (const die of dice) die.setTheme(theme);
   const palette = THEMES[theme];
-  document.documentElement.style.setProperty('--accent', `#${palette.edge.toString(16).padStart(6, '0')}`);
+  document.documentElement.style.setProperty(
+    '--accent',
+    `#${palette.edge.toString(16).padStart(6, '0')}`,
+  );
   document.documentElement.style.setProperty('--accent-bright', palette.label);
   statusText.textContent = `${palette.name} · ready to cast`;
   statusElement.classList.remove('rolling');
@@ -3530,14 +4192,27 @@ function selectTheme(theme: ThemeName): void {
 }
 
 document.querySelectorAll<HTMLButtonElement>('.die-button').forEach((button) => {
-  button.addEventListener('click', () => selectKind(button.dataset.die as DieKind));
+  button.addEventListener('click', () => {
+    // `dataset.die` is only correct by convention with index.html; ignore a button whose
+    // attribute drifted rather than selecting an unsupported kind.
+    if (isDieKind(button.dataset.die)) selectKind(button.dataset.die);
+  });
 });
 document.querySelectorAll<HTMLButtonElement>('.theme-swatch').forEach((button) => {
-  button.addEventListener('click', () => selectTheme(button.dataset.theme as ThemeName));
+  button.addEventListener('click', () => {
+    const theme = button.dataset.theme;
+    if (theme !== undefined) selectTheme(theme);
+  });
 });
-document.querySelector<HTMLButtonElement>('#quantity-minus')?.addEventListener('click', () => updateQuantity(quantity - 1));
-document.querySelector<HTMLButtonElement>('#quantity-plus')?.addEventListener('click', () => updateQuantity(quantity + 1));
-rollButton.addEventListener('click', () => { void enqueueRendererTask(() => castDice()).catch((error) => console.error(error)); });
+document
+  .querySelector<HTMLButtonElement>('#quantity-minus')
+  ?.addEventListener('click', () => updateQuantity(quantity - 1));
+document
+  .querySelector<HTMLButtonElement>('#quantity-plus')
+  ?.addEventListener('click', () => updateQuantity(quantity + 1));
+rollButton.addEventListener('click', () => {
+  void enqueueRendererTask(() => castDice()).catch((error) => console.error(error));
+});
 soundToggle.addEventListener('click', () => {
   audio.setEnabled(!audio.enabled);
   soundToggle.setAttribute('aria-pressed', String(audio.enabled));
@@ -3571,55 +4246,83 @@ presetInput.addEventListener('keydown', (event) => {
 
 window.draftrollDice = {
   roll: (request) => {
-    if (request && typeof request === 'object' && !Array.isArray(request) && canAppendTableRequest(request)) {
+    if (
+      request &&
+      typeof request === 'object' &&
+      !Array.isArray(request) &&
+      canAppendTableRequest(request)
+    ) {
       return appendTableRoll(request);
     }
     return enqueueRendererTask(async () => {
-    queuedApiResults = null;
-    queuedOutcomes = null;
-    queuedContext = {};
-    queuedSeed = null;
-    queuedThemes = null;
-    queuedKinds = null;
-    queuedPhysics = null;
-  queuedPhysicsPreset = 'standard';
-  queuedFallbacks = null;
-    queuedVisualOrder = null;
-    queuedStartAtMs = null;
-    queuedSeekToMs = 0;
-    queuedAnimationDurationMs = null;
-    queuedSettleImmediately = false;
-    queuedLateMode = 'auto';
-    queuedSettleAfterProgress = 0.78;
-    if (typeof request === 'number') {
-      queuedApiResults = [request];
-    } else if (Array.isArray(request)) {
-      queuedApiResults = request.slice();
-    } else if (request) {
-      const results = request.results;
-      queuedApiResults = results === undefined ? null : Array.isArray(results) ? results.slice() : [results];
-      queuedOutcomes = request.outcomes === undefined
-        ? null
-        : Array.isArray(request.outcomes) ? request.outcomes.slice() : [request.outcomes];
-      queuedContext = { ...request.context };
-      queuedSeed = request.seed ?? null;
-      queuedThemes = request.themes ?? null;
-      queuedKinds = request.kinds ?? null;
-      queuedPhysics = request.physics?.map((entry) => ({ ...entry })) ?? null;
-      queuedPhysicsPreset = request.physicsPreset ?? 'standard';
-      queuedFallbacks = request.fallbacks?.map((fallback) => ({ ...fallback, metadata: fallback.metadata ? { ...fallback.metadata } : undefined })) ?? [];
-      queuedVisualOrder = request.visualOrder?.map((entry) => ({ ...entry })) ?? null;
-      queuedStartAtMs = typeof request.startAtMs === 'number' && Number.isFinite(request.startAtMs) ? request.startAtMs : null;
-      queuedSeekToMs = typeof request.seekToMs === 'number' && Number.isFinite(request.seekToMs) ? Math.max(0, request.seekToMs) : 0;
-      queuedAnimationDurationMs = typeof request.animationDurationMs === 'number' && Number.isFinite(request.animationDurationMs)
-        ? Math.max(1, request.animationDurationMs)
-        : null;
-      queuedSettleImmediately = request.settleImmediately === true;
-      queuedLateMode = request.lateMode === 'seek' || request.lateMode === 'settled' || request.lateMode === 'replay' ? request.lateMode : 'auto';
-      queuedSettleAfterProgress = typeof request.settleAfterProgress === 'number' && Number.isFinite(request.settleAfterProgress)
-        ? THREE.MathUtils.clamp(request.settleAfterProgress, 0, 1)
-        : 0.78;
-    }
+      queuedApiResults = null;
+      queuedOutcomes = null;
+      queuedContext = {};
+      queuedSeed = null;
+      queuedThemes = null;
+      queuedKinds = null;
+      queuedPhysics = null;
+      queuedPhysicsPreset = 'standard';
+      queuedFallbacks = null;
+      queuedVisualOrder = null;
+      queuedStartAtMs = null;
+      queuedSeekToMs = 0;
+      queuedAnimationDurationMs = null;
+      queuedSettleImmediately = false;
+      queuedLateMode = 'auto';
+      queuedSettleAfterProgress = 0.78;
+      if (typeof request === 'number') {
+        queuedApiResults = [request];
+      } else if (Array.isArray(request)) {
+        queuedApiResults = request.slice();
+      } else if (request) {
+        const results = request.results;
+        queuedApiResults =
+          results === undefined ? null : Array.isArray(results) ? results.slice() : [results];
+        queuedOutcomes =
+          request.outcomes === undefined
+            ? null
+            : Array.isArray(request.outcomes)
+              ? request.outcomes.slice()
+              : [request.outcomes];
+        queuedContext = { ...request.context };
+        queuedSeed = request.seed ?? null;
+        queuedThemes = request.themes ?? null;
+        queuedKinds = request.kinds ?? null;
+        queuedPhysics = request.physics?.map((entry) => ({ ...entry })) ?? null;
+        queuedPhysicsPreset = request.physicsPreset ?? 'standard';
+        queuedFallbacks =
+          request.fallbacks?.map((fallback) => ({
+            ...fallback,
+            metadata: fallback.metadata ? { ...fallback.metadata } : undefined,
+          })) ?? [];
+        queuedVisualOrder = request.visualOrder?.map((entry) => ({ ...entry })) ?? null;
+        queuedStartAtMs =
+          typeof request.startAtMs === 'number' && Number.isFinite(request.startAtMs)
+            ? request.startAtMs
+            : null;
+        queuedSeekToMs =
+          typeof request.seekToMs === 'number' && Number.isFinite(request.seekToMs)
+            ? Math.max(0, request.seekToMs)
+            : 0;
+        queuedAnimationDurationMs =
+          typeof request.animationDurationMs === 'number' &&
+          Number.isFinite(request.animationDurationMs)
+            ? Math.max(1, request.animationDurationMs)
+            : null;
+        queuedSettleImmediately = request.settleImmediately === true;
+        queuedLateMode =
+          request.lateMode === 'seek' ||
+          request.lateMode === 'settled' ||
+          request.lateMode === 'replay'
+            ? request.lateMode
+            : 'auto';
+        queuedSettleAfterProgress =
+          typeof request.settleAfterProgress === 'number' &&
+          Number.isFinite(request.settleAfterProgress)
+            ? THREE.MathUtils.clamp(request.settleAfterProgress, 0, 1)
+            : 0.78;
+      }
       return castDice();
     });
   },
@@ -3666,12 +4369,27 @@ window.draftrollDice = {
   setQuantity: (count) => updateQuantity(count),
   setTheme: (theme) => selectTheme(theme),
   // Deep copy so callers cannot mutate the shared THEME_MANIFESTS module state.
-  // oxlint-disable-next-line oxc/no-map-spread
-  getThemes: () => Object.values(THEME_MANIFESTS).map((manifest) => ({ ...manifest, capabilities: { ...manifest.capabilities }, surfaceAudio: { ...manifest.surfaceAudio, pitchRange: [...manifest.surfaceAudio.pitchRange] as [number, number] } })),
+  getThemes: () =>
+    // oxlint-disable-next-line oxc/no-map-spread
+    Object.values(THEME_MANIFESTS).map((manifest) => ({
+      ...manifest,
+      capabilities: { ...manifest.capabilities },
+      surfaceAudio: {
+        ...manifest.surfaceAudio,
+        pitchRange: [...manifest.surfaceAudio.pitchRange] as [number, number],
+      },
+    })),
   getThemeManifest: (theme) => {
     const manifest = THEME_MANIFESTS[theme];
     if (!manifest) throw new Error(`Unknown Draftroll theme: ${theme}`);
-    return { ...manifest, capabilities: { ...manifest.capabilities }, surfaceAudio: { ...manifest.surfaceAudio, pitchRange: [...manifest.surfaceAudio.pitchRange] as [number, number] } };
+    return {
+      ...manifest,
+      capabilities: { ...manifest.capabilities },
+      surfaceAudio: {
+        ...manifest.surfaceAudio,
+        pitchRange: [...manifest.surfaceAudio.pitchRange] as [number, number],
+      },
+    };
   },
   installTheme: async (bundle) => {
     invalidateDiceThemeResources(bundle.manifest.id);
@@ -3700,16 +4418,23 @@ window.draftrollDice = {
   configure: (config) => {
     if (config.outcomeResolver !== undefined) outcomeResolver = config.outcomeResolver;
     if (config.neutralEffects !== undefined) neutralEffects = config.neutralEffects;
-    if (config.maxHeroEffects !== undefined) maxHeroEffects = THREE.MathUtils.clamp(Math.round(config.maxHeroEffects), 0, 30);
+    if (config.maxHeroEffects !== undefined)
+      maxHeroEffects = THREE.MathUtils.clamp(Math.round(config.maxHeroEffects), 0, 30);
     if (config.adaptiveQuality !== undefined) adaptiveQuality = config.adaptiveQuality;
     if (config.performanceProfile !== undefined) performanceProfile = config.performanceProfile;
-    if (config.maximumPixelRatio !== undefined) configuredMaximumPixelRatio = THREE.MathUtils.clamp(config.maximumPixelRatio, 0.65, 2);
-    if (config.activeFramesPerSecond !== undefined) configuredActiveFramesPerSecond = THREE.MathUtils.clamp(Math.round(config.activeFramesPerSecond), 15, 60);
+    if (config.maximumPixelRatio !== undefined)
+      configuredMaximumPixelRatio = THREE.MathUtils.clamp(config.maximumPixelRatio, 0.65, 2);
+    if (config.activeFramesPerSecond !== undefined)
+      configuredActiveFramesPerSecond = THREE.MathUtils.clamp(
+        Math.round(config.activeFramesPerSecond),
+        15,
+        60,
+      );
     applyRuntimeQuality(Math.max(1, quantity + activeFallbackSpecs.length));
     requestRender();
   },
   configureThemeEffects: (theme, slots) => effects.configureThemeEffects(theme, slots),
-  getLastReplay: () => lastReplay ? cloneReplay(lastReplay) : null,
+  getLastReplay: () => (lastReplay ? cloneReplay(lastReplay) : null),
   playReplay: (replay, options) => enqueueRendererTask(() => playRecordedReplay(replay, options)),
   dismiss: (options) => dissolveDice(options),
   clear: () => {
@@ -3741,9 +4466,12 @@ window.draftrollDice = {
   },
   screenshot: async () => canvas.toDataURL('image/png'),
   configureCamera: (options) => {
-    if (typeof options.yaw === 'number' && Number.isFinite(options.yaw)) configuredCameraYaw = THREE.MathUtils.clamp(options.yaw, -Math.PI, Math.PI);
-    if (typeof options.pitch === 'number' && Number.isFinite(options.pitch)) configuredCameraPitch = THREE.MathUtils.clamp(options.pitch, 0, Math.PI / 6);
-    if (typeof options.zoom === 'number' && Number.isFinite(options.zoom)) configuredCameraZoom = THREE.MathUtils.clamp(options.zoom, 0.65, 1.8);
+    if (typeof options.yaw === 'number' && Number.isFinite(options.yaw))
+      configuredCameraYaw = THREE.MathUtils.clamp(options.yaw, -Math.PI, Math.PI);
+    if (typeof options.pitch === 'number' && Number.isFinite(options.pitch))
+      configuredCameraPitch = THREE.MathUtils.clamp(options.pitch, 0, Math.PI / 6);
+    if (typeof options.zoom === 'number' && Number.isFinite(options.zoom))
+      configuredCameraZoom = THREE.MathUtils.clamp(options.zoom, 0.65, 1.8);
     if (options.autoRotate !== undefined) cameraAutoRotate = options.autoRotate;
     requestRender();
   },
@@ -3756,19 +4484,26 @@ window.draftrollDice = {
   },
   preview: async (options = {}) => {
     if (options.themeId && THEME_MANIFESTS[options.themeId]) selectTheme(options.themeId);
-    const requestedKind = typeof options.dieType === 'string' && ['d4', 'd6', 'd8', 'd10', 'd12', 'd20'].includes(options.dieType)
-      ? options.dieType as DieKind
-      : selectedKind;
+    const requestedKind = isDieKind(options.dieType) ? options.dieType : selectedKind;
     selectKind(requestedKind);
-    const value = typeof options.value === 'number' && Number.isInteger(options.value) ? options.value : Math.ceil(Number(requestedKind.slice(1)) / 2);
-    return window.draftrollDice.roll({ results: [value], kinds: [requestedKind], themes: [selectedTheme], context: { preview: true } });
+    const value =
+      typeof options.value === 'number' && Number.isInteger(options.value)
+        ? options.value
+        : Math.ceil(Number(requestedKind.slice(1)) / 2);
+    return window.draftrollDice.roll({
+      results: [value],
+      kinds: [requestedKind],
+      themes: [selectedTheme],
+      context: { preview: true },
+    });
   },
   configureInteractions: (options) => {
     interactionOptions = {
       click: options.click ?? interactionOptions.click,
       draggable: options.draggable ?? interactionOptions.draggable,
     };
-    canvas.style.pointerEvents = interactionOptions.click === 'none' && !interactionOptions.draggable ? '' : 'auto';
+    canvas.style.pointerEvents =
+      interactionOptions.click === 'none' && !interactionOptions.draggable ? '' : 'auto';
   },
   getPerformanceSnapshot: () => ({
     profile: performanceProfile,
@@ -3783,12 +4518,15 @@ window.draftrollDice = {
     averageFrameIntervalMs,
     averageRenderCpuMs,
     maximumFrameIntervalMs,
-    usedJsHeapSize: (performance as Performance & { memory?: { usedJSHeapSize?: number } }).memory?.usedJSHeapSize ?? null,
-    jsHeapSizeLimit: (performance as Performance & { memory?: { jsHeapSizeLimit?: number } }).memory?.jsHeapSizeLimit ?? null,
+    usedJsHeapSize:
+      (performance as Performance & { memory?: { usedJSHeapSize?: number } }).memory
+        ?.usedJSHeapSize ?? null,
+    jsHeapSizeLimit:
+      (performance as Performance & { memory?: { jsHeapSizeLimit?: number } }).memory
+        ?.jsHeapSizeLimit ?? null,
     targeting: lastTargetingSnapshot ? { ...lastTargetingSnapshot } : null,
   }),
 };
-
 
 window.addEventListener('keydown', (event) => {
   if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) return;
@@ -3796,7 +4534,14 @@ window.addEventListener('keydown', (event) => {
     event.preventDefault();
     void enqueueRendererTask(() => castDice()).catch((error) => console.error(error));
   }
-  const mapping: Record<string, DieKind> = { Digit1: 'd4', Digit2: 'd6', Digit3: 'd8', Digit4: 'd10', Digit5: 'd12', Digit6: 'd20' };
+  const mapping: Record<string, DieKind> = {
+    Digit1: 'd4',
+    Digit2: 'd6',
+    Digit3: 'd8',
+    Digit4: 'd10',
+    Digit5: 'd12',
+    Digit6: 'd20',
+  };
   const kind = mapping[event.code];
   if (kind) selectKind(kind);
 });
@@ -3819,7 +4564,10 @@ function updateInteractionRay(event: PointerEvent): void {
 
 function findInteractiveDie(event: PointerEvent): { die: DieInstance; index: number } | null {
   updateInteractionRay(event);
-  const hit = interactionRaycaster.intersectObjects(dice.map((die) => die.group), true)[0];
+  const hit = interactionRaycaster.intersectObjects(
+    dice.map((die) => die.group),
+    true,
+  )[0];
   if (!hit) return null;
   const index = dice.findIndex((die) => {
     let object: THREE.Object3D | null = hit.object;
@@ -3872,14 +4620,20 @@ function finishDieDrag(event: PointerEvent, cancelled = false): boolean {
   current.die.body.updateMassProperties();
   current.die.body.velocity.set(0, cancelled ? 0 : 0.08, 0);
   current.die.body.wakeUp();
-  canvas.dispatchEvent(new CustomEvent('draftroll:die-interaction', {
-    detail: {
-      action: 'move',
-      dieIndex: current.index,
-      position: { x: current.die.body.position.x, y: current.die.body.position.y, z: current.die.body.position.z },
-    },
-    bubbles: true,
-  }));
+  canvas.dispatchEvent(
+    new CustomEvent('draftroll:die-interaction', {
+      detail: {
+        action: 'move',
+        dieIndex: current.index,
+        position: {
+          x: current.die.body.position.x,
+          y: current.die.body.position.y,
+          z: current.die.body.position.z,
+        },
+      },
+      bubbles: true,
+    }),
+  );
   requestRender();
   return true;
 }
@@ -3901,13 +4655,22 @@ canvas.addEventListener('pointerup', (event) => {
     return;
   }
   if (hasCast && interactionOptions.click !== 'none') {
-    canvas.dispatchEvent(new CustomEvent('draftroll:die-interaction', {
-      detail: { action: interactionOptions.click, results: lastReplay?.results.slice() ?? [] },
-      bubbles: true,
-    }));
-    if (interactionOptions.click === 'reroll') void enqueueRendererTask(() => castDice()).catch((error) => console.error(error));
-    if (interactionOptions.click === 'drop') void dissolveDice({ durationMs: 180 }).catch(() => undefined);
-    if (interactionOptions.click === 'explode') effects.playOutcome(selectedTheme, 'positive', new THREE.Vector3(0, 0.5, 0), { hero: true, kind: activeKinds[0] ?? selectedKind, value: lastReplay?.results[0] ?? 1 });
+    canvas.dispatchEvent(
+      new CustomEvent('draftroll:die-interaction', {
+        detail: { action: interactionOptions.click, results: lastReplay?.results.slice() ?? [] },
+        bubbles: true,
+      }),
+    );
+    if (interactionOptions.click === 'reroll')
+      void enqueueRendererTask(() => castDice()).catch((error) => console.error(error));
+    if (interactionOptions.click === 'drop')
+      void dissolveDice({ durationMs: 180 }).catch(() => undefined);
+    if (interactionOptions.click === 'explode')
+      effects.playOutcome(selectedTheme, 'positive', new THREE.Vector3(0, 0.5, 0), {
+        hero: true,
+        kind: activeKinds[0] ?? selectedKind,
+        value: lastReplay?.results[0] ?? 1,
+      });
   }
 });
 canvas.addEventListener('pointercancel', (event) => {
@@ -3925,17 +4688,22 @@ function applyResize(): void {
   requestRender();
 }
 
-window.addEventListener('resize', () => {
-  if (resizeFrame !== null) return;
-  resizeFrame = window.requestAnimationFrame(applyResize);
-}, { passive: true });
+window.addEventListener(
+  'resize',
+  () => {
+    if (resizeFrame !== null) return;
+    resizeFrame = window.requestAnimationFrame(applyResize);
+  },
+  { passive: true },
+);
 
-const viewportResizeObserver = typeof ResizeObserver === 'function'
-  ? new ResizeObserver(() => {
-      if (resizeFrame !== null) return;
-      resizeFrame = window.requestAnimationFrame(applyResize);
-    })
-  : null;
+const viewportResizeObserver =
+  typeof ResizeObserver === 'function'
+    ? new ResizeObserver(() => {
+        if (resizeFrame !== null) return;
+        resizeFrame = window.requestAnimationFrame(applyResize);
+      })
+    : null;
 viewportResizeObserver?.observe(document.documentElement);
 
 let physicsAccumulator = 0;
@@ -3950,7 +4718,9 @@ let interactionOptions: Required<RendererInteractionOptions> = { click: 'none', 
 let animationFrameId: number | null = null;
 let lastFrameTimestamp = 0;
 let nextFrameDeadline = 0;
-const adaptiveResolution = new AdaptiveResolutionController({ minimumScale: OVERLAY_MODE ? 0.8 : 0.7 });
+const adaptiveResolution = new AdaptiveResolutionController({
+  minimumScale: OVERLAY_MODE ? 0.8 : 0.7,
+});
 let renderedFrames = 0;
 let averageFrameIntervalMs = 0;
 let averageRenderCpuMs = 0;
@@ -3961,19 +4731,24 @@ function hasAwakeDice(): boolean {
 }
 
 function shouldContinueRendering(): boolean {
-  return isRolling
-    || effects.hasActiveAnimations()
-    || hasAwakeDice()
-    || Math.abs(cameraZoom - 1) > 0.0005;
+  return (
+    isRolling ||
+    effects.hasActiveAnimations() ||
+    hasAwakeDice() ||
+    Math.abs(cameraZoom - 1) > 0.0005
+  );
 }
 
 function requestRender(): void {
   if (document.hidden || manuallyPaused || animationFrameId !== null) return;
-  if (OVERLAY_MODE
-    && !isRolling
-    && dice.length === 0
-    && fallbackVisuals.length === 0
-    && !effects.hasActiveAnimations()) return;
+  if (
+    OVERLAY_MODE &&
+    !isRolling &&
+    dice.length === 0 &&
+    fallbackVisuals.length === 0 &&
+    !effects.hasActiveAnimations()
+  )
+    return;
   animationFrameId = window.requestAnimationFrame(animate);
 }
 
@@ -3982,7 +4757,11 @@ function updateDynamicResolution(frameDurationMs: number): void {
     adaptiveResolution.reset();
     return;
   }
-  const next = adaptiveResolution.observe(frameDurationMs, targetFramesPerSecond(), dynamicResolutionScale);
+  const next = adaptiveResolution.observe(
+    frameDurationMs,
+    targetFramesPerSecond(),
+    dynamicResolutionScale,
+  );
   if (next === null || next === dynamicResolutionScale) return;
   dynamicResolutionScale = next;
   applyRendererResolution();
@@ -3998,13 +4777,15 @@ function animate(timestamp: number): void {
     return;
   }
 
-  const dt = lastFrameTimestamp > 0
-    ? Math.min((timestamp - lastFrameTimestamp) / 1_000, 0.1)
-    : Math.min(1 / targetFramesPerSecond(), 0.05);
+  const dt =
+    lastFrameTimestamp > 0
+      ? Math.min((timestamp - lastFrameTimestamp) / 1_000, 0.1)
+      : Math.min(1 / targetFramesPerSecond(), 0.05);
   lastFrameTimestamp = timestamp;
-  nextFrameDeadline = nextFrameDeadline > 0
-    ? Math.max(nextFrameDeadline + minimumFrameInterval, timestamp + minimumFrameInterval * 0.2)
-    : timestamp + minimumFrameInterval;
+  nextFrameDeadline =
+    nextFrameDeadline > 0
+      ? Math.max(nextFrameDeadline + minimumFrameInterval, timestamp + minimumFrameInterval * 0.2)
+      : timestamp + minimumFrameInterval;
   elapsed += dt;
   if (isRolling || effects.hasActiveAnimations()) audio.update(dt);
   if (isRolling || effects.hasActiveAnimations()) effects.update(dt);
@@ -4047,14 +4828,19 @@ function animate(timestamp: number): void {
     height,
     shake.position.z + Math.cos(configuredCameraYaw) * horizontal,
   );
-  camera.up.set(Math.sin(shake.roll + configuredCameraYaw), 0, -Math.cos(shake.roll + configuredCameraYaw));
+  camera.up.set(
+    Math.sin(shake.roll + configuredCameraYaw),
+    0,
+    -Math.cos(shake.roll + configuredCameraYaw),
+  );
   camera.lookAt(shake.position.x * 0.12, 0, shake.position.z * 0.12);
   const targetZoom = configuredCameraZoom * (isRolling ? 0.988 : 1);
   cameraZoom = THREE.MathUtils.lerp(cameraZoom, targetZoom, 1 - Math.pow(0.002, dt));
   camera.zoom = cameraZoom;
   camera.updateProjectionMatrix();
 
-  if (!hasCast && elapsed > 5.5) gestureHint.classList.toggle('hidden', Math.sin(elapsed * 1.6) < -0.9);
+  if (!hasCast && elapsed > 5.5)
+    gestureHint.classList.toggle('hidden', Math.sin(elapsed * 1.6) < -0.9);
   const renderStartedAt = performance.now();
   if (OVERLAY_MODE) renderer.render(scene, camera);
   else composer?.render();

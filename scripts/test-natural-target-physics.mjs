@@ -34,13 +34,19 @@ assert.doesNotMatch(worker, /targetNormals/);
 assert.match(worker, /candidateAttempts: 1/);
 assert.match(worker, /assistedDice: \[\]/);
 
-assert.match(renderer, /const presentationMode = entries\[0\]\.tableMode[\s\S]*?preservePreviousDice[\s\S]*?table\.mode === 'concurrent'[\s\S]*?'add' : 'replace'/);
+assert.match(
+  renderer,
+  /const presentationMode =\s*entries\[0\]\.tableMode[\s\S]*?preservePreviousDice[\s\S]*?table\.mode === 'concurrent'[\s\S]*?'add'\s*:\s*'replace'/,
+);
 assert.match(main, /function appendTableRoll/);
 assert.match(main, /\(isRolling \|\| hasCast\)/);
 assert.match(main, /sampleActiveLaunchStates/);
 assert.match(main, /tableReplanPaused/);
 assert.match(main, /const lockedTrajectory = isRolling[\s\S]*?createLockedTableTrajectory/);
-assert.match(main, /newStates\.length > 0[\s\S]*?buildRollPlan\(\[\.\.\.existingStates, \.\.\.newStates\], existingCount, lockedTrajectory\)[\s\S]*?createStaticTablePlan/);
+assert.match(
+  main,
+  /newStates\.length > 0[\s\S]*?buildRollPlan\(\[\.\.\.existingStates, \.\.\.newStates\], existingCount, lockedTrajectory\)[\s\S]*?createStaticTablePlan/,
+);
 assert.match(main, /Keep the completed plan while the table remains visible/);
 assert.match(overlay, /table: options\.table \? \{ \.\.\.options\.table \} : undefined/);
 assert.match(playground, /id="sdk-second-delay"[^>]*value="80"/);
@@ -49,9 +55,18 @@ assert.match(guide, /Qvisible\(t\) = Q\(t\) · S/);
 assert.match(guide, /post-impact target torque/);
 
 function parseCollider(name) {
-  const match = colliders.match(new RegExp(`export const ${name}_COLLIDER: ColliderData = (\\{.*?\\});`));
+  const match = colliders.match(
+    // `[\s\S]` rather than `.` so the literal still matches once the formatter wraps it
+    // across multiple lines.
+    new RegExp(`export const ${name}_COLLIDER: ColliderData = (\\{[\\s\\S]*?\\});`),
+  );
   assert.ok(match, `${name} collider missing`);
-  return JSON.parse(match[1]);
+  // The literal is TypeScript, not JSON: keys are unquoted and the formatter adds trailing
+  // commas. Normalize both so this keeps working regardless of how the source is wrapped.
+  const normalized = match[1]
+    .replace(/([{,]\s*)([A-Za-z_$][\w$]*)\s*:/g, '$1"$2":')
+    .replace(/,(\s*[}\]])/g, '$1');
+  return JSON.parse(normalized);
 }
 
 const add = (a, b) => a.map((value, index) => value + b[index]);
@@ -71,7 +86,15 @@ const multiply = (a, b) => a.map((row) => transpose(b).map((column) => dot(row, 
 const applyMatrix = (matrix, vector) => matrix.map((row) => dot(row, vector));
 
 function logicalNormals(kind) {
-  if (kind === 'd6') return [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
+  if (kind === 'd6')
+    return [
+      [1, 0, 0],
+      [-1, 0, 0],
+      [0, 1, 0],
+      [0, -1, 0],
+      [0, 0, 1],
+      [0, 0, -1],
+    ];
   const data = parseCollider(kind.toUpperCase());
   if (kind === 'd4') return data.vertices.map(normalize);
   const groups = [];
@@ -81,7 +104,9 @@ function logicalNormals(kind) {
     const center = average(points);
     if (dot(normal, center) < 0) normal = scale(normal, -1);
     const plane = dot(normal, center);
-    const existing = groups.find((group) => dot(group.normal, normal) > 0.999 && Math.abs(group.plane - plane) < 0.02);
+    const existing = groups.find(
+      (group) => dot(group.normal, normal) > 0.999 && Math.abs(group.plane - plane) < 0.02,
+    );
     if (!existing) groups.push({ normal, plane });
   }
   return groups.map((group) => group.normal);
@@ -115,7 +140,8 @@ function findSymmetry(normals, fromIndex, toIndex) {
         const transformed = applyMatrix(rotation, normal);
         return normals.some((candidate) => dot(transformed, candidate) > 0.9995);
       });
-      if (mapsShape && dot(applyMatrix(rotation, sourcePrimary), targetPrimary) > 0.9995) return rotation;
+      if (mapsShape && dot(applyMatrix(rotation, sourcePrimary), targetPrimary) > 0.9995)
+        return rotation;
     }
   }
   return null;
@@ -153,20 +179,26 @@ for (const file of packageFiles) {
   assert.equal(parsed.version, '0.1.0', `${file} version changed`);
 }
 
-console.log(JSON.stringify({
-  ok: true,
-  tested: [
-    'shape-symmetry exact-result targeting',
-    'all result-to-result symmetries for d4/d6/d8/d10/d12/d20',
-    'constant local-space trajectory rotation',
-    'no post-impact torque assistance',
-    'no final orientation correction',
-    'no runtime face-label remapping',
-    'kinematic continuation of unresolved already-visible dice',
-    'dynamic collisions with previously settled dice',
-    'persistent in-flight and settled table additions',
-    'workerless fallback uses the same shape-symmetry path',
-    'playground defaults to a fully dynamic parallel test',
-    'unchanged versions and deployment configuration',
-  ],
-}, null, 2));
+console.log(
+  JSON.stringify(
+    {
+      ok: true,
+      tested: [
+        'shape-symmetry exact-result targeting',
+        'all result-to-result symmetries for d4/d6/d8/d10/d12/d20',
+        'constant local-space trajectory rotation',
+        'no post-impact torque assistance',
+        'no final orientation correction',
+        'no runtime face-label remapping',
+        'kinematic continuation of unresolved already-visible dice',
+        'dynamic collisions with previously settled dice',
+        'persistent in-flight and settled table additions',
+        'workerless fallback uses the same shape-symmetry path',
+        'playground defaults to a fully dynamic parallel test',
+        'unchanged versions and deployment configuration',
+      ],
+    },
+    null,
+    2,
+  ),
+);

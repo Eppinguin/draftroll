@@ -11,30 +11,40 @@ const outDir = join(tempRoot, 'build');
 const configPath = join(tempRoot, 'tsconfig.json');
 
 class SequenceRng {
-  constructor(values) { this.values = [...values]; }
+  constructor(values) {
+    this.values = [...values];
+  }
   integer(min, max) {
     const value = this.values.shift();
     if (value === undefined) throw new Error(`Sequence RNG exhausted for ${min}..${max}`);
-    if (value < min || value > max) throw new Error(`Sequence value ${value} outside ${min}..${max}`);
+    if (value < min || value > max)
+      throw new Error(`Sequence value ${value} outside ${min}..${max}`);
     return value;
   }
 }
 
 try {
-  await writeFile(configPath, JSON.stringify({
-    compilerOptions: {
-      target: 'ES2022',
-      module: 'CommonJS',
-      moduleResolution: 'Node',
-      rootDir: join(projectRoot, 'packages'),
-      outDir,
-      strict: true,
-      skipLibCheck: true,
-      esModuleInterop: true,
-      lib: ['ES2023', 'DOM', 'DOM.Iterable'],
-    },
-    include: [join(projectRoot, 'packages/**/*.ts')],
-  }, null, 2));
+  await writeFile(
+    configPath,
+    JSON.stringify(
+      {
+        compilerOptions: {
+          target: 'ES2022',
+          module: 'CommonJS',
+          moduleResolution: 'Node',
+          rootDir: join(projectRoot, 'packages'),
+          outDir,
+          strict: true,
+          skipLibCheck: true,
+          esModuleInterop: true,
+          lib: ['ES2023', 'DOM', 'DOM.Iterable'],
+        },
+        include: [join(projectRoot, 'packages/**/*.ts')],
+      },
+      null,
+      2,
+    ),
+  );
 
   const compile = runTsc(['-p', configPath], { cwd: projectRoot });
   if (compile.status !== 0) {
@@ -52,10 +62,13 @@ try {
   const coin = commonDice.coin();
   assert.equal(coin.id, 'coin');
   assert.equal(coin.renderAs, 'coin');
-  assert.deepEqual(coin.faces.map((face) => [face.result, face.value, face.label]), [
-    ['heads', 1, 'Heads'],
-    ['tails', 0, 'Tails'],
-  ]);
+  assert.deepEqual(
+    coin.faces.map((face) => [face.result, face.value, face.label]),
+    [
+      ['heads', 1, 'Heads'],
+      ['tails', 0, 'Tails'],
+    ],
+  );
 
   const weightedCoin = commonDice.coin('weighted-coin', {
     headsResult: 'H',
@@ -64,7 +77,10 @@ try {
     tailsWeight: 1,
     metadata: { name: 'Loaded coin' },
   });
-  assert.deepEqual(weightedCoin.faces.map((face) => face.weight), [3, 1]);
+  assert.deepEqual(
+    weightedCoin.faces.map((face) => face.weight),
+    [3, 1],
+  );
   assert.equal(weightedCoin.metadata?.name, 'Loaded coin');
 
   const coinEngine = new DiceEngine({ rng: new SequenceRng([1, 2]), customDice: [coin] });
@@ -72,19 +88,28 @@ try {
     mode: 'evaluate',
     dice: [dice.custom(coin.id, 'flip_1'), dice.custom(coin.id, 'flip_2')],
   });
-  assert.deepEqual(coinRoll.dice.map((die) => die.result), ['heads', 'tails']);
+  assert.deepEqual(
+    coinRoll.dice.map((die) => die.result),
+    ['heads', 'tails'],
+  );
   assert.equal(coinRoll.total, 1);
 
   const fate = commonDice.fate();
   assert.equal(fate.renderAs, 'fate');
   assert.equal(fate.faces.length, 6);
-  assert.deepEqual(fate.faces.map((face) => face.result), [-1, -1, 0, 0, 1, 1]);
+  assert.deepEqual(
+    fate.faces.map((face) => face.result),
+    [-1, -1, 0, 0, 1, 1],
+  );
   const fateRoll = new DiceEngine({ rng: new SequenceRng([1, 6]), customDice: [fate] }).evaluate({
     mode: 'evaluate',
     dice: [dice.custom(fate.id, 'fate_1'), dice.custom(fate.id, 'fate_2')],
   });
   assert.equal(fateRoll.total, 0);
-  assert.deepEqual(fateRoll.dice.map((die) => die.faceLabel), ['−', '+']);
+  assert.deepEqual(
+    fateRoll.dice.map((die) => die.faceLabel),
+    ['−', '+'],
+  );
 
   const percentile = commonDice.percentilePair();
   assert.equal(percentile.renderAs, 'percentile');
@@ -100,7 +125,10 @@ try {
     tensLabel: '00',
     onesLabel: '0',
   });
-  const percentileRoll = new DiceEngine({ rng: new SequenceRng([100]), customDice: [percentile] }).evaluate({
+  const percentileRoll = new DiceEngine({
+    rng: new SequenceRng([100]),
+    customDice: [percentile],
+  }).evaluate({
     mode: 'evaluate',
     dice: [dice.custom(percentile.id, 'percentile_1')],
   });
@@ -130,7 +158,10 @@ try {
     { result: 'ambush', value: -1, weight: 1 },
   ]);
   assert.equal(encounterTable.renderAs, 'spinner');
-  const tableRoll = new DiceEngine({ rng: new SequenceRng([4]), customDice: [encounterTable] }).evaluate({
+  const tableRoll = new DiceEngine({
+    rng: new SequenceRng([4]),
+    customDice: [encounterTable],
+  }).evaluate({
     mode: 'evaluate',
     dice: [dice.custom(encounterTable.id, 'encounter_1')],
   });
@@ -148,28 +179,44 @@ try {
     dice: [dice.custom(cards.id, 'card_1'), dice.custom(cards.id, 'card_2')],
     render: false,
   });
-  assert.deepEqual(cardRoll.dice.map((die) => die.result), ['sun', 'sun'], 'card helpers draw with replacement');
+  assert.deepEqual(
+    cardRoll.dice.map((die) => die.result),
+    ['sun', 'sun'],
+    'card helpers draw with replacement',
+  );
   assert.equal(cardRoll.dice[0].faceLabel, 'The Sun');
   assert.equal(cardRoll.dice[0].faceMetadata?.suit, 'major');
 
   assert.throws(() => commonDice.symbolPool(' ', ['x']), /definition ID/);
   assert.throws(() => commonDice.symbolPool('empty', []), /at least one face/);
-  assert.throws(() => commonDice.symbolPool('bad-weight', [{ result: 'x', weight: 0 }]), /positive safe integers/);
-  assert.throws(() => commonDice.symbolPool('bad-value', [{ result: 'x', value: Number.NaN }]), /finite/);
+  assert.throws(
+    () => commonDice.symbolPool('bad-weight', [{ result: 'x', weight: 0 }]),
+    /positive safe integers/,
+  );
+  assert.throws(
+    () => commonDice.symbolPool('bad-value', [{ result: 'x', value: Number.NaN }]),
+    /finite/,
+  );
 
-  console.log(JSON.stringify({
-    ok: true,
-    tested: [
-      'coin definition and weighted coin options',
-      'six-face Fate definition with repeated faces',
-      'atomic percentile-pair results including 00/0 = 100',
-      'symbol pools with weighted and metadata-bearing faces',
-      'weighted table draws',
-      'card draws with replacement',
-      'portable use through dice.custom and inline customDice',
-      'factory input validation',
-    ],
-  }, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        ok: true,
+        tested: [
+          'coin definition and weighted coin options',
+          'six-face Fate definition with repeated faces',
+          'atomic percentile-pair results including 00/0 = 100',
+          'symbol pools with weighted and metadata-bearing faces',
+          'weighted table draws',
+          'card draws with replacement',
+          'portable use through dice.custom and inline customDice',
+          'factory input validation',
+        ],
+      },
+      null,
+      2,
+    ),
+  );
 } finally {
   await rm(tempRoot, { recursive: true, force: true });
 }

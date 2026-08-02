@@ -9,17 +9,17 @@ A roll may contain both categories. Unsupported shapes never cause the supported
 
 ## Current mapping
 
-| Normalized result | Visual representation |
-| --- | --- |
-| d4, d6, d8, d10, d12, d20 | Physical mesh and Cannon trajectory |
-| d2 or `coin` | Coin token |
-| `d10x`, `d%`, d100 | Distinct percentile token |
-| `dF` or `fate` | Fate token showing `+`, `0`, or `−` |
-| Arbitrary numeric dN | Spinner token showing the rolled value |
-| Very large dN | Spinner token |
-| Symbolic custom face | Card by default |
-| Weighted/custom table result | Token or card |
-| Unknown result type | Generic result token |
+| Normalized result            | Visual representation                  |
+| ---------------------------- | -------------------------------------- |
+| d4, d6, d8, d10, d12, d20    | Physical mesh and Cannon trajectory    |
+| d2 or `coin`                 | Coin token                             |
+| `d10x`, `d%`, d100           | Distinct percentile token              |
+| `dF` or `fate`               | Fate token showing `+`, `0`, or `−`    |
+| Arbitrary numeric dN         | Spinner token showing the rolled value |
+| Very large dN                | Spinner token                          |
+| Symbolic custom face         | Card by default                        |
+| Weighted/custom table result | Token or card                          |
+| Unknown result type          | Generic result token                   |
 
 The fallback layer is a presentation contract, not a rules-engine substitution. The normalized result remains authoritative.
 

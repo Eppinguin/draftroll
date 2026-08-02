@@ -11,20 +11,27 @@ const outDir = join(tempRoot, 'build');
 const configPath = join(tempRoot, 'tsconfig.json');
 
 try {
-  await writeFile(configPath, JSON.stringify({
-    compilerOptions: {
-      target: 'ES2022',
-      module: 'CommonJS',
-      moduleResolution: 'Node',
-      rootDir: join(projectRoot, 'packages'),
-      outDir,
-      strict: true,
-      skipLibCheck: true,
-      esModuleInterop: true,
-      lib: ['ES2023', 'DOM', 'DOM.Iterable'],
-    },
-    include: [join(projectRoot, 'packages/**/*.ts')],
-  }, null, 2));
+  await writeFile(
+    configPath,
+    JSON.stringify(
+      {
+        compilerOptions: {
+          target: 'ES2022',
+          module: 'CommonJS',
+          moduleResolution: 'Node',
+          rootDir: join(projectRoot, 'packages'),
+          outDir,
+          strict: true,
+          skipLibCheck: true,
+          esModuleInterop: true,
+          lib: ['ES2023', 'DOM', 'DOM.Iterable'],
+        },
+        include: [join(projectRoot, 'packages/**/*.ts')],
+      },
+      null,
+      2,
+    ),
+  );
 
   const compile = runTsc(['-p', configPath], { cwd: projectRoot });
   if (compile.status !== 0) {
@@ -44,7 +51,11 @@ try {
     async warmup() {}
     async playRoll(result, options) {
       this.plays.push({ result, options });
-      return { results: result.dice.map((die) => Number(die.result)), total: result.total, replay: null };
+      return {
+        results: result.dice.map((die) => Number(die.result)),
+        total: result.total,
+        replay: null,
+      };
     }
     updateResult(result, options) {
       this.updates.push({ result, options });
@@ -74,46 +85,68 @@ try {
   assert.equal(corrected.result.dice[0].themeId, 'ember');
   assert.equal(draftroll.rollLog.length, 1, 'revision must replace the existing log entry');
   assert.equal(draftroll.rollLog[0].revision, 1);
-  assert.deepEqual(draftroll.getRollRevisions(original.result.rollId).map((entry) => entry.revision), [0, 1]);
+  assert.deepEqual(
+    draftroll.getRollRevisions(original.result.rollId).map((entry) => entry.revision),
+    [0, 1],
+  );
 
-  const formulaUpdate = corrected.update({ expression: '2d20kh1+7' }, {
-    mode: 'animate',
-    animateDice: 'all',
-  });
+  const formulaUpdate = corrected.update(
+    { expression: '2d20kh1+7' },
+    {
+      mode: 'animate',
+      animateDice: 'all',
+    },
+  );
   await formulaUpdate.presentation;
   assert.equal(renderer.plays.length, 2);
   assert.equal(formulaUpdate.result.revision, 2);
   assert.equal(formulaUpdate.result.expression, '2d20kh1+7');
-  assert.equal(formulaUpdate.result.dice[0].result, 20, 'formula-only edit should preserve existing values by default');
+  assert.equal(
+    formulaUpdate.result.dice[0].result,
+    20,
+    'formula-only edit should preserve existing values by default',
+  );
 
-  const rerolledFormula = formulaUpdate.update({ expression: '3d20kh1+7' }, {
-    mode: 'animate',
-    reroll: true,
-  });
+  const rerolledFormula = formulaUpdate.update(
+    { expression: '3d20kh1+7' },
+    {
+      mode: 'animate',
+      reroll: true,
+    },
+  );
   await rerolledFormula.presentation;
   assert.equal(renderer.plays.length, 3);
   assert.equal(rerolledFormula.result.dice.length, 3);
   assert.equal(rerolledFormula.result.revision, 3);
 
-  const selectedAnimation = rerolledFormula.update({
-    dice: [{ id: 'die_2', result: 1 }],
-  }, {
-    mode: 'animate',
-    animateDice: 'changed',
-  });
+  const selectedAnimation = rerolledFormula.update(
+    {
+      dice: [{ id: 'die_2', result: 1 }],
+    },
+    {
+      mode: 'animate',
+      animateDice: 'changed',
+    },
+  );
   await selectedAnimation.presentation;
   assert.deepEqual(renderer.plays.at(-1).options.dieIds, ['die_2']);
 
-  console.log(JSON.stringify({
-    ok: true,
-    rollId: selectedAnimation.result.rollId,
-    revision: selectedAnimation.result.revision,
-    total: selectedAnimation.result.total,
-    logEntries: draftroll.rollLog.length,
-    revisionSnapshots: draftroll.getRollRevisions(selectedAnimation.result.rollId).length,
-    physicalPlays: renderer.plays.length,
-    logOnlyUpdates: renderer.updates.length,
-  }, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        ok: true,
+        rollId: selectedAnimation.result.rollId,
+        revision: selectedAnimation.result.revision,
+        total: selectedAnimation.result.total,
+        logEntries: draftroll.rollLog.length,
+        revisionSnapshots: draftroll.getRollRevisions(selectedAnimation.result.rollId).length,
+        physicalPlays: renderer.plays.length,
+        logOnlyUpdates: renderer.updates.length,
+      },
+      null,
+      2,
+    ),
+  );
 } finally {
   await rm(tempRoot, { recursive: true, force: true });
 }

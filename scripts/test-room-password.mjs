@@ -195,20 +195,27 @@ class PasswordWebSocket extends EventTarget {
 }
 
 try {
-  await writeFile(configPath, JSON.stringify({
-    compilerOptions: {
-      target: 'ES2022',
-      module: 'CommonJS',
-      moduleResolution: 'Node',
-      rootDir: join(projectRoot, 'packages'),
-      outDir,
-      strict: true,
-      skipLibCheck: true,
-      esModuleInterop: true,
-      lib: ['ES2023', 'DOM', 'DOM.Iterable'],
-    },
-    include: [join(projectRoot, 'packages/**/*.ts')],
-  }, null, 2));
+  await writeFile(
+    configPath,
+    JSON.stringify(
+      {
+        compilerOptions: {
+          target: 'ES2022',
+          module: 'CommonJS',
+          moduleResolution: 'Node',
+          rootDir: join(projectRoot, 'packages'),
+          outDir,
+          strict: true,
+          skipLibCheck: true,
+          esModuleInterop: true,
+          lib: ['ES2023', 'DOM', 'DOM.Iterable'],
+        },
+        include: [join(projectRoot, 'packages/**/*.ts')],
+      },
+      null,
+      2,
+    ),
+  );
 
   const compile = runTsc(['-p', configPath], { cwd: projectRoot });
   if (compile.status !== 0) {
@@ -220,11 +227,7 @@ try {
 
   const client = await import(pathToFileURL(join(outDir, 'client/src/index.js')).href);
   const protocol = await import(pathToFileURL(join(outDir, 'protocol/src/index.js')).href);
-  const {
-    DiceRoom,
-    DiceRoomPasswordError,
-    DiceRoomPasswordRequiredError,
-  } = client;
+  const { DiceRoom, DiceRoomPasswordError, DiceRoomPasswordRequiredError } = client;
   const { decodeClientToServerEvent } = protocol;
 
   await assert.rejects(
@@ -266,8 +269,14 @@ try {
   });
 
   const socket = PasswordWebSocket.instances.at(-1);
-  assert.equal(new URL(socket.url).searchParams.has('roomPassword'), false, 'password must never be placed in the WebSocket URL');
-  const authentication = socket.sent.map(JSON.parse).find((event) => event.type === 'authenticate_room_password');
+  assert.equal(
+    new URL(socket.url).searchParams.has('roomPassword'),
+    false,
+    'password must never be placed in the WebSocket URL',
+  );
+  const authentication = socket.sent
+    .map(JSON.parse)
+    .find((event) => event.type === 'authenticate_room_password');
   assert.equal(authentication.password, CORRECT_PASSWORD);
   assert.equal(room.policy.access.passwordProtected, true);
 
@@ -279,9 +288,20 @@ try {
   assert.equal(updated.policy.access.passwordProtected, false);
   assert.equal(updated.previousPolicy.access.passwordProtected, true);
 
-  assert.equal(decodeClientToServerEvent({ type: 'authenticate_room_password', password: CORRECT_PASSWORD }).success, true);
-  assert.equal(decodeClientToServerEvent({ type: 'authenticate_room_password', password: 'short' }).success, false);
-  assert.equal(decodeClientToServerEvent({ type: 'set_room_password', requestId: 'request-1', password: null }).success, true);
+  assert.equal(
+    decodeClientToServerEvent({ type: 'authenticate_room_password', password: CORRECT_PASSWORD })
+      .success,
+    true,
+  );
+  assert.equal(
+    decodeClientToServerEvent({ type: 'authenticate_room_password', password: 'short' }).success,
+    false,
+  );
+  assert.equal(
+    decodeClientToServerEvent({ type: 'set_room_password', requestId: 'request-1', password: null })
+      .success,
+    true,
+  );
 
   const workerSource = await readFile(join(projectRoot, 'apps/worker/src/index.ts'), 'utf8');
   assert.match(workerSource, /PBKDF2-SHA-256/);
@@ -307,19 +327,25 @@ try {
     assert.equal(pkg.version, '0.1.0', `${file} version must remain unchanged`);
   }
 
-  console.log(JSON.stringify({
-    ok: true,
-    tested: [
-      'password-required handshake without room-state leakage',
-      'typed missing and invalid password errors',
-      'password sent after WebSocket open and never in URL',
-      'HTTP password header helper',
-      'password set/remove policy revisions',
-      'runtime password validation',
-      'PBKDF2 salted verifier and constant-time comparison implementation',
-      'no package version bumps',
-    ],
-  }, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        ok: true,
+        tested: [
+          'password-required handshake without room-state leakage',
+          'typed missing and invalid password errors',
+          'password sent after WebSocket open and never in URL',
+          'HTTP password header helper',
+          'password set/remove policy revisions',
+          'runtime password validation',
+          'PBKDF2 salted verifier and constant-time comparison implementation',
+          'no package version bumps',
+        ],
+      },
+      null,
+      2,
+    ),
+  );
 } finally {
   await rm(tempRoot, { recursive: true, force: true });
 }

@@ -18,9 +18,7 @@ const original = draftroll.roll('2d20kh1+5');
 await original.presentation;
 
 const corrected = original.update({
-  dice: [
-    { id: 'die_1', result: 20, themeId: 'ember' },
-  ],
+  dice: [{ id: 'die_1', result: 20, themeId: 'ember' }],
   annotation: 'Corrected by the GM',
 });
 
@@ -32,12 +30,15 @@ The result panel changes immediately. No 3D replay occurs.
 ## Correct a die and animate the revised roll
 
 ```ts
-const corrected = original.update({
-  dice: [{ id: 'die_1', result: 20 }],
-}, {
-  mode: 'animate',
-  animateDice: 'changed',
-});
+const corrected = original.update(
+  {
+    dice: [{ id: 'die_1', result: 20 }],
+  },
+  {
+    mode: 'animate',
+    animateDice: 'changed',
+  },
+);
 
 await corrected.presentation;
 ```
@@ -63,13 +64,16 @@ Changing a formula modifier should be done by changing the expression. `modifier
 ## Replace the formula and reroll everything
 
 ```ts
-const revised = original.update({
-  expression: '3d20kh1+7 [Revised attack]',
-}, {
-  mode: 'animate',
-  reroll: true,
-  themes: ['dragon', 'frost', 'ember'],
-});
+const revised = original.update(
+  {
+    expression: '3d20kh1+7 [Revised attack]',
+  },
+  {
+    mode: 'animate',
+    reroll: true,
+    themes: ['dragon', 'frost', 'ember'],
+  },
+);
 ```
 
 When a formula adds dice, Draftroll does not silently invent values during a preserve-only correction. Supply explicit results, list the new IDs in `reroll`, set `reroll: true`, or opt into `allowGenerateMissing: true`.
@@ -77,13 +81,16 @@ When a formula adds dice, Draftroll does not silently invent values during a pre
 ## Reroll selected values while changing the formula
 
 ```ts
-const revised = original.update({
-  expression: '3d20kh1+5',
-}, {
-  reroll: ['die_2', 'die_3'],
-  mode: 'animate',
-  animateDice: ['die_2', 'die_3'],
-});
+const revised = original.update(
+  {
+    expression: '3d20kh1+5',
+  },
+  {
+    reroll: ['die_2', 'die_3'],
+    mode: 'animate',
+    animateDice: ['die_2', 'die_3'],
+  },
+);
 ```
 
 Unlisted compatible dice retain their previous values.
@@ -129,12 +136,16 @@ const auditTrail = draftroll.getRollRevisions(rollId);
 ## Realtime room updates
 
 ```ts
-await room.updateRoll(rollId, {
-  dice: [{ id: 'die_1', result: 20 }],
-  annotation: 'Server-validated correction',
-}, {
-  animate: false,
-});
+await room.updateRoll(
+  rollId,
+  {
+    dice: [{ id: 'die_1', result: 20 }],
+    annotation: 'Server-validated correction',
+  },
+  {
+    animate: false,
+  },
+);
 ```
 
 Set `animate: true` for a synchronized room replay. The Durable Object validates and recalculates the revision, broadcasts `roll_updated`, replaces the current D1 history row, and appends an audit snapshot to `roll_revisions`.

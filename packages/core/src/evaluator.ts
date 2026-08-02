@@ -168,43 +168,45 @@ export function evaluateParsedExpression(
       metadata: options.metadata,
       createdAt: (options.now ?? (() => new Date()))().toISOString(),
     };
-    if (options.instrumentation) emitProfile(options.instrumentation, {
-      kind: 'evaluate',
-      status: 'success',
-      durationMs: profileDuration(options.instrumentation, startedAt),
-      mode: 'expression',
-      dialect: parsed.dialect,
-      sourceLength: parsed.source.length,
-      expressionLength: parsed.expression.length,
-      initialDice,
-      generatedDice: Math.max(0, state.generatedDice - initialDice),
-      resultDice: result.dice.length,
-      astNodesVisited: state.astNodesVisited,
-      evaluationSteps: state.operations,
-      modifiersApplied: state.modifiersApplied,
-      rerolls: state.rerolls,
-      explosions: state.explosions,
-    });
+    if (options.instrumentation)
+      emitProfile(options.instrumentation, {
+        kind: 'evaluate',
+        status: 'success',
+        durationMs: profileDuration(options.instrumentation, startedAt),
+        mode: 'expression',
+        dialect: parsed.dialect,
+        sourceLength: parsed.source.length,
+        expressionLength: parsed.expression.length,
+        initialDice,
+        generatedDice: Math.max(0, state.generatedDice - initialDice),
+        resultDice: result.dice.length,
+        astNodesVisited: state.astNodesVisited,
+        evaluationSteps: state.operations,
+        modifiersApplied: state.modifiersApplied,
+        rerolls: state.rerolls,
+        explosions: state.explosions,
+      });
     return result;
   } catch (error) {
-    if (options.instrumentation) emitProfile(options.instrumentation, {
-      kind: 'evaluate',
-      status: 'error',
-      durationMs: profileDuration(options.instrumentation, startedAt),
-      mode: 'expression',
-      dialect: parsed.dialect,
-      sourceLength: parsed.source.length,
-      expressionLength: parsed.expression.length,
-      initialDice,
-      generatedDice: Math.max(0, state.generatedDice - initialDice),
-      resultDice: state.generatedDice,
-      astNodesVisited: state.astNodesVisited,
-      evaluationSteps: state.operations,
-      modifiersApplied: state.modifiersApplied,
-      rerolls: state.rerolls,
-      explosions: state.explosions,
-      error: profileError(error),
-    });
+    if (options.instrumentation)
+      emitProfile(options.instrumentation, {
+        kind: 'evaluate',
+        status: 'error',
+        durationMs: profileDuration(options.instrumentation, startedAt),
+        mode: 'expression',
+        dialect: parsed.dialect,
+        sourceLength: parsed.source.length,
+        expressionLength: parsed.expression.length,
+        initialDice,
+        generatedDice: Math.max(0, state.generatedDice - initialDice),
+        resultDice: state.generatedDice,
+        astNodesVisited: state.astNodesVisited,
+        evaluationSteps: state.operations,
+        modifiersApplied: state.modifiersApplied,
+        rerolls: state.rerolls,
+        explosions: state.explosions,
+        error: profileError(error),
+      });
     throw error;
   }
 }
@@ -235,15 +237,20 @@ export function evaluateStructuredInput(
 
   try {
     if (input.advantage && input.advantage !== 'none') {
-      throw new Error('Structured rolls do not infer an advantage pool; provide two d20 dice with keep-highest/keep-lowest, or use an expression roll');
+      throw new Error(
+        'Structured rolls do not infer an advantage pool; provide two d20 dice with keep-highest/keep-lowest, or use an expression roll',
+      );
     }
-    if (planned.length > limits.maxInitialDice) throw new DiceLimitError(`Initial dice count exceeds ${limits.maxInitialDice}`);
+    if (planned.length > limits.maxInitialDice)
+      throw new DiceLimitError(`Initial dice count exceeds ${limits.maxInitialDice}`);
 
     const inlineCustomDice = new Map<string, CustomDiceDefinition>();
     for (const definition of input.customDice ?? []) {
       if (!definition.id.trim()) throw new Error('Custom dice require a non-empty id');
-      if (!definition.faces.length) throw new Error(`Custom die '${definition.id}' requires at least one face`);
-      if (inlineCustomDice.has(definition.id)) throw new Error(`Duplicate custom die definition '${definition.id}'`);
+      if (!definition.faces.length)
+        throw new Error(`Custom die '${definition.id}' requires at least one face`);
+      if (inlineCustomDice.has(definition.id))
+        throw new Error(`Duplicate custom die definition '${definition.id}'`);
       inlineCustomDice.set(definition.id, definition);
     }
     const resolveCustom = (id: string) => inlineCustomDice.get(id) ?? options.customDice?.(id);
@@ -288,12 +295,19 @@ export function evaluateStructuredInput(
       instrumented: Boolean(options.instrumentation),
       usedIds: new Set(dice.map((die) => die.id)),
     };
-    const operationTotal = applyStructuredOperations(dice, input.operations ?? [], operations, state);
+    const operationTotal = applyStructuredOperations(
+      dice,
+      input.operations ?? [],
+      operations,
+      state,
+    );
     const treeChildren: RollTreeNode[] = dice.map((die, index) => ({
       kind: 'die',
       id: `node_${index + 1}`,
       dieId: die.id,
-      sides: die.customDiceId ?? (die.type.toLowerCase() === 'df' ? 'F' : die.sides ?? parseSides(die.type)),
+      sides:
+        die.customDiceId ??
+        (die.type.toLowerCase() === 'df' ? 'F' : (die.sides ?? parseSides(die.type))),
       generatedBy: die.generatedBy ?? 'initial',
       value: numericDieResult(die),
       kept: die.kept,
@@ -301,7 +315,9 @@ export function evaluateStructuredInput(
       diceIds: [die.id],
     }));
     const keptValues = dice.filter((die) => die.kept).map(numericDieResult);
-    const total = normalizeZero((operationTotal ?? keptValues.reduce((sum, value) => sum + value, 0)) + (input.modifier ?? 0));
+    const total = normalizeZero(
+      (operationTotal ?? keptValues.reduce((sum, value) => sum + value, 0)) + (input.modifier ?? 0),
+    );
     const tree: RollTreeNode = {
       kind: 'set',
       id: 'node_root',
@@ -332,39 +348,41 @@ export function evaluateStructuredInput(
       createdAt: (options.now ?? (() => new Date()))().toISOString(),
     };
     resultDice = result.dice.length;
-    if (options.instrumentation) emitProfile(options.instrumentation, {
-      kind: 'evaluate',
-      status: 'success',
-      durationMs: profileDuration(options.instrumentation, startedAt),
-      mode: 'structured',
-      dialect: input.dialect ?? 'd20',
-      initialDice: planned.length,
-      generatedDice: Math.max(0, state.generatedDice - planned.length),
-      resultDice,
-      astNodesVisited: 0,
-      evaluationSteps: state.operationSteps,
-      modifiersApplied: operations.length,
-      rerolls: state.rerolls,
-      explosions: state.explosions,
-    });
+    if (options.instrumentation)
+      emitProfile(options.instrumentation, {
+        kind: 'evaluate',
+        status: 'success',
+        durationMs: profileDuration(options.instrumentation, startedAt),
+        mode: 'structured',
+        dialect: input.dialect ?? 'd20',
+        initialDice: planned.length,
+        generatedDice: Math.max(0, state.generatedDice - planned.length),
+        resultDice,
+        astNodesVisited: 0,
+        evaluationSteps: state.operationSteps,
+        modifiersApplied: operations.length,
+        rerolls: state.rerolls,
+        explosions: state.explosions,
+      });
     return result;
   } catch (error) {
-    if (options.instrumentation) emitProfile(options.instrumentation, {
-      kind: 'evaluate',
-      status: 'error',
-      durationMs: profileDuration(options.instrumentation, startedAt),
-      mode: 'structured',
-      dialect: input.dialect ?? 'd20',
-      initialDice: planned.length,
-      generatedDice: Math.max(0, (state?.generatedDice ?? planned.length) - planned.length),
-      resultDice: resultDice || state?.generatedDice || 0,
-      astNodesVisited: 0,
-      evaluationSteps: state?.operationSteps ?? 0,
-      modifiersApplied: state?.operationSteps ?? 0,
-      rerolls: state?.rerolls ?? 0,
-      explosions: state?.explosions ?? 0,
-      error: profileError(error),
-    });
+    if (options.instrumentation)
+      emitProfile(options.instrumentation, {
+        kind: 'evaluate',
+        status: 'error',
+        durationMs: profileDuration(options.instrumentation, startedAt),
+        mode: 'structured',
+        dialect: input.dialect ?? 'd20',
+        initialDice: planned.length,
+        generatedDice: Math.max(0, (state?.generatedDice ?? planned.length) - planned.length),
+        resultDice: resultDice || state?.generatedDice || 0,
+        astNodesVisited: 0,
+        evaluationSteps: state?.operationSteps ?? 0,
+        modifiersApplied: state?.operationSteps ?? 0,
+        rerolls: state?.rerolls ?? 0,
+        explosions: state?.explosions ?? 0,
+        error: profileError(error),
+      });
     throw error;
   }
 }
@@ -486,7 +504,16 @@ function evaluateDice(
   const children: Extract<RollTreeNode, { kind: 'die' }>[] = [];
   const selection: SelectableItem[] = [];
   for (let count = 0; count < node.count; count += 1) {
-    const item = createDieItem(node.sides, rng, state, limits, themeId, state.nextSourceRollIndex++, 'initial', node.annotations);
+    const item = createDieItem(
+      node.sides,
+      rng,
+      state,
+      limits,
+      themeId,
+      state.nextSourceRollIndex++,
+      'initial',
+      node.annotations,
+    );
     dice.push(item.die);
     children.push(item.tree);
     selection.push(item);
@@ -541,17 +568,26 @@ function applySetOperations(
       continue;
     }
 
-    if (!diceNode) throw new Error(`Operation '${modifier.notation ?? modifier.type}' can only be applied to dice`);
+    if (!diceNode)
+      throw new Error(
+        `Operation '${modifier.notation ?? modifier.type}' can only be applied to dice`,
+      );
 
     if (modifier.type === 'minimum' || modifier.type === 'maximum') {
       for (const item of items.filter((candidate) => candidate.isKept() && candidate.die)) {
         const current = item.value();
-        const next = modifier.type === 'minimum'
-          ? Math.max(current, modifier.selector.target)
-          : Math.min(current, modifier.selector.target);
+        const next =
+          modifier.type === 'minimum'
+            ? Math.max(current, modifier.selector.target)
+            : Math.min(current, modifier.selector.target);
         setDieItemValue(item, next);
       }
-      result.operations.push(operationRecord(modifier, items.filter((item) => item.isKept())));
+      result.operations.push(
+        operationRecord(
+          modifier,
+          items.filter((item) => item.isKept()),
+        ),
+      );
       continue;
     }
 
@@ -584,7 +620,8 @@ function applySetOperations(
           affected.push(current);
           current.setKept(false);
           state.rerolls += 1;
-          if (state.rerolls > limits.maxRerolls) throw new DiceLimitError(`Rerolls exceed ${limits.maxRerolls}`);
+          if (state.rerolls > limits.maxRerolls)
+            throw new DiceLimitError(`Rerolls exceed ${limits.maxRerolls}`);
           const replacement = createDieItem(
             diceNode.sides,
             rng,
@@ -598,7 +635,12 @@ function applySetOperations(
           );
           appendDieItem(result, replacement);
           current = replacement;
-          if (modifier.type === 'reroll-once' || isRankSelector(modifier.selector) || !matchesSelector(current.value(), modifier.selector)) break;
+          if (
+            modifier.type === 'reroll-once' ||
+            isRankSelector(modifier.selector) ||
+            !matchesSelector(current.value(), modifier.selector)
+          )
+            break;
         }
       }
       result.operations.push(operationRecord(modifier, affected));
@@ -612,7 +654,8 @@ function applySetOperations(
         const current = queue[index];
         affected.push(current);
         state.explosions += 1;
-        if (state.explosions > limits.maxExplosions) throw new DiceLimitError(`Explosions exceed ${limits.maxExplosions}`);
+        if (state.explosions > limits.maxExplosions)
+          throw new DiceLimitError(`Explosions exceed ${limits.maxExplosions}`);
         const exploded = createDieItem(
           diceNode.sides,
           rng,
@@ -625,7 +668,11 @@ function applySetOperations(
           current.die?.id,
         );
         appendDieItem(result, exploded);
-        if (!isRankSelector(modifier.selector) && matchesSelector(exploded.value(), modifier.selector)) queue.push(exploded);
+        if (
+          !isRankSelector(modifier.selector) &&
+          matchesSelector(exploded.value(), modifier.selector)
+        )
+          queue.push(exploded);
       }
       result.operations.push(operationRecord(modifier, affected));
     }
@@ -653,7 +700,8 @@ function createDieItem(
   generatedFromDieId?: string,
 ): DieSelectableItem {
   state.generatedDice += 1;
-  if (state.generatedDice > limits.maxGeneratedDice) throw new DiceLimitError(`Generated dice exceed ${limits.maxGeneratedDice}`);
+  if (state.generatedDice > limits.maxGeneratedDice)
+    throw new DiceLimitError(`Generated dice exceed ${limits.maxGeneratedDice}`);
   const id = `die_${state.nextDieId++}`;
   const override = generatedBy === 'initial' ? state.resultOverrides?.[id] : undefined;
   const result = override ?? rollValue(sides, rng);
@@ -742,19 +790,27 @@ function selectItems(items: readonly SelectableItem[], selector: SetSelector): S
   if (selector.type === 'highest' || selector.type === 'lowest') {
     const count = Math.max(0, Math.trunc(selector.target));
     const sorted = active.toSorted((left, right) => left.value() - right.value());
-    return selector.type === 'highest' ? sorted.slice(Math.max(0, sorted.length - count)) : sorted.slice(0, count);
+    return selector.type === 'highest'
+      ? sorted.slice(Math.max(0, sorted.length - count))
+      : sorted.slice(0, count);
   }
   return active.filter((item) => matchesSelector(item.value(), selector));
 }
 
 function matchesSelector(value: number, selector: SetSelector): boolean {
   switch (selector.type) {
-    case 'literal': return value === selector.target;
-    case 'not-equal': return value !== selector.target;
-    case 'less': return value < selector.target;
-    case 'less-equal': return value <= selector.target;
-    case 'greater': return value > selector.target;
-    case 'greater-equal': return value >= selector.target;
+    case 'literal':
+      return value === selector.target;
+    case 'not-equal':
+      return value !== selector.target;
+    case 'less':
+      return value < selector.target;
+    case 'less-equal':
+      return value <= selector.target;
+    case 'greater':
+      return value > selector.target;
+    case 'greater-equal':
+      return value >= selector.target;
     case 'highest':
     case 'lowest':
       return false;
@@ -770,12 +826,17 @@ function operationRecord(modifier: SetOperation, items: readonly SelectableItem[
   const comparator = selectorComparison(modifier.selector);
   return {
     type,
-    count: modifier.selector.type === 'highest' || modifier.selector.type === 'lowest' ? modifier.selector.target : undefined,
+    count:
+      modifier.selector.type === 'highest' || modifier.selector.type === 'lowest'
+        ? modifier.selector.target
+        : undefined,
     comparator: comparator ?? undefined,
     target: modifier.selector.target,
     selector: { ...modifier.selector },
     notation: modifier.notation,
-    appliedTo: items.flatMap((item) => item.diceIds().length > 0 ? item.diceIds() : [item.tree.id]),
+    appliedTo: items.flatMap((item) =>
+      item.diceIds().length > 0 ? item.diceIds() : [item.tree.id],
+    ),
   };
 }
 
@@ -789,12 +850,18 @@ function legacyOperationType(modifier: SetOperation): RollOperationType {
 
 function selectorComparison(selector: SetSelector): ComparisonOperator | null {
   switch (selector.type) {
-    case 'literal': return '=';
-    case 'not-equal': return '!=';
-    case 'less': return '<';
-    case 'less-equal': return '<=';
-    case 'greater': return '>';
-    case 'greater-equal': return '>=';
+    case 'literal':
+      return '=';
+    case 'not-equal':
+      return '!=';
+    case 'less':
+      return '<';
+    case 'less-equal':
+      return '<=';
+    case 'greater':
+      return '>';
+    case 'greater-equal':
+      return '>=';
     case 'highest':
     case 'lowest':
       return null;
@@ -809,9 +876,12 @@ function setDieItemValue(item: SelectableItem, value: number): void {
 
 function applyArithmetic(operator: BinaryOperator, left: number, right: number): number {
   switch (operator) {
-    case '+': return left + right;
-    case '-': return left - right;
-    case '*': return left * right;
+    case '+':
+      return left + right;
+    case '-':
+      return left - right;
+    case '*':
+      return left * right;
     case '/':
       if (right === 0) throw new Error('Division by zero');
       return left / right;
@@ -822,23 +892,35 @@ function applyArithmetic(operator: BinaryOperator, left: number, right: number):
       if (right === 0) throw new Error('Modulo by zero');
       return left - Math.floor(left / right) * right;
     case '=':
-    case '==': return left === right ? 1 : 0;
-    case '!=': return left !== right ? 1 : 0;
-    case '<': return left < right ? 1 : 0;
-    case '<=': return left <= right ? 1 : 0;
-    case '>': return left > right ? 1 : 0;
-    case '>=': return left >= right ? 1 : 0;
+    case '==':
+      return left === right ? 1 : 0;
+    case '!=':
+      return left !== right ? 1 : 0;
+    case '<':
+      return left < right ? 1 : 0;
+    case '<=':
+      return left <= right ? 1 : 0;
+    case '>':
+      return left > right ? 1 : 0;
+    case '>=':
+      return left >= right ? 1 : 0;
   }
 }
 
 function countInitialDice(node: AstNode): number {
   switch (node.type) {
-    case 'number': return 0;
-    case 'dice': return node.count;
-    case 'unary': return countInitialDice(node.operand);
-    case 'binary': return countInitialDice(node.left) + countInitialDice(node.right);
-    case 'parenthetical': return countInitialDice(node.value);
-    case 'set': return node.values.reduce((sum, value) => sum + countInitialDice(value), 0);
+    case 'number':
+      return 0;
+    case 'dice':
+      return node.count;
+    case 'unary':
+      return countInitialDice(node.operand);
+    case 'binary':
+      return countInitialDice(node.left) + countInitialDice(node.right);
+    case 'parenthetical':
+      return countInitialDice(node.value);
+    case 'set':
+      return node.values.reduce((sum, value) => sum + countInitialDice(value), 0);
   }
 }
 
@@ -862,13 +944,17 @@ function applyAdvantage(node: AstNode, advantage: AdvantageMode): boolean {
         return true;
       }
       return false;
-    case 'unary': return applyAdvantage(node.operand, advantage);
-    case 'binary': return applyAdvantage(node.left, advantage) || applyAdvantage(node.right, advantage);
-    case 'parenthetical': return applyAdvantage(node.value, advantage);
+    case 'unary':
+      return applyAdvantage(node.operand, advantage);
+    case 'binary':
+      return applyAdvantage(node.left, advantage) || applyAdvantage(node.right, advantage);
+    case 'parenthetical':
+      return applyAdvantage(node.value, advantage);
     case 'set':
       for (const value of node.values) if (applyAdvantage(value, advantage)) return true;
       return false;
-    case 'number': return false;
+    case 'number':
+      return false;
   }
 }
 
@@ -879,11 +965,14 @@ function detectCritical(
 ): CriticalType {
   const firstD20 = findLeftmostD20(tree);
   if (!firstD20 || firstD20.kind !== 'dice') return 'none';
-  const qualifyingPool = firstD20.count === 1 || operations.some((operation) => (
-    (operation.type === 'keep-highest' || operation.type === 'keep-lowest')
-    && operation.count === 1
-    && firstD20.diceIds.some((id) => operation.appliedTo.includes(id))
-  ));
+  const qualifyingPool =
+    firstD20.count === 1 ||
+    operations.some(
+      (operation) =>
+        (operation.type === 'keep-highest' || operation.type === 'keep-lowest') &&
+        operation.count === 1 &&
+        firstD20.diceIds.some((id) => operation.appliedTo.includes(id)),
+    );
   if (!qualifyingPool) return 'none';
   const byId = new Map(dice.map((die) => [die.id, die]));
   const kept = firstD20.diceIds.map((id) => byId.get(id)).filter((die) => die?.kept);
@@ -913,7 +1002,8 @@ function nextNodeId(state: EvaluationState): string {
 
 function tick(state: EvaluationState, limits: DiceExecutionLimits): void {
   state.operations += 1;
-  if (state.operations > limits.maxOperations) throw new DiceLimitError(`Evaluation operations exceed ${limits.maxOperations}`);
+  if (state.operations > limits.maxOperations)
+    throw new DiceLimitError(`Evaluation operations exceed ${limits.maxOperations}`);
 }
 
 function rollValue(sides: number | 'F', rng: DiceRng): number {
@@ -921,18 +1011,21 @@ function rollValue(sides: number | 'F', rng: DiceRng): number {
 }
 
 function validateDieValue(value: number | string, sides: number | 'F', id: string): void {
-  if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`Die '${id}' requires a numeric result`);
+  if (typeof value !== 'number' || !Number.isFinite(value))
+    throw new Error(`Die '${id}' requires a numeric result`);
   if (sides === 'F') {
     if (![-1, 0, 1].includes(value)) throw new Error(`Fate die '${id}' must be -1, 0, or 1`);
     return;
   }
-  if (!Number.isInteger(value) || value < 1 || value > sides) throw new Error(`Die '${id}' result must be between 1 and ${sides}`);
+  if (!Number.isInteger(value) || value < 1 || value > sides)
+    throw new Error(`Die '${id}' result must be between 1 and ${sides}`);
 }
 
 function numericResult(result: number | string): number {
   if (typeof result === 'number') return result;
   const numeric = Number(result);
-  if (!Number.isFinite(numeric)) throw new Error(`Non-numeric die result '${result}' cannot be evaluated`);
+  if (!Number.isFinite(numeric))
+    throw new Error(`Non-numeric die result '${result}' cannot be evaluated`);
   return numeric;
 }
 
@@ -958,19 +1051,29 @@ function resolveStructuredDie(
     let faceIndex: number;
     if (die.faceIndex !== undefined) {
       faceIndex = die.faceIndex;
-      if (!Number.isSafeInteger(faceIndex) || faceIndex < 0 || faceIndex >= definition.faces.length) {
+      if (
+        !Number.isSafeInteger(faceIndex) ||
+        faceIndex < 0 ||
+        faceIndex >= definition.faces.length
+      ) {
         throw new Error(`Face index ${faceIndex} is invalid for custom die '${definition.id}'`);
       }
       if (die.result !== undefined && definition.faces[faceIndex].result !== die.result) {
-        throw new Error(`Face index ${faceIndex} does not match result '${String(die.result)}' for custom die '${definition.id}'`);
+        throw new Error(
+          `Face index ${faceIndex} does not match result '${String(die.result)}' for custom die '${definition.id}'`,
+        );
       }
     } else if (die.result !== undefined) {
       faceIndex = definition.faces.findIndex((face) => face.result === die.result);
-      if (faceIndex < 0) throw new Error(`Result '${String(die.result)}' is not a face of custom die '${definition.id}'`);
+      if (faceIndex < 0)
+        throw new Error(
+          `Result '${String(die.result)}' is not a face of custom die '${definition.id}'`,
+        );
     } else {
       const weights = definition.faces.map((face) => face.weight ?? 1);
       for (const weight of weights) {
-        if (!Number.isSafeInteger(weight) || weight < 1) throw new Error(`Custom die '${definition.id}' weights must be positive integers`);
+        if (!Number.isSafeInteger(weight) || weight < 1)
+          throw new Error(`Custom die '${definition.id}' weights must be positive integers`);
       }
       const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
       const ticket = rng.integer(1, totalWeight);
@@ -979,8 +1082,10 @@ function resolveStructuredDie(
     }
     const face = definition.faces[faceIndex];
     const result = die.result ?? face.result;
-    const numericValue = die.numericValue ?? face.value ?? (typeof result === 'number' ? result : 0);
-    if (!Number.isFinite(numericValue)) throw new Error(`Custom die '${definition.id}' face requires a finite numeric value`);
+    const numericValue =
+      die.numericValue ?? face.value ?? (typeof result === 'number' ? result : 0);
+    if (!Number.isFinite(numericValue))
+      throw new Error(`Custom die '${definition.id}' face requires a finite numeric value`);
     return {
       result,
       numericValue,
@@ -1051,7 +1156,12 @@ function applyStructuredOperations(
     const selector = structuredSelector(operation);
     let affected: NormalizedDieResult[] = [];
 
-    if (operation.type === 'keep-highest' || operation.type === 'keep-lowest' || operation.type === 'drop-highest' || operation.type === 'drop-lowest') {
+    if (
+      operation.type === 'keep-highest' ||
+      operation.type === 'keep-lowest' ||
+      operation.type === 'drop-highest' ||
+      operation.type === 'drop-lowest'
+    ) {
       const genericType = operation.type.startsWith('keep') ? 'keep' : 'drop';
       const rank = operation.type.endsWith('highest') ? 'highest' : 'lowest';
       affected = selectStructuredDice(scoped, { type: rank, target: operation.count ?? 1 });
@@ -1064,7 +1174,8 @@ function applyStructuredOperations(
       const target = selector.target;
       for (const die of affected) {
         const value = numericDieResult(die);
-        const next = operation.type === 'minimum' ? Math.max(value, target) : Math.min(value, target);
+        const next =
+          operation.type === 'minimum' ? Math.max(value, target) : Math.min(value, target);
         die.numericValue = next;
         if (typeof die.result === 'number') die.result = next;
       }
@@ -1091,7 +1202,12 @@ function applyStructuredOperations(
           const replacement = createStructuredGeneratedDie(current, 'reroll', state);
           dice.push(replacement);
           current = replacement;
-          if (operation.type === 'reroll-once' || isRankSelector(selector) || !matchesSelector(numericDieResult(current), selector)) break;
+          if (
+            operation.type === 'reroll-once' ||
+            isRankSelector(selector) ||
+            !matchesSelector(numericDieResult(current), selector)
+          )
+            break;
         }
       }
     } else if (operation.type === 'explode') {
@@ -1105,7 +1221,8 @@ function applyStructuredOperations(
         }
         const exploded = createStructuredGeneratedDie(current, 'explosion', state);
         dice.push(exploded);
-        if (!isRankSelector(selector) && matchesSelector(numericDieResult(exploded), selector)) queue.push(exploded);
+        if (!isRankSelector(selector) && matchesSelector(numericDieResult(exploded), selector))
+          queue.push(exploded);
       }
     }
 
@@ -1132,7 +1249,9 @@ function structuredScope(
 ): NormalizedDieResult[] {
   if (!operation.dice?.length) return [...dice];
   const configured = new Set(operation.dice);
-  return dice.filter((die) => configured.has(die.id) || configured.has(state.rootByDieId.get(die.id) ?? die.id));
+  return dice.filter(
+    (die) => configured.has(die.id) || configured.has(state.rootByDieId.get(die.id) ?? die.id),
+  );
 }
 
 function selectStructuredDice(
@@ -1142,7 +1261,9 @@ function selectStructuredDice(
   const active = dice.filter((die) => die.kept);
   if (selector.type === 'highest' || selector.type === 'lowest') {
     const count = Math.max(0, Math.trunc(selector.target));
-    const sorted = active.toSorted((left, right) => numericDieResult(left) - numericDieResult(right));
+    const sorted = active.toSorted(
+      (left, right) => numericDieResult(left) - numericDieResult(right),
+    );
     return selector.type === 'highest'
       ? sorted.slice(Math.max(0, sorted.length - count))
       : sorted.slice(0, count);
@@ -1208,32 +1329,42 @@ function applyStructuredKeepDrop(
   type: 'keep' | 'drop',
   selector: RollSelector,
 ): void {
-  const items = dice.map((die) => ({
-    die,
-    value: numericDieResult(die),
-  })).filter(({ die }) => die.kept);
+  const items = dice
+    .map((die) => ({
+      die,
+      value: numericDieResult(die),
+    }))
+    .filter(({ die }) => die.kept);
   let selected: typeof items;
   if (selector.type === 'highest' || selector.type === 'lowest') {
     const sorted = items.toSorted((a, b) => a.value - b.value);
-    selected = selector.type === 'highest'
-      ? sorted.slice(Math.max(0, sorted.length - Math.trunc(selector.target)))
-      : sorted.slice(0, Math.trunc(selector.target));
+    selected =
+      selector.type === 'highest'
+        ? sorted.slice(Math.max(0, sorted.length - Math.trunc(selector.target)))
+        : sorted.slice(0, Math.trunc(selector.target));
   } else {
     selected = items.filter((item) => matchesSelector(item.value, selector));
   }
   const selectedIds = new Set(selected.map((item) => item.die.id));
-  for (const { die } of items) die.kept = type === 'keep' ? selectedIds.has(die.id) : !selectedIds.has(die.id);
+  for (const { die } of items)
+    die.kept = type === 'keep' ? selectedIds.has(die.id) : !selectedIds.has(die.id);
 }
 
 function comparisonToSelector(comparator: ComparisonOperator, target: number): RollSelector {
   switch (comparator) {
     case '=':
-    case '==': return { type: 'literal', target };
-    case '!=': return { type: 'not-equal', target };
-    case '<': return { type: 'less', target };
-    case '<=': return { type: 'less-equal', target };
-    case '>': return { type: 'greater', target };
-    case '>=': return { type: 'greater-equal', target };
+    case '==':
+      return { type: 'literal', target };
+    case '!=':
+      return { type: 'not-equal', target };
+    case '<':
+      return { type: 'less', target };
+    case '<=':
+      return { type: 'less-equal', target };
+    case '>':
+      return { type: 'greater', target };
+    case '>=':
+      return { type: 'greater-equal', target };
   }
 }
 

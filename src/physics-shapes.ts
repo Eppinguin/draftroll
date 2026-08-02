@@ -13,6 +13,18 @@ export const DIE_RADIUS: Record<DieKind, number> = {
 };
 
 /**
+ * Narrows an untrusted string to a supported die kind.
+ *
+ * @remarks
+ * Values arriving from `dataset` attributes or SDK callers are only correct by convention with
+ * the markup or the caller. This checks them against the die table so a typo surfaces as a
+ * rejected value rather than a die that silently renders with the wrong geometry.
+ */
+export function isDieKind(value: unknown): value is DieKind {
+  return typeof value === 'string' && Object.hasOwn(DIE_RADIUS, value);
+}
+
+/**
  * Small collision skin around the visible solid.
  *
  * Cannon permits a little penetration while its iterative solver resolves a

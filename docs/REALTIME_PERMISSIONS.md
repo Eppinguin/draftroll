@@ -161,12 +161,16 @@ await attack.updateLog({ annotation: 'Corrected' });
 The equivalent lower-level call is:
 
 ```ts
-await room.room.updateRoll(attack.id, {
-  annotation: 'Corrected',
-}, {
-  expectedRevision: attack.revision,
-  animate: false,
-});
+await room.room.updateRoll(
+  attack.id,
+  {
+    annotation: 'Corrected',
+  },
+  {
+    expectedRevision: attack.revision,
+    animate: false,
+  },
+);
 ```
 
 A stale update rejects with `DiceRoomRequestError`:
@@ -186,25 +190,26 @@ try {
 Secure deployments use short-lived, room-scoped capability tokens. Tokens can be issued by any trusted application backend; Draftroll does not require or maintain user accounts.
 
 ```ts
-import {
-  createGameMasterPermissions,
-  createRoomCapabilityToken,
-} from '@draftroll/server';
+import { createGameMasterPermissions, createRoomCapabilityToken } from '@draftroll/server';
 
-const token = await createRoomCapabilityToken({
-  roomId: 'table',
-  participantId: user.id,
-  name: 'Game Master',
-  roles: ['gm'],
-  permissions: createGameMasterPermissions(),
-}, {
-  id: '2026-07',
-  secret: process.env.DRAFTROLL_ROOM_SIGNING_KEY!,
-}, {
-  expiresInSeconds: 60 * 60,
-  issuer: 'https://app.example.com',
-  audience: 'draftroll-room',
-});
+const token = await createRoomCapabilityToken(
+  {
+    roomId: 'table',
+    participantId: user.id,
+    name: 'Game Master',
+    roles: ['gm'],
+    permissions: createGameMasterPermissions(),
+  },
+  {
+    id: '2026-07',
+    secret: process.env.DRAFTROLL_ROOM_SIGNING_KEY!,
+  },
+  {
+    expiresInSeconds: 60 * 60,
+    issuer: 'https://app.example.com',
+    audience: 'draftroll-room',
+  },
+);
 ```
 
 Available permissions:
@@ -239,13 +244,16 @@ New deployments should use `ROOM_TOKEN_KEYS`, a JSON object mapping key IDs to s
 Capability tokens support issuer and audience claims, issued-at and not-before timestamps, unique token IDs, and key IDs. A room manager can revoke one token ID or all tokens for a participant issued before a cutoff:
 
 ```ts
-await session.revokeToken({
-  type: 'participant',
-  participantId: removedParticipantId,
-  issuedAtOrBefore: Math.floor(Date.now() / 1000),
-}, {
-  reason: 'Removed from table',
-});
+await session.revokeToken(
+  {
+    type: 'participant',
+    participantId: removedParticipantId,
+    issuedAtOrBefore: Math.floor(Date.now() / 1000),
+  },
+  {
+    reason: 'Removed from table',
+  },
+);
 ```
 
 The Durable Object checks revocation before returning room state, immediately disconnects matching token-authenticated sessions, and exposes the sequenced revocation event only to room managers. Complete tokens and signing material are never broadcast. See `TOKEN_SECURITY.md`.
@@ -257,17 +265,20 @@ Permissions establish what a participant is capable of doing; the room policy es
 Managers can update policy without replacing the room:
 
 ```ts
-await session.setPolicy({
-  authorization: {
-    allowHiddenRolls: true,
-    allowWhispers: false,
+await session.setPolicy(
+  {
+    authorization: {
+      allowHiddenRolls: true,
+      allowWhispers: false,
+    },
+    lifecycle: {
+      staleSessionSeconds: 600,
+    },
   },
-  lifecycle: {
-    staleSessionSeconds: 600,
+  {
+    expectedRevision: session.policyRevision,
   },
-}, {
-  expectedRevision: session.policyRevision,
-});
+);
 ```
 
 The Durable Object applies the resulting policy to WebSocket commands, HTTP reads, participant admission, result sizes, visibility, revision retention, room expiry, and emergency shutdown. See `ROOM_HARDENING.md` for presets and all configurable controls.

@@ -60,7 +60,6 @@ Hidden-roll filtering occurs before socket transmission. The renderer and host a
 - `apps/worker`: optional Cloudflare Worker and Durable Object with per-socket permission projection, reconnect buffers, current D1 roll state, and immutable D1 revision history.
 - `src`: physical renderer implementation, production overlay entry, and a separate character-sheet host entry. The renderer entry does not import the host test client.
 
-
 ## Package entry-point isolation
 
 `@draftroll/sdk` publishes separate browser and headless source entry points. The browser entry re-exports the renderer and iframe overlay. The headless entry retains local evaluation, structured rolls, normalized results, realtime room sessions, and stable roll handles, while loading overlay support only through the explicit asynchronous `Draftroll.createOverlay()` boundary.

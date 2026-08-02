@@ -21,8 +21,6 @@ const VALUE_ORDERS: Record<Exclude<DieKind, 'd4'>, number[]> = {
   d20: [20, 2, 14, 8, 19, 3, 12, 6, 17, 9, 1, 18, 4, 15, 7, 13, 5, 16, 10, 11],
 };
 
-
-
 interface LogicalFace {
   normal: THREE.Vector3;
   center: THREE.Vector3;
@@ -99,7 +97,13 @@ function createGeometry(kind: DieKind): GeometrySet {
     }
     case 'd6':
       geometry = {
-        visual: new RoundedBoxGeometry(radius * 1.72, radius * 1.72, radius * 1.72, 6, radius * 0.2),
+        visual: new RoundedBoxGeometry(
+          radius * 1.72,
+          radius * 1.72,
+          radius * 1.72,
+          6,
+          radius * 0.2,
+        ),
         collider: new THREE.BoxGeometry(radius * 1.72, radius * 1.72, radius * 1.72),
       };
       break;
@@ -143,7 +147,11 @@ function getTriangleData(geometry: THREE.BufferGeometry): TriangleData[] {
     const b = new THREE.Vector3().fromBufferAttribute(position, i + 1);
     const c = new THREE.Vector3().fromBufferAttribute(position, i + 2);
     const normal = b.clone().sub(a).cross(c.clone().sub(a)).normalize();
-    const center = a.clone().add(b).add(c).multiplyScalar(1 / 3);
+    const center = a
+      .clone()
+      .add(b)
+      .add(c)
+      .multiplyScalar(1 / 3);
     if (normal.dot(center) < 0) {
       normal.negate();
       triangles.push({ normal, center, vertices: [a, c, b] });
@@ -156,7 +164,8 @@ function getTriangleData(geometry: THREE.BufferGeometry): TriangleData[] {
 }
 
 function pushUniqueVertex(vertices: THREE.Vector3[], vertex: THREE.Vector3): void {
-  if (!vertices.some((candidate) => candidate.distanceToSquared(vertex) < 1e-8)) vertices.push(vertex.clone());
+  if (!vertices.some((candidate) => candidate.distanceToSquared(vertex) < 1e-8))
+    vertices.push(vertex.clone());
 }
 
 const logicalFaceCache = new Map<DieKind, LogicalFace[]>();
@@ -165,7 +174,11 @@ function getLogicalFaceTemplate(kind: DieKind): LogicalFace[] {
   const cached = logicalFaceCache.get(kind);
   if (cached) return cached;
   const triangles = getTriangleData(createGeometry(kind).collider);
-  const groups: Array<{ normal: THREE.Vector3; centers: THREE.Vector3[]; vertices: THREE.Vector3[] }> = [];
+  const groups: Array<{
+    normal: THREE.Vector3;
+    centers: THREE.Vector3[];
+    vertices: THREE.Vector3[];
+  }> = [];
   for (const triangle of triangles) {
     const plane = triangle.normal.dot(triangle.center);
     const existing = groups.find((group) => {
@@ -182,7 +195,9 @@ function getLogicalFaceTemplate(kind: DieKind): LogicalFace[] {
   const sorted = groups
     .map((group) => ({
       normal: group.normal.normalize(),
-      center: group.vertices.reduce((sum, vertex) => sum.add(vertex), new THREE.Vector3()).multiplyScalar(1 / group.vertices.length),
+      center: group.vertices
+        .reduce((sum, vertex) => sum.add(vertex), new THREE.Vector3())
+        .multiplyScalar(1 / group.vertices.length),
       vertices: group.vertices,
     }))
     .toSorted((a, b) => {
@@ -192,11 +207,14 @@ function getLogicalFaceTemplate(kind: DieKind): LogicalFace[] {
       return ay - by;
     });
 
-  if (sorted.length !== expected) console.warn(`Expected ${expected} faces for ${kind}, found ${sorted.length}.`);
+  if (sorted.length !== expected)
+    console.warn(`Expected ${expected} faces for ${kind}, found ${sorted.length}.`);
   const values = kind === 'd4' ? [1, 2, 3, 4] : VALUE_ORDERS[kind];
   // Copies cached geometry faces; mutating them would corrupt `logicalFaceCache`.
-  // oxlint-disable-next-line oxc/no-map-spread
-  const faces = sorted.slice(0, expected).map((face, index) => ({ ...face, value: values[index] ?? index + 1 }));
+  const faces = sorted
+    .slice(0, expected)
+    // oxlint-disable-next-line oxc/no-map-spread
+    .map((face, index) => ({ ...face, value: values[index] ?? index + 1 }));
   logicalFaceCache.set(kind, faces);
   return faces;
 }
@@ -221,7 +239,6 @@ function getUniqueVertices(faces: LogicalFace[]): THREE.Vector3[] {
   });
 }
 
-
 let contactShadowTexture: THREE.CanvasTexture | null = null;
 let contactShadowGeometry: THREE.PlaneGeometry | null = null;
 
@@ -232,7 +249,14 @@ function getContactShadowTexture(): THREE.CanvasTexture {
   canvas.width = canvas.height = size;
   const context = canvas.getContext('2d');
   if (!context) throw new Error('Canvas 2D context unavailable.');
-  const gradient = context.createRadialGradient(size / 2, size / 2, 2, size / 2, size / 2, size * 0.49);
+  const gradient = context.createRadialGradient(
+    size / 2,
+    size / 2,
+    2,
+    size / 2,
+    size / 2,
+    size * 0.49,
+  );
   gradient.addColorStop(0, 'rgba(0,0,0,.72)');
   gradient.addColorStop(0.38, 'rgba(0,0,0,.42)');
   gradient.addColorStop(0.72, 'rgba(0,0,0,.12)');
@@ -375,7 +399,12 @@ function appendQuad(
   bindings.push({ ...binding, uvOffset });
 }
 
-function createLabelSet(faces: LogicalFace[], theme: ThemeName, kind: DieKind, d4Vertices: THREE.Vector3[]): LabelSet {
+function createLabelSet(
+  faces: LogicalFace[],
+  theme: ThemeName,
+  kind: DieKind,
+  d4Vertices: THREE.Vector3[],
+): LabelSet {
   const positions: number[] = [];
   const normals: number[] = [];
   const uvs: number[] = [];
@@ -386,11 +415,25 @@ function createLabelSet(faces: LogicalFace[], theme: ThemeName, kind: DieKind, d
     for (let faceIndex = 0; faceIndex < faces.length; faceIndex += 1) {
       const face = faces[faceIndex];
       for (const vertex of face.vertices) {
-        const vertexIndex = d4Vertices.findIndex((candidate) => candidate.distanceToSquared(vertex) < 1e-8);
+        const vertexIndex = d4Vertices.findIndex(
+          (candidate) => candidate.distanceToSquared(vertex) < 1e-8,
+        );
         if (vertexIndex < 0) continue;
         const towardCorner = vertex.clone().sub(face.center).normalize();
         const center = face.center.clone().lerp(vertex, 0.47).addScaledVector(face.normal, 0.014);
-        appendQuad(positions, normals, uvs, indices, bindings, center, face.normal, towardCorner, 0.16, 0.205, { vertexIndex });
+        appendQuad(
+          positions,
+          normals,
+          uvs,
+          indices,
+          bindings,
+          center,
+          face.normal,
+          towardCorner,
+          0.16,
+          0.205,
+          { vertexIndex },
+        );
       }
     }
   } else {
@@ -404,9 +447,24 @@ function createLabelSet(faces: LogicalFace[], theme: ThemeName, kind: DieKind, d
     const [width, height] = scaleByKind[kind];
     for (let faceIndex = 0; faceIndex < faces.length; faceIndex += 1) {
       const face = faces[faceIndex];
-      const reference = Math.abs(face.normal.y) < 0.88 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(0, 0, -1);
-      const center = face.center.clone().addScaledVector(face.normal, kind === 'd6' ? 0.017 : 0.014);
-      appendQuad(positions, normals, uvs, indices, bindings, center, face.normal, reference, width, height, { faceIndex });
+      const reference =
+        Math.abs(face.normal.y) < 0.88 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(0, 0, -1);
+      const center = face.center
+        .clone()
+        .addScaledVector(face.normal, kind === 'd6' ? 0.017 : 0.014);
+      appendQuad(
+        positions,
+        normals,
+        uvs,
+        indices,
+        bindings,
+        center,
+        face.normal,
+        reference,
+        width,
+        height,
+        { faceIndex },
+      );
     }
   }
 
@@ -422,7 +480,12 @@ function createLabelSet(faces: LogicalFace[], theme: ThemeName, kind: DieKind, d
 }
 
 const surfaceCache = new Map<ThemeName, SurfaceSet>();
-function createSurfaceCanvases(size = 512): { colorCanvas: HTMLCanvasElement; bumpCanvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D; btx: CanvasRenderingContext2D } {
+function createSurfaceCanvases(size = 512): {
+  colorCanvas: HTMLCanvasElement;
+  bumpCanvas: HTMLCanvasElement;
+  ctx: CanvasRenderingContext2D;
+  btx: CanvasRenderingContext2D;
+} {
   const colorCanvas = document.createElement('canvas');
   const bumpCanvas = document.createElement('canvas');
   colorCanvas.width = bumpCanvas.width = size;
@@ -478,7 +541,11 @@ function createNormalAndRoughnessMaps(
 
       const height = sample(x, y);
       const localContrast = Math.abs(right - left) + Math.abs(up - down);
-      const value = THREE.MathUtils.clamp(baseRoughness + (height - 0.5) * 48 + localContrast * 92, 28, 245);
+      const value = THREE.MathUtils.clamp(
+        baseRoughness + (height - 0.5) * 48 + localContrast * 92,
+        28,
+        245,
+      );
       roughness.data[offset] = value;
       roughness.data[offset + 1] = value;
       roughness.data[offset + 2] = value;
@@ -497,7 +564,11 @@ function createNormalAndRoughnessMaps(
   return { normalMap, roughnessMap };
 }
 
-function finalizeSurface(colorCanvas: HTMLCanvasElement, bumpCanvas: HTMLCanvasElement, palette: ThemePalette): SurfaceSet {
+function finalizeSurface(
+  colorCanvas: HTMLCanvasElement,
+  bumpCanvas: HTMLCanvasElement,
+  palette: ThemePalette,
+): SurfaceSet {
   const map = new THREE.CanvasTexture(colorCanvas);
   map.colorSpace = THREE.SRGBColorSpace;
   map.wrapS = map.wrapT = THREE.RepeatWrapping;
@@ -506,13 +577,22 @@ function finalizeSurface(colorCanvas: HTMLCanvasElement, bumpCanvas: HTMLCanvasE
   return { map, normalMap, roughnessMap };
 }
 
-function seedNoise(ctx: CanvasRenderingContext2D, btx: CanvasRenderingContext2D, size: number, palette: ThemePalette, count = 700): void {
+function seedNoise(
+  ctx: CanvasRenderingContext2D,
+  btx: CanvasRenderingContext2D,
+  size: number,
+  palette: ThemePalette,
+  count = 700,
+): void {
   for (let i = 0; i < count; i += 1) {
     const x = Math.random() * size;
     const y = Math.random() * size;
     const r = 3 + Math.random() * 18;
     ctx.globalAlpha = 0.02 + Math.random() * 0.055;
-    ctx.fillStyle = i % 3 === 0 ? lerpColor(palette.edge, palette.base, 0.72) : lerpColor(palette.base, palette.shadow, 0.28 + Math.random() * 0.35);
+    ctx.fillStyle =
+      i % 3 === 0
+        ? lerpColor(palette.edge, palette.base, 0.72)
+        : lerpColor(palette.base, palette.shadow, 0.28 + Math.random() * 0.35);
     ctx.beginPath();
     ctx.arc(x, y, r, 0, Math.PI * 2);
     ctx.fill();
@@ -524,7 +604,14 @@ function seedNoise(ctx: CanvasRenderingContext2D, btx: CanvasRenderingContext2D,
   }
 }
 
-function drawJaggedVein(ctx: CanvasRenderingContext2D, size: number, stroke: string, alpha: number, width: number, steps = 8): void {
+function drawJaggedVein(
+  ctx: CanvasRenderingContext2D,
+  size: number,
+  stroke: string,
+  alpha: number,
+  width: number,
+  steps = 8,
+): void {
   ctx.globalAlpha = alpha;
   ctx.strokeStyle = stroke;
   ctx.lineWidth = width;
@@ -545,7 +632,14 @@ function drawJaggedVein(ctx: CanvasRenderingContext2D, size: number, stroke: str
 function createDragonSurface(palette: ThemePalette): SurfaceSet {
   const size = 512;
   const { colorCanvas, bumpCanvas, ctx, btx } = createSurfaceCanvases(size);
-  const bg = ctx.createRadialGradient(size * 0.45, size * 0.35, 30, size * 0.5, size * 0.55, size * 0.62);
+  const bg = ctx.createRadialGradient(
+    size * 0.45,
+    size * 0.35,
+    30,
+    size * 0.5,
+    size * 0.55,
+    size * 0.62,
+  );
   bg.addColorStop(0, lerpColor(palette.base, 0xffffff, 0.12));
   bg.addColorStop(0.55, hexToCss(palette.base));
   bg.addColorStop(1, hexToCss(palette.shadow));
@@ -601,7 +695,12 @@ function createNebulaSurface(palette: ThemePalette): SurfaceSet {
     const y = Math.random() * size;
     const radius = 18 + Math.random() * 72;
     const cloud = ctx.createRadialGradient(x, y, 0, x, y, radius);
-    const color = i % 3 === 0 ? 'rgba(66,184,255,.15)' : i % 3 === 1 ? 'rgba(225,89,255,.13)' : 'rgba(255,180,120,.08)';
+    const color =
+      i % 3 === 0
+        ? 'rgba(66,184,255,.15)'
+        : i % 3 === 1
+          ? 'rgba(225,89,255,.13)'
+          : 'rgba(255,180,120,.08)';
     cloud.addColorStop(0, color);
     cloud.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.fillStyle = cloud;
@@ -703,7 +802,8 @@ function createCelestialSurface(palette: ThemePalette): SurfaceSet {
       const rr = p % 2 === 0 ? r : r * 0.35;
       const px = x + Math.cos(a) * rr;
       const py = y + Math.sin(a) * rr;
-      if (p === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      if (p === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
     }
     ctx.closePath();
     ctx.fill();
@@ -782,7 +882,14 @@ function createWildwoodSurface(palette: ThemePalette): SurfaceSet {
     ctx.lineWidth = 1 + Math.random() * 4;
     ctx.beginPath();
     ctx.moveTo(0, y);
-    ctx.bezierCurveTo(size * 0.25, y + (Math.random() - 0.5) * 70, size * 0.7, y + (Math.random() - 0.5) * 70, size, y + (Math.random() - 0.5) * 30);
+    ctx.bezierCurveTo(
+      size * 0.25,
+      y + (Math.random() - 0.5) * 70,
+      size * 0.7,
+      y + (Math.random() - 0.5) * 70,
+      size,
+      y + (Math.random() - 0.5) * 30,
+    );
     ctx.stroke();
     btx.globalAlpha = 0.05;
     btx.strokeStyle = '#9b9b9b';
@@ -815,14 +922,30 @@ function createSurface(theme: ThemeName, palette: ThemePalette): SurfaceSet {
   if (cached) return cached;
   let surface: SurfaceSet;
   switch (palette.surface) {
-    case 'dragon-scale': surface = createDragonSurface(palette); break;
-    case 'nebula': surface = createNebulaSurface(palette); break;
-    case 'magma': surface = createMagmaSurface(palette); break;
-    case 'ice': surface = createIceSurface(palette); break;
-    case 'celestial': surface = createCelestialSurface(palette); break;
-    case 'storm': surface = createStormSurface(palette); break;
-    case 'necrotic': surface = createNecroticSurface(palette); break;
-    case 'wildwood': surface = createWildwoodSurface(palette); break;
+    case 'dragon-scale':
+      surface = createDragonSurface(palette);
+      break;
+    case 'nebula':
+      surface = createNebulaSurface(palette);
+      break;
+    case 'magma':
+      surface = createMagmaSurface(palette);
+      break;
+    case 'ice':
+      surface = createIceSurface(palette);
+      break;
+    case 'celestial':
+      surface = createCelestialSurface(palette);
+      break;
+    case 'storm':
+      surface = createStormSurface(palette);
+      break;
+    case 'necrotic':
+      surface = createNecroticSurface(palette);
+      break;
+    case 'wildwood':
+      surface = createWildwoodSurface(palette);
+      break;
   }
   surfaceCache.set(theme, surface);
   return surface;
@@ -847,7 +970,10 @@ const SURFACE_VARIANT_OFFSETS = Array.from({ length: SURFACE_VARIANT_COUNT }, (_
   return new THREE.Vector2(radicalInverse(index + 1, 2), radicalInverse(index + 1, 3));
 });
 
-function installSurfaceVariation(material: THREE.MeshPhysicalMaterial, offset: THREE.Vector2): void {
+function installSurfaceVariation(
+  material: THREE.MeshPhysicalMaterial,
+  offset: THREE.Vector2,
+): void {
   const stableOffset = offset.clone();
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uDiceUvOffset = { value: stableOffset };
@@ -881,7 +1007,8 @@ const edgeMaterialCache = new Map<ThemeName, THREE.LineBasicMaterial>();
 const edgeGeometryCache = new Map<string, THREE.EdgesGeometry>();
 
 function getMainMaterial(theme: ThemeName, kind: DieKind, variant = 0): THREE.MeshPhysicalMaterial {
-  const normalizedVariant = ((Math.round(variant) % SURFACE_VARIANT_COUNT) + SURFACE_VARIANT_COUNT) % SURFACE_VARIANT_COUNT;
+  const normalizedVariant =
+    ((Math.round(variant) % SURFACE_VARIANT_COUNT) + SURFACE_VARIANT_COUNT) % SURFACE_VARIANT_COUNT;
   const key = `${theme}:${kind}:${normalizedVariant}`;
   const cached = mainMaterialCache.get(key);
   if (cached) return cached;
@@ -912,7 +1039,8 @@ function getMainMaterial(theme: ThemeName, kind: DieKind, variant = 0): THREE.Me
     ior: theme === 'frost' ? 1.36 : 1.46,
     specularIntensity: theme === 'wildwood' || theme === 'necrotic' ? 0.46 : 0.72,
     specularColor: new THREE.Color(palette.edge).lerp(new THREE.Color(0xffffff), 0.72),
-    iridescence: theme === 'nebula' ? 0.18 : theme === 'frost' ? 0.07 : theme === 'celestial' ? 0.05 : 0,
+    iridescence:
+      theme === 'nebula' ? 0.18 : theme === 'frost' ? 0.07 : theme === 'celestial' ? 0.05 : 0,
     iridescenceIOR: magical ? 1.38 : 1.3,
     iridescenceThicknessRange: magical ? [80, 260] : [100, 140],
     sheen: theme === 'wildwood' ? 0.14 : theme === 'necrotic' ? 0.08 : 0.04,
@@ -1026,7 +1154,11 @@ function createDragonAdornment(kind: DieKind, faces: LogicalFace[]): THREE.Group
   upperFaces.forEach((face, index) => {
     dummy.position.copy(face.center).addScaledVector(face.normal, 0.2);
     dummy.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), face.normal);
-    dummy.scale.set(index % 2 === 0 ? 0.9 : 0.72, index % 2 === 0 ? 1 : 0.78, index % 2 === 0 ? 0.9 : 0.72);
+    dummy.scale.set(
+      index % 2 === 0 ? 0.9 : 0.72,
+      index % 2 === 0 ? 1 : 0.78,
+      index % 2 === 0 ? 0.9 : 0.72,
+    );
     dummy.updateMatrix();
     ornaments.setMatrixAt(index, dummy.matrix);
   });
@@ -1076,7 +1208,12 @@ export class DieInstance {
   private static readonly symmetryRotationCache = new Map<string, THREE.Quaternion>();
   private readonly surfaceVariant = DieInstance.surfaceVariantCursor++ % SURFACE_VARIANT_COUNT;
 
-  constructor(kind: DieKind, theme: ThemeName, physicsMaterial: CANNON.Material, options: number | DiePhysicsOptions = 1.15) {
+  constructor(
+    kind: DieKind,
+    theme: ThemeName,
+    physicsMaterial: CANNON.Material,
+    options: number | DiePhysicsOptions = 1.15,
+  ) {
     const resolved = typeof options === 'number' ? { mass: options } : options;
     const mass = resolved.mass ?? 1.15;
     this.sizeScale = THREE.MathUtils.clamp(resolved.sizeScale ?? 1, 0.5, 2);
@@ -1094,7 +1231,10 @@ export class DieInstance {
     this.group.add(this.visualRoot);
     this.visualRoot.scale.setScalar(this.sizeScale);
 
-    this.mesh = new THREE.Mesh(getVisualGeometry(theme, kind), getMainMaterial(theme, kind, this.surfaceVariant));
+    this.mesh = new THREE.Mesh(
+      getVisualGeometry(theme, kind),
+      getMainMaterial(theme, kind, this.surfaceVariant),
+    );
     this.mesh.castShadow = true;
     this.mesh.receiveShadow = true;
     this.mesh.renderOrder = 1;
@@ -1132,7 +1272,11 @@ export class DieInstance {
     this.contactShadow.frustumCulled = false;
     this.group.add(this.contactShadow);
 
-    this.body = new CANNON.Body({ mass, material: physicsMaterial, shape: createDiePhysicsShape(kind, this.sizeScale) });
+    this.body = new CANNON.Body({
+      mass,
+      material: physicsMaterial,
+      shape: createDiePhysicsShape(kind, this.sizeScale),
+    });
     if (this.inertiaScale !== 1) {
       this.body.inertia.scale(this.inertiaScale, this.body.inertia);
       this.body.invInertia.set(
@@ -1200,9 +1344,10 @@ export class DieInstance {
     if (!(uv instanceof THREE.BufferAttribute) || !(uv.array instanceof Float32Array)) return;
     const array = uv.array;
     for (const binding of this.labelBindings) {
-      const value = binding.vertexIndex !== undefined
-        ? this.d4VertexValues[binding.vertexIndex] ?? 1
-        : this.faces[binding.faceIndex ?? 0]?.value ?? 1;
+      const value =
+        binding.vertexIndex !== undefined
+          ? (this.d4VertexValues[binding.vertexIndex] ?? 1)
+          : (this.faces[binding.faceIndex ?? 0]?.value ?? 1);
       writeAtlasUvs(array, binding.uvOffset, value);
     }
     uv.needsUpdate = true;
@@ -1227,7 +1372,10 @@ export class DieInstance {
       let bestVertex = 0;
       let bestDot = -Infinity;
       for (let index = 0; index < this.d4Vertices.length; index += 1) {
-        this.worldNormal.copy(this.d4Vertices[index]).normalize().applyQuaternion(this.topQuaternion);
+        this.worldNormal
+          .copy(this.d4Vertices[index])
+          .normalize()
+          .applyQuaternion(this.topQuaternion);
         const dot = this.worldNormal.dot(up);
         if (dot > bestDot) {
           bestDot = dot;
@@ -1253,7 +1401,11 @@ export class DieInstance {
   mapLandingFaceToValue(landingIndex: number, value: number): void {
     const target = THREE.MathUtils.clamp(Math.round(value), 1, this.maxValue);
     if (this.kind === 'd4') {
-      const landing = THREE.MathUtils.clamp(Math.round(landingIndex), 0, this.d4VertexValues.length - 1);
+      const landing = THREE.MathUtils.clamp(
+        Math.round(landingIndex),
+        0,
+        this.d4VertexValues.length - 1,
+      );
       const existing = this.d4VertexValues.indexOf(target);
       if (existing < 0 || existing === landing) return;
       const displaced = this.d4VertexValues[landing];
@@ -1273,13 +1425,22 @@ export class DieInstance {
   }
 
   getValueForFaceIndex(landingIndex: number): number {
-    const index = THREE.MathUtils.clamp(Math.round(landingIndex), 0, this.kind === 'd4' ? this.d4VertexValues.length - 1 : this.faces.length - 1);
-    return this.kind === 'd4' ? this.d4VertexValues[index] ?? 1 : this.faces[index]?.value ?? 1;
+    const index = THREE.MathUtils.clamp(
+      Math.round(landingIndex),
+      0,
+      this.kind === 'd4' ? this.d4VertexValues.length - 1 : this.faces.length - 1,
+    );
+    return this.kind === 'd4' ? (this.d4VertexValues[index] ?? 1) : (this.faces[index]?.value ?? 1);
   }
 
   syncVisual(): void {
     this.group.position.set(this.body.position.x, this.body.position.y, this.body.position.z);
-    this.visualRoot.quaternion.set(this.body.quaternion.x, this.body.quaternion.y, this.body.quaternion.z, this.body.quaternion.w);
+    this.visualRoot.quaternion.set(
+      this.body.quaternion.x,
+      this.body.quaternion.y,
+      this.body.quaternion.z,
+      this.body.quaternion.w,
+    );
     const radius = DIE_RADIUS[this.kind];
     const floorClearance = Math.max(0, this.body.position.y - radius * 0.72);
     const fade = THREE.MathUtils.clamp(1 - floorClearance / 4.25, 0, 1);
@@ -1301,9 +1462,13 @@ export class DieInstance {
   /** Local-space outward normal for the face/vertex representing a result. */
   getTargetNormal(value: number): THREE.Vector3 {
     const target = THREE.MathUtils.clamp(Math.round(value), 1, this.maxValue);
-    const source = this.kind === 'd4'
-      ? this.d4Vertices[this.baseD4VertexValues.indexOf(target)]?.clone().normalize()
-      : this.faces.find((_candidate, index) => this.baseFaceValues[index] === target)?.normal.clone().normalize();
+    const source =
+      this.kind === 'd4'
+        ? this.d4Vertices[this.baseD4VertexValues.indexOf(target)]?.clone().normalize()
+        : this.faces
+            .find((_candidate, index) => this.baseFaceValues[index] === target)
+            ?.normal.clone()
+            .normalize();
     if (!source) throw new Error(`Value ${value} is not valid for ${this.kind}.`);
     return source;
   }
@@ -1323,7 +1488,9 @@ export class DieInstance {
     const cached = DieInstance.symmetryRotationCache.get(cacheKey);
     if (cached) return cached.clone();
 
-    const normals = Array.from({ length: this.maxValue }, (_entry, index) => this.getTargetNormal(index + 1));
+    const normals = Array.from({ length: this.maxValue }, (_entry, index) =>
+      this.getTargetNormal(index + 1),
+    );
     const sourcePrimary = normals[from - 1];
     const targetPrimary = normals[to - 1];
     const sourceBasis = new THREE.Matrix4();

@@ -45,15 +45,8 @@ Use this when the game owns its rules model and should not construct notation st
 import { dice, op, select } from '@draftroll/sdk';
 
 const roll = draftroll.rollDice({
-  dice: [
-    dice.d10('skill_1'),
-    dice.d10('skill_2'),
-    dice.d10('skill_3'),
-  ],
-  operations: [
-    op.rerollOnce(select.equal(1)),
-    op.countSuccesses(select.greaterOrEqual(7)),
-  ],
+  dice: [dice.d10('skill_1'), dice.d10('skill_2'), dice.d10('skill_3')],
+  operations: [op.rerollOnce(select.equal(1)), op.countSuccesses(select.greaterOrEqual(7))],
   metadata: { system: 'example-pool' },
 });
 ```

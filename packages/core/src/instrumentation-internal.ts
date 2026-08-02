@@ -74,7 +74,10 @@ export function profileParse<T extends ParsedExpression>(
   return parsed;
 }
 
-export function emitProfile(instrumentation: DiceInstrumentation | undefined, profile: DiceProfile): void {
+export function emitProfile(
+  instrumentation: DiceInstrumentation | undefined,
+  profile: DiceProfile,
+): void {
   if (!instrumentation) return;
   try {
     instrumentation.onProfile(Object.freeze(profile));
@@ -91,11 +94,15 @@ export function profileNow(instrumentation: DiceInstrumentation | undefined): nu
   } catch {
     // Fall through to the platform clock; profiling cannot affect evaluation.
   }
-  const fallback = typeof globalThis.performance?.now === 'function' ? globalThis.performance.now() : Date.now();
+  const fallback =
+    typeof globalThis.performance?.now === 'function' ? globalThis.performance.now() : Date.now();
   return Number.isFinite(fallback) ? fallback : 0;
 }
 
-export function profileDuration(instrumentation: DiceInstrumentation | undefined, startedAt: number): number {
+export function profileDuration(
+  instrumentation: DiceInstrumentation | undefined,
+  startedAt: number,
+): number {
   return Math.max(0, profileNow(instrumentation) - startedAt);
 }
 

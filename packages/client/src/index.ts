@@ -30,6 +30,7 @@ import {
   type BulkRollUpdateItem,
   type ClientToServerEvent,
   type DisplayRollInput,
+  type EvaluateRollInput,
   type ParticipantIdentityInput,
   type RollInput,
   type RollAuditDetails,
@@ -228,7 +229,19 @@ interface PendingRequest {
  * @public
  */
 export class DiceRoom {
-  private readonly options: Required<Pick<DiceRoomOptions, 'reconnect' | 'reconnectDelayMs' | 'reconnectMaximumDelayMs' | 'reconnectBackoffFactor' | 'clockSyncSamples' | 'requestTimeoutMs' | 'longRangeRecovery'>> & DiceRoomOptions;
+  private readonly options: Required<
+    Pick<
+      DiceRoomOptions,
+      | 'reconnect'
+      | 'reconnectDelayMs'
+      | 'reconnectMaximumDelayMs'
+      | 'reconnectBackoffFactor'
+      | 'clockSyncSamples'
+      | 'requestTimeoutMs'
+      | 'longRangeRecovery'
+    >
+  > &
+    DiceRoomOptions;
   private readonly handlers = new Map<keyof DiceRoomEvents, Set<EventHandler<never>>>();
   private readonly pendingRequests = new Map<string, PendingRequest>();
   private readonly participantsBySession = new Map<string, RoomParticipant>();
@@ -239,12 +252,19 @@ export class DiceRoom {
   private clockOffsetMs = 0;
   private clockRoundTripMs = 0;
   private clockUncertaintyMs = 0;
-  private pendingPings = new Map<string, { sentAt: number; resolve: (sample: ClockSample) => void }>();
+  private pendingPings = new Map<
+    string,
+    { sentAt: number; resolve: (sample: ClockSample) => void }
+  >();
   private requestCounter = 0;
   private lastEventSequence: number;
   private roomPolicy: RoomPolicy | null = null;
   private roomPolicyRevision = 0;
-  private connectionReady: { resolve: () => void; reject: (error: Error) => void; timeout: ReturnType<typeof setTimeout> } | null = null;
+  private connectionReady: {
+    resolve: () => void;
+    reject: (error: Error) => void;
+    timeout: ReturnType<typeof setTimeout>;
+  } | null = null;
   private passwordSubmitted = false;
   private tokenSubmitted = false;
   private reconnectAttempt = 0;
@@ -267,11 +287,18 @@ export class DiceRoom {
   };
   private totalRequestLatencyMs = 0;
   private messageQueue: Promise<void> = Promise.resolve();
-  private readonly participantIdentity: Required<Pick<ParticipantIdentityInput, 'participantId' | 'sessionId' | 'name'>> & ParticipantIdentityInput;
+  private readonly participantIdentity: Required<
+    Pick<ParticipantIdentityInput, 'participantId' | 'sessionId' | 'name'>
+  > &
+    ParticipantIdentityInput;
 
   private constructor(options: DiceRoomOptions) {
     const decodedParticipant = decodeParticipantIdentityInput(options.participant ?? {});
-    if (!decodedParticipant.success) throw new DiceRoomProtocolError(decodedParticipant.error.message, decodedParticipant.error.issues);
+    if (!decodedParticipant.success)
+      throw new DiceRoomProtocolError(
+        decodedParticipant.error.message,
+        decodedParticipant.error.issues,
+      );
     const participant = decodedParticipant.data;
     const participantId = participant.participantId ?? createId('participant');
     const sessionId = participant.sessionId ?? createId('session');
@@ -307,7 +334,10 @@ export class DiceRoom {
   /**
    * Subscribes to a room event and returns an unsubscribe function.
    */
-  on<K extends keyof DiceRoomEvents>(event: K, handler: EventHandler<DiceRoomEvents[K]>): () => void {
+  on<K extends keyof DiceRoomEvents>(
+    event: K,
+    handler: EventHandler<DiceRoomEvents[K]>,
+  ): () => void {
     const set = this.handlers.get(event) ?? new Set<EventHandler<never>>();
     set.add(handler);
     this.handlers.set(event, set);
@@ -326,24 +356,37 @@ export class DiceRoom {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
-    const state: DiceRoomConnectionState = this.reconnectAttempt > 0 ? 'reconnecting' : 'connecting';
+    const state: DiceRoomConnectionState =
+      this.reconnectAttempt > 0 ? 'reconnecting' : 'connecting';
     this.transitionConnection(state, { recoverable: true });
-    this.connecting = this.openSocket(signal).then(() => {
-      this.reconnectAttempt = 0;
-    }).catch((error) => {
-      if (error instanceof DraftrollAbortError) {
-        this.closedIntentionally = true;
-        this.transitionConnection('closed', { code: error.code, reason: error.message, recoverable: true });
-      } else {
-        const normalized = asError(error);
-        this.transitionConnection('failed', {
-          code: error instanceof DraftrollError ? error.code : DRAFTROLL_ERROR_CODES.roomConnectionFailed,
-          reason: normalized.message,
-          recoverable: this.options.reconnect,
-        });
-      }
-      throw error;
-    }).finally(() => { this.connecting = null; });
+    this.connecting = this.openSocket(signal)
+      .then(() => {
+        this.reconnectAttempt = 0;
+      })
+      .catch((error) => {
+        if (error instanceof DraftrollAbortError) {
+          this.closedIntentionally = true;
+          this.transitionConnection('closed', {
+            code: error.code,
+            reason: error.message,
+            recoverable: true,
+          });
+        } else {
+          const normalized = asError(error);
+          this.transitionConnection('failed', {
+            code:
+              error instanceof DraftrollError
+                ? error.code
+                : DRAFTROLL_ERROR_CODES.roomConnectionFailed,
+            reason: normalized.message,
+            recoverable: this.options.reconnect,
+          });
+        }
+        throw error;
+      })
+      .finally(() => {
+        this.connecting = null;
+      });
     return raceWithAbort(this.connecting, signal, 'Dice room connection', () => {
       this.closedIntentionally = true;
       this.socket?.close(1000, 'Connection aborted');
@@ -359,8 +402,19 @@ export class DiceRoom {
     this.reconnectTimer = null;
     this.socket?.close(code, reason);
     this.socket = null;
-    this.rejectPending(new DiceRoomConnectionError(DRAFTROLL_ERROR_CODES.roomConnectionClosed, 'Dice room was closed', true));
-    this.transitionConnection('closed', { code: DRAFTROLL_ERROR_CODES.roomConnectionClosed, reason, recoverable: true, closeCode: code });
+    this.rejectPending(
+      new DiceRoomConnectionError(
+        DRAFTROLL_ERROR_CODES.roomConnectionClosed,
+        'Dice room was closed',
+        true,
+      ),
+    );
+    this.transitionConnection('closed', {
+      code: DRAFTROLL_ERROR_CODES.roomConnectionClosed,
+      reason,
+      recoverable: true,
+      closeCode: code,
+    });
   }
 
   /**
@@ -373,7 +427,11 @@ export class DiceRoom {
   /**
    * Current authenticated participant, when ready.
    */
-  get participant(): ParticipantIdentityInput & { participantId: string; sessionId: string; name: string } {
+  get participant(): ParticipantIdentityInput & {
+    participantId: string;
+    sessionId: string;
+    name: string;
+  } {
     return { ...this.participantIdentity };
   }
 
@@ -416,7 +474,10 @@ export class DiceRoom {
    * Returns current connection state and recovery guidance.
    */
   get connectionDiagnostics(): DiceRoomConnectionDiagnostic {
-    return { ...this.connectionDiagnostic, recommendations: [...this.connectionDiagnostic.recommendations] };
+    return {
+      ...this.connectionDiagnostic,
+      recommendations: [...this.connectionDiagnostic.recommendations],
+    };
   }
 
   /**
@@ -435,7 +496,8 @@ export class DiceRoom {
   authorizeHttpRequest(input: string | URL, init: RequestInit = {}): Request {
     const headers = new Headers(init.headers);
     if (this.options.token) headers.set('Authorization', `Bearer ${this.options.token}`);
-    if (this.options.roomPassword) headers.set('X-Draftroll-Room-Password', this.options.roomPassword);
+    if (this.options.roomPassword)
+      headers.set('X-Draftroll-Room-Password', this.options.roomPassword);
     return new Request(this.authorizeHttpUrl(input), { ...init, headers });
   }
 
@@ -443,18 +505,25 @@ export class DiceRoom {
    * Requests an authoritative room roll and resolves with its synchronized event.
    */
   async roll(
-    input: string | RollInput,
+    input: string | Omit<EvaluateRollInput, 'mode'> | RollInput,
     options: { visibility?: RollVisibility; clientRollId?: string; signal?: AbortSignal } = {},
   ): Promise<SynchronizedRollStart> {
-    const normalized: RollInput = typeof input === 'string' ? { mode: 'evaluate', expression: input } : input;
+    const normalized: RollInput =
+      typeof input === 'string'
+        ? { mode: 'evaluate', expression: input }
+        : { mode: 'evaluate', ...input };
     const requestId = this.nextRequestId();
-    const event = await this.dispatchRequest(requestId, {
-      type: 'roll_request',
+    const event = await this.dispatchRequest(
       requestId,
-      clientRollId: options.clientRollId,
-      input: normalized,
-      visibility: options.visibility,
-    }, options.signal);
+      {
+        type: 'roll_request',
+        requestId,
+        clientRollId: options.clientRollId,
+        input: normalized,
+        visibility: options.visibility,
+      },
+      options.signal,
+    );
     if (event.type !== 'roll_start') throw new Error(`Expected roll_start for ${requestId}`);
     return event;
   }
@@ -467,13 +536,17 @@ export class DiceRoom {
     options: { visibility?: RollVisibility; clientRollId?: string; signal?: AbortSignal } = {},
   ): Promise<SynchronizedRollStart> {
     const requestId = this.nextRequestId();
-    const event = await this.dispatchRequest(requestId, {
-      type: 'display_roll',
+    const event = await this.dispatchRequest(
       requestId,
-      clientRollId: options.clientRollId,
-      input: { ...input, mode: 'display' },
-      visibility: options.visibility,
-    }, options.signal);
+      {
+        type: 'display_roll',
+        requestId,
+        clientRollId: options.clientRollId,
+        input: { ...input, mode: 'display' },
+        visibility: options.visibility,
+      },
+      options.signal,
+    );
     if (event.type !== 'roll_start') throw new Error(`Expected roll_start for ${requestId}`);
     return event;
   }
@@ -493,16 +566,20 @@ export class DiceRoom {
     } = {},
   ): Promise<SynchronizedRollUpdate> {
     const requestId = this.nextRequestId();
-    const event = await this.dispatchRequest(requestId, {
-      type: 'update_roll',
+    const event = await this.dispatchRequest(
       requestId,
-      rollId,
-      update,
-      expectedRevision: options.expectedRevision,
-      reroll: options.reroll,
-      animate: options.animate ?? false,
-      audit: options.audit,
-    }, options.signal);
+      {
+        type: 'update_roll',
+        requestId,
+        rollId,
+        update,
+        expectedRevision: options.expectedRevision,
+        reroll: options.reroll,
+        animate: options.animate ?? false,
+        audit: options.audit,
+      },
+      options.signal,
+    );
     if (event.type !== 'roll_updated') throw new Error(`Expected roll_updated for ${requestId}`);
     return event;
   }
@@ -515,11 +592,15 @@ export class DiceRoom {
     options: { signal?: AbortSignal } = {},
   ): Promise<BulkRollUpdatedEvent> {
     const requestId = this.nextRequestId();
-    const event = await this.dispatchRequest(requestId, {
-      type: 'bulk_update_rolls',
+    const event = await this.dispatchRequest(
       requestId,
-      updates: updates.map((update) => ({ ...update })),
-    }, options.signal);
+      {
+        type: 'bulk_update_rolls',
+        requestId,
+        updates: updates.map((update) => ({ ...update })),
+      },
+      options.signal,
+    );
     if (event.type !== 'bulk_rolls_updated') {
       throw new DiceRoomProtocolError(`Expected bulk_rolls_updated for ${requestId}`);
     }
@@ -535,14 +616,18 @@ export class DiceRoom {
     options: { expectedRevision?: number; signal?: AbortSignal; audit?: RollAuditDetails } = {},
   ): Promise<SynchronizedVisibilityUpdate> {
     const requestId = this.nextRequestId();
-    const event = await this.dispatchRequest(requestId, {
-      type: 'set_roll_visibility',
+    const event = await this.dispatchRequest(
       requestId,
-      rollId,
-      visibility,
-      expectedRevision: options.expectedRevision,
-      audit: options.audit,
-    }, options.signal);
+      {
+        type: 'set_roll_visibility',
+        requestId,
+        rollId,
+        visibility,
+        expectedRevision: options.expectedRevision,
+        audit: options.audit,
+      },
+      options.signal,
+    );
     if (event.type !== 'roll_visibility_updated') {
       throw new Error(`Expected roll_visibility_updated for ${requestId}`);
     }
@@ -552,7 +637,10 @@ export class DiceRoom {
   /**
    * Makes an existing roll public.
    */
-  revealRoll(rollId: string, options: { expectedRevision?: number; signal?: AbortSignal; audit?: RollAuditDetails } = {}): Promise<SynchronizedVisibilityUpdate> {
+  revealRoll(
+    rollId: string,
+    options: { expectedRevision?: number; signal?: AbortSignal; audit?: RollAuditDetails } = {},
+  ): Promise<SynchronizedVisibilityUpdate> {
     return this.setRollVisibility(rollId, { type: 'public' }, options);
   }
 
@@ -564,13 +652,18 @@ export class DiceRoom {
     options: { expectedRevision?: number; signal?: AbortSignal } = {},
   ): Promise<SynchronizedRoomPolicyUpdate> {
     const requestId = this.nextRequestId();
-    const event = await this.dispatchRequest(requestId, {
-      type: 'set_room_password',
+    const event = await this.dispatchRequest(
       requestId,
-      password,
-      expectedRevision: options.expectedRevision ?? this.roomPolicyRevision,
-    }, options.signal);
-    if (event.type !== 'room_policy_updated') throw new Error(`Expected room_policy_updated for ${requestId}`);
+      {
+        type: 'set_room_password',
+        requestId,
+        password,
+        expectedRevision: options.expectedRevision ?? this.roomPolicyRevision,
+      },
+      options.signal,
+    );
+    if (event.type !== 'room_policy_updated')
+      throw new Error(`Expected room_policy_updated for ${requestId}`);
     return event;
   }
 
@@ -582,13 +675,18 @@ export class DiceRoom {
     options: { expectedRevision?: number; signal?: AbortSignal } = {},
   ): Promise<SynchronizedRoomPolicyUpdate> {
     const requestId = this.nextRequestId();
-    const event = await this.dispatchRequest(requestId, {
-      type: 'set_room_policy',
+    const event = await this.dispatchRequest(
       requestId,
-      policy,
-      expectedRevision: options.expectedRevision ?? this.roomPolicyRevision,
-    }, options.signal);
-    if (event.type !== 'room_policy_updated') throw new Error(`Expected room_policy_updated for ${requestId}`);
+      {
+        type: 'set_room_policy',
+        requestId,
+        policy,
+        expectedRevision: options.expectedRevision ?? this.roomPolicyRevision,
+      },
+      options.signal,
+    );
+    if (event.type !== 'room_policy_updated')
+      throw new Error(`Expected room_policy_updated for ${requestId}`);
     return event;
   }
 
@@ -600,13 +698,18 @@ export class DiceRoom {
     options: { reason?: string; signal?: AbortSignal } = {},
   ): Promise<SynchronizedRoomTokenRevocation> {
     const requestId = this.nextRequestId();
-    const event = await this.dispatchRequest(requestId, {
-      type: 'revoke_room_token',
+    const event = await this.dispatchRequest(
       requestId,
-      target,
-      reason: options.reason,
-    }, options.signal);
-    if (event.type !== 'room_token_revoked') throw new Error(`Expected room_token_revoked for ${requestId}`);
+      {
+        type: 'revoke_room_token',
+        requestId,
+        target,
+        reason: options.reason,
+      },
+      options.signal,
+    );
+    if (event.type !== 'room_token_revoked')
+      throw new Error(`Expected room_token_revoked for ${requestId}`);
     return event;
   }
 
@@ -676,7 +779,10 @@ export class DiceRoom {
     url.searchParams.set('lastEventSequence', String(this.lastEventSequence));
     if (this.options.token) url.searchParams.set('authMode', 'token');
     if (this.participantIdentity.metadata) {
-      url.searchParams.set('participantMetadata', JSON.stringify(this.participantIdentity.metadata));
+      url.searchParams.set(
+        'participantMetadata',
+        JSON.stringify(this.participantIdentity.metadata),
+      );
     }
     const socket = new WebSocketClass(url.toString());
     const abortSocket = () => socket.close(1000, 'Connection aborted');
@@ -689,7 +795,9 @@ export class DiceRoom {
         .catch((error) => this.emit('error', { error: asError(error) }));
     });
     socket.addEventListener('close', (event) => this.handleClose(event.code, event.reason));
-    socket.addEventListener('error', () => this.emit('error', { error: new Error('WebSocket error') }));
+    socket.addEventListener('error', () =>
+      this.emit('error', { error: new Error('WebSocket error') }),
+    );
 
     this.transitionConnection('authenticating', { recoverable: true });
     const sessionReady = new Promise<void>((resolve, reject) => {
@@ -737,7 +845,10 @@ export class DiceRoom {
     const best = samples.slice(0, Math.max(1, Math.ceil(samples.length / 2)));
     this.clockOffsetMs = best.reduce((sum, sample) => sum + sample.offsetMs, 0) / best.length;
     this.clockRoundTripMs = best.reduce((sum, sample) => sum + sample.roundTripMs, 0) / best.length;
-    const offsetJitter = best.reduce((maximum, sample) => Math.max(maximum, Math.abs(sample.offsetMs - this.clockOffsetMs)), 0);
+    const offsetJitter = best.reduce(
+      (maximum, sample) => Math.max(maximum, Math.abs(sample.offsetMs - this.clockOffsetMs)),
+      0,
+    );
     this.clockUncertaintyMs = Math.max(this.clockRoundTripMs / 2, offsetJitter);
     this.emit('clockSync', {
       offsetMs: this.clockOffsetMs,
@@ -761,7 +872,13 @@ export class DiceRoom {
       const timeout = setTimeout(() => {
         this.pendingPings.delete(nonce);
         cleanup();
-        reject(new DiceRoomConnectionError(DRAFTROLL_ERROR_CODES.roomRequestTimeout, 'Clock synchronization timed out', true));
+        reject(
+          new DiceRoomConnectionError(
+            DRAFTROLL_ERROR_CODES.roomRequestTimeout,
+            'Clock synchronization timed out',
+            true,
+          ),
+        );
       }, 3_000);
       signal?.addEventListener('abort', handleAbort, { once: true });
       this.pendingPings.set(nonce, {
@@ -778,17 +895,26 @@ export class DiceRoom {
 
   private async handleMessage(raw: unknown): Promise<void> {
     if (!(typeof raw === 'string' || raw instanceof ArrayBuffer || ArrayBuffer.isView(raw))) {
-      this.emit('error', { error: new DiceRoomProtocolError('Received unsupported WebSocket payload type') });
+      this.emit('error', {
+        error: new DiceRoomProtocolError('Received unsupported WebSocket payload type'),
+      });
       return;
     }
     const parsed = parseRuntimeJson(raw, { maximumBytes: 512 * 1024 });
     if (!parsed.success) {
-      this.emit('error', { error: new DiceRoomProtocolError(parsed.error.message, parsed.error.issues) });
+      this.emit('error', {
+        error: new DiceRoomProtocolError(parsed.error.message, parsed.error.issues),
+      });
       return;
     }
-    const decoded = decodeServerToClientEvent(parsed.data, { rejectUnknownFields: true, allowLegacyResults: true });
+    const decoded = decodeServerToClientEvent(parsed.data, {
+      rejectUnknownFields: true,
+      allowLegacyResults: true,
+    });
     if (!decoded.success) {
-      this.emit('error', { error: new DiceRoomProtocolError(decoded.error.message, decoded.error.issues) });
+      this.emit('error', {
+        error: new DiceRoomProtocolError(decoded.error.message, decoded.error.issues),
+      });
       return;
     }
     const event = decoded.data;
@@ -839,12 +965,16 @@ export class DiceRoom {
         await this.recoverLongRangeEvents(this.lastEventSequence);
       }
       this.participantsBySession.clear();
-      event.participants.forEach((participant) => this.participantsBySession.set(participant.sessionId, participant));
+      event.participants.forEach((participant) =>
+        this.participantsBySession.set(participant.sessionId, participant),
+      );
       this.roomPolicy = event.policy;
       this.roomPolicyRevision = event.policyRevision;
       this.emit('roomState', event);
       this.metricsState.replayedEvents += event.recentEvents.length;
-      for (const replayed of event.recentEvents.toSorted((left, right) => left.eventSequence - right.eventSequence)) {
+      for (const replayed of event.recentEvents.toSorted(
+        (left, right) => left.eventSequence - right.eventSequence,
+      )) {
         if (replayed.type === 'room_policy_updated') {
           this.processRoomPolicyEvent({ ...replayed, replayed: true, elapsedMs: 0 });
         } else if (replayed.type === 'room_token_revoked') {
@@ -1004,7 +1134,12 @@ export class DiceRoom {
   private handleClose(code: number, reason: string): void {
     this.socket = null;
     const message = `Dice room connection closed (${code}${reason ? `: ${reason}` : ''})`;
-    const error = new DiceRoomConnectionError(DRAFTROLL_ERROR_CODES.roomConnectionClosed, message, !this.closedIntentionally && this.options.reconnect, { closeCode: code });
+    const error = new DiceRoomConnectionError(
+      DRAFTROLL_ERROR_CODES.roomConnectionClosed,
+      message,
+      !this.closedIntentionally && this.options.reconnect,
+      { closeCode: code },
+    );
     if (this.connectionReady) {
       clearTimeout(this.connectionReady.timeout);
       this.connectionReady.reject(error);
@@ -1017,7 +1152,10 @@ export class DiceRoom {
       this.metricsState.reconnectAttempts += 1;
       const delay = Math.min(
         this.options.reconnectMaximumDelayMs,
-        Math.round(this.options.reconnectDelayMs * this.options.reconnectBackoffFactor ** Math.max(0, this.reconnectAttempt - 1)),
+        Math.round(
+          this.options.reconnectDelayMs *
+            this.options.reconnectBackoffFactor ** Math.max(0, this.reconnectAttempt - 1),
+        ),
       );
       this.transitionConnection('reconnecting', {
         code: error.code,
@@ -1028,7 +1166,9 @@ export class DiceRoom {
       });
       this.reconnectTimer = setTimeout(() => {
         this.reconnectTimer = null;
-        void this.connect(this.options.signal).catch((connectError) => this.emit('error', { error: asError(connectError) }));
+        void this.connect(this.options.signal).catch((connectError) =>
+          this.emit('error', { error: asError(connectError) }),
+        );
       }, delay);
       return;
     }
@@ -1041,9 +1181,15 @@ export class DiceRoom {
   }
 
   private send(event: ClientToServerEvent): void {
-    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) throw new DiceRoomConnectionError(DRAFTROLL_ERROR_CODES.roomNotConnected, 'Dice room is not connected', true);
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN)
+      throw new DiceRoomConnectionError(
+        DRAFTROLL_ERROR_CODES.roomNotConnected,
+        'Dice room is not connected',
+        true,
+      );
     const decoded = decodeClientToServerEvent(event, { rejectUnknownFields: true });
-    if (!decoded.success) throw new DiceRoomProtocolError(decoded.error.message, decoded.error.issues);
+    if (!decoded.success)
+      throw new DiceRoomProtocolError(decoded.error.message, decoded.error.issues);
     const payload = JSON.stringify(decoded.data);
     const bytes = new TextEncoder().encode(payload).byteLength;
     if (bytes > 64 * 1024) {
@@ -1052,7 +1198,11 @@ export class DiceRoom {
     this.socket.send(payload);
   }
 
-  private dispatchRequest(requestId: string, event: ClientToServerEvent, signal?: AbortSignal): Promise<PendingRoomEvent> {
+  private dispatchRequest(
+    requestId: string,
+    event: ClientToServerEvent,
+    signal?: AbortSignal,
+  ): Promise<PendingRoomEvent> {
     const pending = this.waitForRequest(requestId, signal);
     try {
       this.send(event);
@@ -1062,7 +1212,10 @@ export class DiceRoom {
         clearTimeout(request.timeout);
         request.cleanupAbort?.();
         this.pendingRequests.delete(requestId);
-        this.recordRequestFailure(request, error instanceof DraftrollError ? error.code : DRAFTROLL_ERROR_CODES.roomNotConnected);
+        this.recordRequestFailure(
+          request,
+          error instanceof DraftrollError ? error.code : DRAFTROLL_ERROR_CODES.roomNotConnected,
+        );
       }
       throw error;
     }
@@ -1088,7 +1241,13 @@ export class DiceRoom {
         cleanupAbort();
         this.metricsState.requestsTimedOut += 1;
         this.recordRequestFailure({ startedAt }, DRAFTROLL_ERROR_CODES.roomRequestTimeout, false);
-        reject(new DiceRoomConnectionError(DRAFTROLL_ERROR_CODES.roomRequestTimeout, `Room request '${requestId}' timed out`, true));
+        reject(
+          new DiceRoomConnectionError(
+            DRAFTROLL_ERROR_CODES.roomRequestTimeout,
+            `Room request '${requestId}' timed out`,
+            true,
+          ),
+        );
       }, this.options.requestTimeoutMs);
       signal?.addEventListener('abort', handleAbort, { once: true });
       this.pendingRequests.set(requestId, { resolve, reject, timeout, cleanupAbort, startedAt });
@@ -1099,7 +1258,10 @@ export class DiceRoom {
     for (const pending of this.pendingRequests.values()) {
       clearTimeout(pending.timeout);
       pending.cleanupAbort?.();
-      this.recordRequestFailure(pending, error instanceof DraftrollError ? error.code : DRAFTROLL_ERROR_CODES.roomConnectionClosed);
+      this.recordRequestFailure(
+        pending,
+        error instanceof DraftrollError ? error.code : DRAFTROLL_ERROR_CODES.roomConnectionClosed,
+      );
       pending.reject(error);
     }
     this.pendingRequests.clear();
@@ -1109,8 +1271,12 @@ export class DiceRoom {
     const latency = Math.max(0, Date.now() - pending.startedAt);
     this.metricsState.requestsCompleted += 1;
     this.totalRequestLatencyMs += latency;
-    this.metricsState.averageRequestLatencyMs = this.totalRequestLatencyMs / this.metricsState.requestsCompleted;
-    this.metricsState.maximumRequestLatencyMs = Math.max(this.metricsState.maximumRequestLatencyMs, latency);
+    this.metricsState.averageRequestLatencyMs =
+      this.totalRequestLatencyMs / this.metricsState.requestsCompleted;
+    this.metricsState.maximumRequestLatencyMs = Math.max(
+      this.metricsState.maximumRequestLatencyMs,
+      latency,
+    );
   }
 
   private recordRequestFailure(
@@ -1123,7 +1289,10 @@ export class DiceRoom {
     this.metricsState.lastFailureCode = code;
     this.metricsState.lastFailureAt = new Date().toISOString();
     const latency = Math.max(0, Date.now() - pending.startedAt);
-    this.metricsState.maximumRequestLatencyMs = Math.max(this.metricsState.maximumRequestLatencyMs, latency);
+    this.metricsState.maximumRequestLatencyMs = Math.max(
+      this.metricsState.maximumRequestLatencyMs,
+      latency,
+    );
   }
 
   private async recoverLongRangeEvents(afterEventSequence: number): Promise<void> {
@@ -1151,20 +1320,39 @@ export class DiceRoom {
       url.searchParams.set('limit', String(pageLimit));
       const headers: Record<string, string> = {};
       if (this.options.token) headers.Authorization = `Bearer ${this.options.token}`;
-      if (this.options.roomPassword) headers['X-Draftroll-Room-Password'] = this.options.roomPassword;
+      if (this.options.roomPassword)
+        headers['X-Draftroll-Room-Password'] = this.options.roomPassword;
       const response = await fetchImpl(url, { headers });
-      if (!response.ok) throw new DiceRoomConnectionError('long_range_recovery_failed', `Long-range room recovery failed with HTTP ${response.status}`, true);
-      const payload = await response.json() as {
+      if (!response.ok)
+        throw new DiceRoomConnectionError(
+          'long_range_recovery_failed',
+          `Long-range room recovery failed with HTTP ${response.status}`,
+          true,
+        );
+      // `Response.json` returns `any`. Only the recovery envelope is shaped here, and every
+      // field it exposes is either re-validated below (`events`, through
+      // `decodeServerToClientEvent`) or coerced through a `typeof`/`Number.isFinite` check
+      // before use, so nothing reaches state on the strength of this assertion alone.
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+      const payload = (await response.json()) as {
         events?: unknown[];
         nextAfterEventSequence?: number;
         latestEventSequence?: number;
         hasMore?: boolean;
       };
       for (const rawEvent of payload.events ?? []) {
-        const decoded = decodeServerToClientEvent(rawEvent, { rejectUnknownFields: true, allowLegacyResults: true });
-        if (!decoded.success) throw new DiceRoomProtocolError(decoded.error.message, decoded.error.issues);
+        const decoded = decodeServerToClientEvent(rawEvent, {
+          rejectUnknownFields: true,
+          allowLegacyResults: true,
+        });
+        if (!decoded.success)
+          throw new DiceRoomProtocolError(decoded.error.message, decoded.error.issues);
         const recovered = decoded.data;
-        if (recovered.type === 'roll_start' || recovered.type === 'roll_updated' || recovered.type === 'roll_visibility_updated') {
+        if (
+          recovered.type === 'roll_start' ||
+          recovered.type === 'roll_updated' ||
+          recovered.type === 'roll_visibility_updated'
+        ) {
           this.processRoomRollEvent({ ...recovered, replayed: true });
           recoveredCount += 1;
         } else if (recovered.type === 'room_policy_updated') {
@@ -1178,32 +1366,46 @@ export class DiceRoom {
       const events = payload.events ?? [];
       const nextCursor = isSafeInteger(payload.nextAfterEventSequence)
         ? Math.max(cursor, payload.nextAfterEventSequence)
-        : Math.max(cursor, ...events.map((event) => {
-            const sequence: unknown = isRecord(event) ? event.eventSequence : undefined;
-            return isSafeInteger(sequence) ? sequence : cursor;
-          }));
-      const latestMetadata = isSafeInteger(payload.latestEventSequence) ? payload.latestEventSequence : undefined;
+        : Math.max(
+            cursor,
+            ...events.map((event) => {
+              const sequence: unknown = isRecord(event) ? event.eventSequence : undefined;
+              return isSafeInteger(sequence) ? sequence : cursor;
+            }),
+          );
+      const latestMetadata = isSafeInteger(payload.latestEventSequence)
+        ? payload.latestEventSequence
+        : undefined;
       const hasLatestMetadata = latestMetadata !== undefined;
       const latest = latestMetadata ?? nextCursor;
       // Older compatible endpoints may not include pagination metadata. In that
       // case, a full page means there may be another page; one final empty page
       // safely confirms completion without advancing past unprocessed events.
-      const hasMore = typeof payload.hasMore === 'boolean'
-        ? payload.hasMore
-        : hasLatestMetadata
-          ? nextCursor < latest
-          : events.length >= pageLimit;
+      const hasMore =
+        typeof payload.hasMore === 'boolean'
+          ? payload.hasMore
+          : hasLatestMetadata
+            ? nextCursor < latest
+            : events.length >= pageLimit;
       if (!hasMore || (hasLatestMetadata && nextCursor >= latest)) {
         complete = true;
         break;
       }
       if (nextCursor <= cursor) {
-        throw new DiceRoomConnectionError('long_range_recovery_stalled', `Long-range recovery made no progress after event ${cursor}`, true);
+        throw new DiceRoomConnectionError(
+          'long_range_recovery_stalled',
+          `Long-range recovery made no progress after event ${cursor}`,
+          true,
+        );
       }
       cursor = nextCursor;
     }
     if (!complete && pages >= maximumPages) {
-      throw new DiceRoomConnectionError('long_range_recovery_limit', `Long-range recovery exceeded ${maximumPages} pages`, true);
+      throw new DiceRoomConnectionError(
+        'long_range_recovery_limit',
+        `Long-range recovery exceeded ${maximumPages} pages`,
+        true,
+      );
     }
     this.metricsState.replayedEvents += recoveredCount;
     this.metricsState.longRangeRecoveries += 1;
@@ -1263,6 +1465,10 @@ export class DiceRoom {
   private emit<K extends keyof DiceRoomEvents>(event: K, payload: DiceRoomEvents[K]): void {
     for (const handler of this.handlers.get(event) ?? []) {
       try {
+        // Handlers are stored contravariantly at `never` so one map can hold every event's
+        // handler. `on` only ever files a handler under its own key, so widening back to this
+        // key's payload type restores the signature the caller registered.
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion
         (handler as EventHandler<DiceRoomEvents[K]>)(payload);
       } catch {
         // Observer failures cannot corrupt transport state or request correlation.
@@ -1408,14 +1614,16 @@ export class DiceRoomRequestError extends DraftrollError {
 }
 
 function isRecoverableRequestCode(code: string): boolean {
-  return code === 'revision_conflict'
-    || code === 'rate_limited'
-    || code === 'request_timeout'
-    || code === 'room_password_required'
-    || code === 'invalid_room_password'
-    || code === 'token_required'
-    || code === 'token_expired'
-    || code === 'token_revoked';
+  return (
+    code === 'revision_conflict' ||
+    code === 'rate_limited' ||
+    code === 'request_timeout' ||
+    code === 'room_password_required' ||
+    code === 'invalid_room_password' ||
+    code === 'token_required' ||
+    code === 'token_expired' ||
+    code === 'token_revoked'
+  );
 }
 
 interface ClockSample {
@@ -1428,63 +1636,72 @@ interface ClockSample {
  *
  * @public
  */
-export function synchronizeRoomEvent(event: RoomRollEvent, clockOffsetMs: number, nowMs = Date.now()): SynchronizedRoomRollEvent {
+export function synchronizeRoomEvent(
+  event: RoomRollEvent,
+  clockOffsetMs: number,
+  nowMs = Date.now(),
+): SynchronizedRoomRollEvent {
   if (event.type === 'roll_start') {
-    const localStartTimeMs = event.serverStartTimeMs === undefined
-      ? undefined
-      : event.serverStartTimeMs - clockOffsetMs;
+    const localStartTimeMs =
+      event.serverStartTimeMs === undefined ? undefined : event.serverStartTimeMs - clockOffsetMs;
     const elapsedMs = localStartTimeMs === undefined ? 0 : Math.max(0, nowMs - localStartTimeMs);
     return {
       ...event,
       localStartTimeMs,
       elapsedMs,
-      animationProgress: event.animationDurationMs && event.animationDurationMs > 0
-        ? elapsedMs / event.animationDurationMs
-        : 0,
+      animationProgress:
+        event.animationDurationMs && event.animationDurationMs > 0
+          ? elapsedMs / event.animationDurationMs
+          : 0,
     };
   }
   if (event.type === 'roll_updated') {
-    const localStartTimeMs = event.animate && event.serverStartTimeMs !== undefined
-      ? event.serverStartTimeMs - clockOffsetMs
-      : undefined;
+    const localStartTimeMs =
+      event.animate && event.serverStartTimeMs !== undefined
+        ? event.serverStartTimeMs - clockOffsetMs
+        : undefined;
     const elapsedMs = localStartTimeMs === undefined ? 0 : Math.max(0, nowMs - localStartTimeMs);
     return {
       ...event,
       localStartTimeMs,
       elapsedMs,
-      animationProgress: event.animationDurationMs && event.animationDurationMs > 0
-        ? elapsedMs / event.animationDurationMs
-        : 0,
+      animationProgress:
+        event.animationDurationMs && event.animationDurationMs > 0
+          ? elapsedMs / event.animationDurationMs
+          : 0,
     };
   }
   return { ...event, elapsedMs: 0 };
 }
 
 function isTokenAuthenticationError(code: string): boolean {
-  return code === 'invalid_token'
-    || code === 'malformed_token'
-    || code === 'unsupported_token_header'
-    || code === 'unknown_key_id'
-    || code === 'invalid_signature'
-    || code === 'invalid_payload'
-    || code === 'protocol_mismatch'
-    || code === 'room_mismatch'
-    || code === 'token_expired'
-    || code === 'token_not_yet_valid'
-    || code === 'token_issued_in_future'
-    || code === 'token_issuer_mismatch'
-    || code === 'token_audience_mismatch'
-    || code === 'token_id_required'
-    || code === 'token_issued_at_required'
-    || code === 'token_revoked'
-    || code === 'token_verification_unavailable'
-    || code === 'token_key_configuration_invalid';
+  return (
+    code === 'invalid_token' ||
+    code === 'malformed_token' ||
+    code === 'unsupported_token_header' ||
+    code === 'unknown_key_id' ||
+    code === 'invalid_signature' ||
+    code === 'invalid_payload' ||
+    code === 'protocol_mismatch' ||
+    code === 'room_mismatch' ||
+    code === 'token_expired' ||
+    code === 'token_not_yet_valid' ||
+    code === 'token_issued_in_future' ||
+    code === 'token_issuer_mismatch' ||
+    code === 'token_audience_mismatch' ||
+    code === 'token_id_required' ||
+    code === 'token_issued_at_required' ||
+    code === 'token_revoked' ||
+    code === 'token_verification_unavailable' ||
+    code === 'token_key_configuration_invalid'
+  );
 }
 
 function createId(prefix: string): string {
-  const random = typeof crypto !== 'undefined' && 'randomUUID' in crypto
-    ? crypto.randomUUID()
-    : `${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
+  const random =
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
   return `${prefix}_${random}`;
 }
 

@@ -22,7 +22,9 @@ const stopServer = async () => {
   stopping = true;
   if (process.platform === 'win32') {
     await new Promise((resolve) => {
-      const killer = spawn('taskkill', ['/pid', String(server.pid), '/T', '/F'], { stdio: 'ignore' });
+      const killer = spawn('taskkill', ['/pid', String(server.pid), '/T', '/F'], {
+        stdio: 'ignore',
+      });
       killer.on('exit', resolve);
       killer.on('error', resolve);
     });
@@ -49,7 +51,11 @@ try {
 
 async function runCommand(args) {
   await new Promise((resolve, reject) => {
-    const child = spawn(pnpmCommand, args, { cwd: process.cwd(), env: process.env, stdio: 'inherit' });
+    const child = spawn(pnpmCommand, args, {
+      cwd: process.cwd(),
+      env: process.env,
+      stdio: 'inherit',
+    });
     child.on('error', reject);
     child.on('exit', (code) => {
       if (code === 0) resolve();
@@ -61,7 +67,8 @@ async function runCommand(args) {
 async function waitForHealth(url, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (server.exitCode !== null) throw new Error(`Wrangler exited before becoming ready (code ${server.exitCode})`);
+    if (server.exitCode !== null)
+      throw new Error(`Wrangler exited before becoming ready (code ${server.exitCode})`);
     try {
       const response = await fetch(url);
       if (response.ok) return;
