@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { getState, openParticipant } from '../support/fixture';
+import { expectSharedTable, getState, openParticipant } from '../support/fixture';
 
 test('two participants receive one authoritative public roll without duplicate logical events', async ({
   browser,
@@ -213,12 +213,13 @@ test('a disconnected participant catches up from the event cursor after reconnec
     overlay: false,
   });
 
-  await bobContext.setOffline(true);
+  // `context.setOffline(true)` does not close an already-established WebSocket, so it never
+  // produces the close event this recovery path depends on. Sever the socket directly instead.
+  await bob.evaluate(() => window.__draftrollTest.dropConnection());
   await expect.poll(() => getState(bob).then((state) => state.roomCloseCount)).toBeGreaterThan(0);
   const missed = await alice.evaluate(() =>
     window.__draftrollTest.rollRoom('2d6+3', { type: 'public' }),
   );
-  await bobContext.setOffline(false);
 
   await expect.poll(() => getState(bob).then((state) => state.roomOpenCount)).toBeGreaterThan(1);
   await expect
@@ -329,10 +330,10 @@ test('near-simultaneous room rolls share one visible table throw with both rolle
   ]);
   expect(aliceRoll.rollId).not.toBe(bobRoll.rollId);
 
-  const rendererFrame = spectator.frameLocator('iframe[title="Draftroll dice overlay"]');
-  await expect(rendererFrame.locator('#result-detail')).toContainText('Alice');
-  await expect(rendererFrame.locator('#result-detail')).toContainText('Bob');
-  await expect(rendererFrame.locator('#result-detail')).toContainText('•');
+  // Assert on the renderer's own table state rather than the transient `#result-detail` text:
+  // the panel only names both rollers while they share the table, and whether that is still
+  // true once `rollRoom` resolves depends on machine timing.
+  await expectSharedTable(spectator, ['Alice', 'Bob']);
 
   await Promise.all(contexts.map((context) => context.close()));
 });
@@ -377,19 +378,17 @@ test('a later room roll joins the active table world instead of waiting for the 
     window.__draftrollTest.rollRoom('3d6', { type: 'public' }),
   );
 
-  // This is deliberately outside the renderer's 140 ms coalescing window but
-  // inside the 720 ms visible throw. Bob's dice should be injected into the
-  // already-running table world instead of waiting for a second isolated scene.
-  await spectator.waitForTimeout(360);
+  // Deliberately outside the renderer's 140 ms coalescing window but inside the 720 ms visible
+  // throw, so Bob's dice join the already-running table world instead of waiting for a second
+  // isolated scene. Wait for Alice to actually be on the table rather than sleeping a fixed
+  // 360 ms, which races the throw on a slow machine and leaves only one group by assertion time.
+  await expectSharedTable(spectator, ['Alice']);
   const bobRoll = await bob.evaluate(() =>
     window.__draftrollTest.rollRoom('2d8', { type: 'public' }),
   );
   expect(aliceRoll.rollId).not.toBe(bobRoll.rollId);
 
-  const rendererFrame = spectator.frameLocator('iframe[title="Draftroll dice overlay"]');
-  await expect(rendererFrame.locator('#result-detail')).toContainText('Alice');
-  await expect(rendererFrame.locator('#result-detail')).toContainText('Bob');
-  await expect(rendererFrame.locator('#result-detail')).toContainText('•');
+  await expectSharedTable(spectator, ['Alice', 'Bob']);
 
   await Promise.all(contexts.map((context) => context.close()));
 });
@@ -468,8 +467,7 @@ test('a new room roll can strike dice that already settled on the persistent tab
       { timeout: 10_000 },
     )
     .toBe(3);
-  await expect(rendererFrame.locator('#result-detail')).toContainText('Alice');
-  await expect(rendererFrame.locator('#result-detail')).toContainText('Bob');
+  await expectSharedTable(spectator, ['Alice', 'Bob']);
 
   await Promise.all(contexts.map((context) => context.close()));
 });

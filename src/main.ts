@@ -142,6 +142,14 @@ export interface DicePerformanceSnapshot {
   jsHeapSizeLimit: number | null;
   /** Diagnostics from the most recently planned physical throw. */
   targeting: DiceTargetingSnapshot | null;
+  /**
+   * Roller labels for the table groups currently on screen, in presentation order.
+   *
+   * @remarks
+   * Exposed so tests can wait for a specific set of rollers to share the table instead of
+   * racing a fixed delay against the visible throw.
+   */
+  activeTableRolls: string[];
 }
 
 export interface DiceEngineConfig {
@@ -4525,6 +4533,7 @@ window.draftrollDice = {
       (performance as Performance & { memory?: { jsHeapSizeLimit?: number } }).memory
         ?.jsHeapSizeLimit ?? null,
     targeting: lastTargetingSnapshot ? { ...lastTargetingSnapshot } : null,
+    activeTableRolls: readActiveTableRolls().map((group) => group.actorLabel ?? ''),
   }),
 };
 

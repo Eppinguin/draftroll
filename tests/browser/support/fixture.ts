@@ -36,6 +36,33 @@ export function getState(page: Page): Promise<FixtureState> {
   return page.evaluate(() => window.__draftrollTest.getState());
 }
 
+/**
+ * Waits until exactly the given rollers share the spectator's visible table.
+ *
+ * @remarks
+ * The overlay's `#result-detail` text names every roller only while their groups are on the
+ * table together, which is a transient state. Polling the renderer's own `activeTableRolls`
+ * diagnostic makes the assertion independent of how fast the throw resolves, instead of
+ * racing a fixed delay against the 720 ms animation.
+ */
+export async function expectSharedTable(
+  spectator: Page,
+  rollers: readonly string[],
+): Promise<void> {
+  const rendererFrame = spectator.frameLocator('iframe[title="Draftroll dice overlay"]');
+  await expect
+    .poll(
+      () =>
+        rendererFrame
+          .locator('body')
+          .evaluate(() =>
+            (window.draftrollDice.getPerformanceSnapshot().activeTableRolls ?? []).toSorted(),
+          ),
+      { timeout: 15_000 },
+    )
+    .toEqual(rollers.toSorted());
+}
+
 export async function openParticipant(
   context: BrowserContext,
   options: {
@@ -79,6 +106,7 @@ declare global {
       revealLast(): Promise<{ rollId: string; revision: number; total: number | null }>;
       destroyOverlay(): void;
       closeRoom(): void;
+      dropConnection(): void;
     };
   }
 }

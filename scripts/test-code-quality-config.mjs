@@ -35,8 +35,8 @@ for (const [name, version] of Object.entries(expectedVersions)) {
 
 assert.equal(packageJson.scripts?.lint, 'oxlint .');
 assert.equal(packageJson.scripts?.['lint:fix'], 'oxlint --fix .');
-assert.equal(packageJson.scripts?.format, 'oxfmt');
-assert.equal(packageJson.scripts?.['format:check'], 'oxfmt --check');
+assert.equal(packageJson.scripts?.fmt, 'oxfmt');
+assert.equal(packageJson.scripts?.['fmt:check'], 'oxfmt --check');
 assert.match(packageJson.scripts?.check ?? '', /check:quality/);
 assert.match(packageJson.scripts?.check ?? '', /test:quality-config/);
 assert.match(packageJson.scripts?.['test:release'] ?? '', /check:quality/);

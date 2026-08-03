@@ -53,6 +53,11 @@ interface BrowserFixtureApi {
   revealLast(): Promise<{ rollId: string; revision: number; total: number | null }>;
   destroyOverlay(): void;
   closeRoom(): void;
+  /**
+   * Drops the live WebSocket the way a lost network would, without marking the close
+   * intentional, so the client's reconnect and event-replay path runs.
+   */
+  dropConnection(): void;
 }
 
 declare global {
@@ -89,6 +94,18 @@ let overlay: DraftrollOverlayRenderer | undefined;
 let draftroll: Draftroll;
 let roomSession: DraftrollRoomSession | null = null;
 let lastRoomRoll: DraftrollRoomRoll | null = null;
+// Tracks the socket the room client is currently using so a test can sever it. Playwright's
+// `context.setOffline` does not close an already-established WebSocket, so it never triggers
+// the reconnect path this fixture needs to exercise.
+let liveSocket: WebSocket | null = null;
+
+const TrackedWebSocket = new Proxy(WebSocket, {
+  construct(target, args: [string | URL, (string | string[])?]) {
+    const socket = new target(...args);
+    liveSocket = socket;
+    return socket;
+  },
+});
 
 const ready = initialize();
 window.__draftrollTest = {
@@ -104,6 +121,9 @@ window.__draftrollTest = {
     renderState();
   },
   closeRoom: () => roomSession?.close(),
+  // 4900 carries no protocol meaning (4001-4003 are password/token cases the client treats as
+  // intentional), so the client sees an unexpected close and runs reconnect + event replay.
+  dropConnection: () => liveSocket?.close(4900, 'test transport drop'),
 };
 
 window.addEventListener('securitypolicyviolation', (event) => {
@@ -192,6 +212,7 @@ async function connectRoom(
       sessionId: options.sessionId ?? `session-${crypto.randomUUID()}`,
       name: options.name ?? 'Browser participant',
     },
+    WebSocketImpl: TrackedWebSocket,
     reconnect: true,
     reconnectDelayMs: 150,
     clockSyncSamples: 1,
