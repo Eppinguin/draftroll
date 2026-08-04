@@ -1,6 +1,7 @@
 import * as CANNON from 'cannon-es';
 import { createDiePhysicsShape, type DieKind } from './physics-shapes';
 import {
+  markUnobstructedTableDice,
   minimumRestingAlignment,
   readRestingAlignment,
   releaseUnstableRestPose,
@@ -44,6 +45,7 @@ interface PlannerCache {
   boundsX: number;
   boundsZ: number;
   world: CANNON.World;
+  floorBodyId: number;
   bodies: CANNON.Body[];
   bodyKeys: Map<number, number>;
 }
@@ -181,6 +183,7 @@ function createPlanner(kinds: readonly DieKind[], boundsX: number, boundsZ: numb
     boundsX,
     boundsZ,
     world,
+    floorBodyId: floor.id,
     bodies,
     bodyKeys,
   };
@@ -560,6 +563,9 @@ function simulate(
   const stablePositions = new Float32Array(planner.bodies.length * 3);
   const restingAxes = planner.bodies.map(() => new CANNON.Vec3());
   const restingAlignments = new Float32Array(planner.bodies.length);
+  const unobstructedTableDice = new Uint8Array(planner.bodies.length);
+  const lastUnstableReleaseTimes = new Float32Array(planner.bodies.length);
+  lastUnstableReleaseTimes.fill(Number.NEGATIVE_INFINITY);
   copyPositions(stablePositions, planner.bodies, lockedCount);
   let settleReason = 'timeout';
   let finalAverageLinear = 0;
@@ -604,6 +610,13 @@ function simulate(
       true,
     );
     enforceBounds(planner.bodies, planner.boundsX, planner.boundsZ, simulationTime, lockedCount);
+    markUnobstructedTableDice(
+      planner.world.contacts,
+      planner.bodyKeys,
+      planner.bodies.length,
+      planner.floorBodyId,
+      unobstructedTableDice,
+    );
     const allActive = currentActiveFlags.slice(lockedCount).every(Boolean);
     let linearSum = 0;
     let angularSum = 0;
@@ -619,6 +632,10 @@ function simulate(
       angularSum += angularSpeed;
       if (!(body.sleepState === CANNON.Body.SLEEPING || (speed < 0.2 && angularSpeed < 0.28)))
         allSlow = false;
+      if (unobstructedTableDice[index] === 0) {
+        restingAlignments[index] = 1;
+        return;
+      }
       const alignment = readRestingAlignment(
         planner.kinds[index],
         body.quaternion,
@@ -666,8 +683,12 @@ function simulate(
     if (afterLastActivation && !allWellSeated) {
       planner.bodies.forEach((body, index) => {
         if (!currentActiveFlags[index] || index < lockedCount) return;
+        if (unobstructedTableDice[index] === 0) return;
         if (restingAlignments[index] >= minimumRestingAlignment(planner.kinds[index])) return;
-        releaseUnstableRestPose(body, restingAxes[index]);
+        if (simulationTime - lastUnstableReleaseTimes[index] < 0.45) return;
+        if (releaseUnstableRestPose(body, restingAxes[index])) {
+          lastUnstableReleaseTimes[index] = simulationTime;
+        }
       });
     }
     const sleepSettled = afterLastActivation && slowTime > 0.5;

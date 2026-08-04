@@ -50,9 +50,9 @@ If the worker cannot produce a valid standard-die plan, the renderer does not sh
 
 ## Stable physical resting poses
 
-A low average velocity is not enough to finish a plan. Every active body must also remain seated on a supporting face for a short stable window. A shape-aware alignment check distinguishes a face-down rest from the exact edge and corner equilibria that a numerical rigid-body solver can otherwise preserve.
+A low average velocity is not enough to finish a plan. An unobstructed die touching only the table must also remain seated on a supporting face for a short stable window. Dice braced by the wall or other dice are allowed to keep their naturally tilted pile orientation. A shape-aware alignment check distinguishes a face-down rest from the exact edge and corner equilibria that a numerical rigid-body solver can otherwise preserve.
 
-When a nearly motionless body is balanced on an edge or corner, Draftroll wakes it with a small rotation toward the closest face selected by its existing physical orientation. This settling nudge is independent of the requested result and happens inside the hidden planning simulation, before playback begins. It neither changes the natural collision path already taken nor creates a visible correction phase.
+When an unobstructed, nearly motionless body is balanced on an edge or corner, Draftroll briefly unloads the exact contact equilibrium and wakes it with a small rotation toward the closest face selected by its existing physical orientation. Corrections have a per-die cooldown, so they cannot repeatedly energize a settled pool. This settling nudge is independent of the requested result and happens inside the hidden planning simulation, before playback begins. It neither changes the natural collision path already taken nor creates a visible correction phase.
 
 ## Concurrent table behavior
 

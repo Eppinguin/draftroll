@@ -48,9 +48,12 @@ try {
 
   const require = createRequire(import.meta.url);
   const { createDiePhysicsShape } = require(join(outDir, 'physics-shapes.js'));
-  const { minimumRestingAlignment, readRestingAlignment, releaseUnstableRestPose } = require(
-    join(outDir, 'resting-physics.js'),
-  );
+  const {
+    markUnobstructedTableDice,
+    minimumRestingAlignment,
+    readRestingAlignment,
+    releaseUnstableRestPose,
+  } = require(join(outDir, 'resting-physics.js'));
   const coinShape = createDiePhysicsShape('coin');
   assert.ok(coinShape instanceof CANNON.Cylinder, 'coin uses a Cannon cylinder');
 
@@ -89,6 +92,48 @@ try {
     Math.abs(coin.position.z) < 0.1 && Math.abs(d6.position.z) < 0.1,
     'head-on contact remains stable',
   );
+
+  const supportFloor = new CANNON.Body({ mass: 0 });
+  const supportWall = new CANNON.Body({ mass: 0 });
+  const lowerDie = new CANNON.Body({ mass: 1 });
+  const upperDie = new CANNON.Body({ mass: 1 });
+  const supportIndexes = new Map([
+    [lowerDie.id, 0],
+    [upperDie.id, 1],
+    [supportFloor.id, 2],
+    [supportWall.id, 3],
+  ]);
+  const supportFlags = new Uint8Array(2);
+  markUnobstructedTableDice(
+    [new CANNON.ContactEquation(supportFloor, lowerDie)],
+    supportIndexes,
+    2,
+    supportFloor.id,
+    supportFlags,
+  );
+  assert.deepEqual(Array.from(supportFlags), [1, 0], 'an isolated table die can be corrected');
+  markUnobstructedTableDice(
+    [
+      new CANNON.ContactEquation(supportFloor, lowerDie),
+      new CANNON.ContactEquation(lowerDie, upperDie),
+    ],
+    supportIndexes,
+    2,
+    supportFloor.id,
+    supportFlags,
+  );
+  assert.deepEqual(Array.from(supportFlags), [0, 0], 'a physical dice pile remains untouched');
+  markUnobstructedTableDice(
+    [
+      new CANNON.ContactEquation(supportFloor, lowerDie),
+      new CANNON.ContactEquation(supportWall, lowerDie),
+    ],
+    supportIndexes,
+    2,
+    supportFloor.id,
+    supportFlags,
+  );
+  assert.deepEqual(Array.from(supportFlags), [0, 0], 'a wall-braced die remains untouched');
 
   function settleFromEdge(kind, positionY, edgeQuaternion) {
     const settlingWorld = new CANNON.World({ gravity: new CANNON.Vec3(0, -20.5, 0) });
@@ -218,6 +263,7 @@ try {
           'coin-to-d6 momentum transfer',
           'coin edge-balance release',
           'd6 edge-balance release',
+          'contact-aware pile and wall stabilization',
           'supporting-face settlement for every physical kind',
         ],
         finalVelocity: { coin: coin.velocity.x, d6: d6.velocity.x },

@@ -18,6 +18,7 @@ import {
 } from './dice';
 import { DIE_COLLIDER_RADIUS, DIE_RADIUS, isDieKind } from './physics-shapes';
 import {
+  markUnobstructedTableDice,
   minimumRestingAlignment,
   readRestingAlignment,
   releaseUnstableRestPose,
@@ -2391,6 +2392,9 @@ function buildRollPlanSync(states: LaunchState[]): RollPlan {
   let previousContacts: number[] = [];
   const restingAxes = plannerDice.map(() => new CANNON.Vec3());
   const restingAlignments = new Float32Array(plannerDice.length);
+  const unobstructedTableDice = new Uint8Array(plannerDice.length);
+  const lastUnstableReleaseTimes = new Float32Array(plannerDice.length);
+  lastUnstableReleaseTimes.fill(Number.NEGATIVE_INFINITY);
   let settleReason = 'timeout';
   const maxSteps = 1_080;
   const minSteps = 120;
@@ -2417,6 +2421,13 @@ function buildRollPlanSync(states: LaunchState[]): RollPlan {
 
     planner.step(PLANNER_STEP);
     enforceBodiesBounds(plannerDice, simulationTime);
+    markUnobstructedTableDice(
+      planner.contacts,
+      bodyKeys,
+      plannerDice.length,
+      plannerFloor.id,
+      unobstructedTableDice,
+    );
     let linearSum = 0;
     let angularSum = 0;
     let allSlow = activeFlags.every(Boolean);
@@ -2431,6 +2442,10 @@ function buildRollPlanSync(states: LaunchState[]): RollPlan {
       angularSum += angularSpeed;
       if (!(body.sleepState === CANNON.Body.SLEEPING || (speed < 0.2 && angularSpeed < 0.28)))
         allSlow = false;
+      if (unobstructedTableDice[index] === 0) {
+        restingAlignments[index] = 1;
+        return;
+      }
       const kind = activeKinds[index] ?? selectedKind;
       const alignment = readRestingAlignment(kind, body.quaternion, restingAxes[index]);
       restingAlignments[index] = alignment;
@@ -2457,9 +2472,13 @@ function buildRollPlanSync(states: LaunchState[]): RollPlan {
       if (afterLastActivation && !allWellSeated) {
         plannerDice.forEach((body, index) => {
           if (!activeFlags[index]) return;
+          if (unobstructedTableDice[index] === 0) return;
           const kind = activeKinds[index] ?? selectedKind;
           if (restingAlignments[index] >= minimumRestingAlignment(kind)) return;
-          releaseUnstableRestPose(body, restingAxes[index]);
+          if (simulationTime - lastUnstableReleaseTimes[index] < 0.45) return;
+          if (releaseUnstableRestPose(body, restingAxes[index])) {
+            lastUnstableReleaseTimes[index] = simulationTime;
+          }
         });
       }
       const averageLinear = linearSum / Math.max(1, activeCount);

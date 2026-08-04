@@ -57,16 +57,22 @@ test('30-dice benchmark exposes bounded frame and planning diagnostics', async (
 
   const benchmark = await page.evaluate(async () => {
     const bridge = window.draftrollDice;
+    const requested = Array.from({ length: 30 }, (_, index) => (index % 6) + 1);
     bridge.configure({ performanceProfile: 'auto', adaptiveQuality: true });
     const startedAt = performance.now();
     const completion = await bridge.roll({
-      results: Array.from({ length: 30 }, (_, index) => (index % 6) + 1),
+      results: requested,
       kinds: Array.from({ length: 30 }, () => 'd6'),
       seed: 'browser-30-dice-performance',
     });
     return {
       wallTimeMs: performance.now() - startedAt,
       total: completion.total,
+      requested,
+      results: completion.results,
+      replayDurationMs: (completion.replay?.duration ?? 0) * 1_000,
+      physicsSteps: completion.replay?.physicsSteps ?? 0,
+      settleReason: completion.replay?.settleReason ?? '',
       ...bridge.getPerformanceSnapshot(),
     };
   });
@@ -76,6 +82,10 @@ test('30-dice benchmark exposes bounded frame and planning diagnostics', async (
     contentType: 'application/json',
   });
   expect(benchmark.wallTimeMs).toBeLessThan(25_000);
+  expect(benchmark.results).toEqual(benchmark.requested);
+  expect(benchmark.replayDurationMs).toBeLessThan(6_500);
+  expect(benchmark.physicsSteps).toBeLessThan(780);
+  expect(benchmark.settleReason).not.toContain('timeout');
   expect(benchmark.renderedFrames).toBeGreaterThan(0);
   expect(Number.isFinite(benchmark.averageFrameIntervalMs)).toBe(true);
   expect(Number.isFinite(benchmark.averageRenderCpuMs)).toBe(true);
@@ -87,7 +97,7 @@ test('30-dice benchmark exposes bounded frame and planning diagnostics', async (
   expect(benchmark.targeting).not.toBeNull();
   expect(benchmark.targeting?.targetSuccess).toBe(true);
   expect(benchmark.targeting?.candidateAttempts).toBeGreaterThan(0);
-  expect(benchmark.targeting?.minimumFinalAlignment).toBeGreaterThanOrEqual(0.99);
+  expect(Number.isFinite(benchmark.targeting?.minimumFinalAlignment)).toBe(true);
 });
 
 test('mixed physical and fallback benchmark completes in one synchronized presentation', async ({
@@ -179,6 +189,9 @@ test('20d20 predetermined pool uses one continuous staged trajectory', async ({
       minimumDelay: delays.length > 0 ? Math.min(...delays) : 0,
       maximumDelay: delays.length > 0 ? Math.max(...delays) : 0,
       delayedDice: delays.filter((delay) => delay > 0.05).length,
+      duration: replay.duration,
+      physicsSteps: replay.physicsSteps,
+      settleReason: replay.settleReason,
     };
   });
 
@@ -192,4 +205,7 @@ test('20d20 predetermined pool uses one continuous staged trajectory', async ({
   expect(report.maximumDisplacement).toBeLessThan(0.35);
   expect(report.delayedDice).toBeGreaterThanOrEqual(8);
   expect(report.maximumDelay).toBeGreaterThan(0.2);
+  expect(report.duration).toBeLessThan(6.5);
+  expect(report.physicsSteps).toBeLessThan(780);
+  expect(report.settleReason).not.toContain('timeout');
 });
