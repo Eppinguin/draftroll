@@ -80,8 +80,12 @@ test('clear invalidates an in-flight pool before accepting a fresh roll', async 
 
     bridge.clear();
     const immediatelyAfterClear = bridge.getPerformanceSnapshot();
+    const canvasHiddenAfterClear =
+      document.querySelector<HTMLCanvasElement>('#scene')?.style.visibility === 'hidden';
     const staleOutcome = await staleRoll;
     const queuedOutcome = await queuedRoll;
+    const canvasHiddenBeforeFreshRoll =
+      document.querySelector<HTMLCanvasElement>('#scene')?.style.visibility === 'hidden';
     const freshCompletion = await bridge.roll({
       results: [6],
       kinds: ['d6'],
@@ -90,23 +94,31 @@ test('clear invalidates an in-flight pool before accepting a fresh roll', async 
     });
     await new Promise<void>((resolve) => window.setTimeout(resolve, 100));
     const afterFreshRoll = bridge.getPerformanceSnapshot();
+    const canvasVisibleAfterFreshRoll =
+      document.querySelector<HTMLCanvasElement>('#scene')?.style.visibility !== 'hidden';
 
     return {
       immediatelyAfterClear,
+      canvasHiddenAfterClear,
       staleOutcome,
       queuedOutcome,
+      canvasHiddenBeforeFreshRoll,
       freshCompletion,
       afterFreshRoll,
+      canvasVisibleAfterFreshRoll,
     };
   });
 
   expect(report.immediatelyAfterClear.physicalDice).toBe(0);
   expect(report.immediatelyAfterClear.fallbackVisuals).toBe(0);
+  expect(report.canvasHiddenAfterClear).toBe(true);
   expect(report.staleOutcome).toContain('cleared');
   expect(report.queuedOutcome).toContain('cleared');
+  expect(report.canvasHiddenBeforeFreshRoll).toBe(true);
   expect(report.freshCompletion.results).toEqual([6]);
   expect(report.afterFreshRoll.physicalDice).toBe(1);
   expect(report.afterFreshRoll.fallbackVisuals).toBe(0);
+  expect(report.canvasVisibleAfterFreshRoll).toBe(true);
 });
 
 test('30-dice benchmark exposes bounded frame and planning diagnostics', async ({

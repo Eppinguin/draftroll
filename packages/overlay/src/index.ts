@@ -182,6 +182,12 @@ export type DraftrollOverlayMessage =
   | {
       source: typeof DRAFTROLL_OVERLAY_SOURCE;
       version: typeof DRAFTROLL_OVERLAY_PROTOCOL_VERSION;
+      type: 'frame-ready';
+      requestId: string;
+    }
+  | {
+      source: typeof DRAFTROLL_OVERLAY_SOURCE;
+      version: typeof DRAFTROLL_OVERLAY_PROTOCOL_VERSION;
       type: 'complete';
       requestId: string;
       completion: RendererCompletion | null;
@@ -273,6 +279,7 @@ type OverlayCompleteMessage = Extract<DraftrollOverlayMessage, { type: 'complete
 interface PendingCommand {
   resolve: (message: OverlayCompleteMessage) => void;
   reject: (error: Error) => void;
+  onFrameReady?: () => void;
   cleanupAbort?: () => void;
 }
 
@@ -551,7 +558,6 @@ export class DraftrollOverlayRenderer implements DiceRenderer {
     });
     for (const themeId of themeIds) await this.ensureTheme(themeId, options.signal);
     this.assertPresentationGeneration(generation);
-    this.setIframeActive(true);
     this.panel?.show(result, 'rolling', options.dieIds);
 
     const outcomes = options.outcomeResolver
@@ -578,6 +584,7 @@ export class DraftrollOverlayRenderer implements DiceRenderer {
 
     try {
       this.emitLifecycle('started', { result, options });
+      let frameReady = false;
       const response = await this.command(
         {
           type: 'play',
@@ -586,6 +593,11 @@ export class DraftrollOverlayRenderer implements DiceRenderer {
           outcomes,
         },
         options.signal,
+        () => {
+          if (generation !== this.presentationGeneration) return;
+          frameReady = true;
+          this.setIframeActive(true);
+        },
       );
       const completion = response.completion;
       if (generation !== this.presentationGeneration) {
@@ -597,6 +609,7 @@ export class DraftrollOverlayRenderer implements DiceRenderer {
           );
         return completion;
       }
+      if (!frameReady) this.setIframeActive(true);
       this.panel?.show(result, 'complete');
       if (!completion)
         throw new DraftrollError(
@@ -664,12 +677,18 @@ export class DraftrollOverlayRenderer implements DiceRenderer {
    * Clears retained state and visible output.
    */
   async clear(): Promise<void> {
-    await this.mount();
     this.presentationGeneration += 1;
     this.dismissArmed = false;
-    await this.command({ type: 'clear' });
+    if (this.pointerDismissTimer !== null) {
+      clearTimeout(this.pointerDismissTimer);
+      this.pointerDismissTimer = null;
+    }
+    // Hide synchronously. Waiting for the iframe command round-trip exposes
+    // its last composited WebGL frame while the underlying scene is clearing.
     this.setIframeActive(false);
     this.panel?.hide();
+    await this.mount();
+    await this.command({ type: 'clear' });
     this.emitLifecycle('cleared', {});
   }
 
@@ -862,6 +881,7 @@ export class DraftrollOverlayRenderer implements DiceRenderer {
   private command(
     command: DraftrollOverlayCommand,
     signal?: AbortSignal,
+    onFrameReady?: () => void,
   ): Promise<OverlayCompleteMessage> {
     throwIfAborted(signal, `Overlay command '${command.type}'`);
     const target = this.iframe?.contentWindow;
@@ -899,6 +919,7 @@ export class DraftrollOverlayRenderer implements DiceRenderer {
           cleanupAbort();
           reject(error);
         },
+        onFrameReady,
         cleanupAbort,
       });
       target.postMessage(message, this.targetOrigin);
@@ -952,6 +973,10 @@ export class DraftrollOverlayRenderer implements DiceRenderer {
     if (!message.requestId) return;
     const pending = this.pending.get(message.requestId);
     if (!pending) return;
+    if (message.type === 'frame-ready') {
+      pending.onFrameReady?.();
+      return;
+    }
     this.pending.delete(message.requestId);
     if (message.type === 'error')
       pending.reject(
@@ -1295,7 +1320,10 @@ function isOverlayMessage(value: unknown): value is DraftrollOverlayMessage {
   return (
     candidate.source === DRAFTROLL_OVERLAY_SOURCE &&
     candidate.version === DRAFTROLL_OVERLAY_PROTOCOL_VERSION &&
-    (candidate.type === 'ready' || candidate.type === 'complete' || candidate.type === 'error')
+    (candidate.type === 'ready' ||
+      candidate.type === 'frame-ready' ||
+      candidate.type === 'complete' ||
+      candidate.type === 'error')
   );
 }
 

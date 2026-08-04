@@ -3058,6 +3058,14 @@ function beginPlanPlayback(
   applyPlanTransform(plan, planTime);
   const fallbackProgress = plan.duration > 0 ? planTime / plan.duration : 1;
   fallbackVisuals.forEach((visual) => visual.update(fallbackProgress, plan.duration));
+  if (OVERLAY_MODE) {
+    // Paint the first committed frame before notifying the host. The host keeps
+    // its iframe hidden until this exact signal, avoiding both a retained old
+    // frame and a blank visibility handoff while planning is still in progress.
+    renderer.render(scene, camera);
+    canvas.style.visibility = '';
+    window.dispatchEvent(new Event('draftroll:frame-ready'));
+  }
   requestRender();
   if (settleImmediately) {
     fallbackVisuals.forEach((visual) => visual.settle());
@@ -4571,6 +4579,14 @@ window.draftrollDice = {
     resultPanel.classList.remove('revealed', 'critical');
     resultTotal.textContent = '—';
     resultDetail.textContent = 'Ready';
+    // The host can hide and later reuse the overlay iframe before a scheduled
+    // render has painted the empty scene. Clear the transparent backbuffer now
+    // so the browser cannot composite the previous roll for a frame when the
+    // iframe is shown again.
+    if (OVERLAY_MODE) {
+      canvas.style.visibility = 'hidden';
+      renderer.clear(true, true, true);
+    }
     notifyRendererIdle();
     requestRender();
   },

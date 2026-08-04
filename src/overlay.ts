@@ -159,10 +159,32 @@ async function handleCommand(message: DraftrollHostMessage, event: MessageEvent)
       const outcome = message.outcomes?.[index];
       if (outcome) outcomeById.set(die.id, outcome);
     });
-    const completion = await overlayRenderer.playRoll(message.result, {
-      ...message.options,
-      outcomeResolver: message.outcomes ? (die) => outcomeById.get(die.id) ?? 'neutral' : undefined,
-    });
+    let frameReady = false;
+    const signalFrameReady = () => {
+      if (frameReady) return;
+      frameReady = true;
+      respond(event, {
+        source: DRAFTROLL_OVERLAY_SOURCE,
+        version: DRAFTROLL_OVERLAY_PROTOCOL_VERSION,
+        type: 'frame-ready',
+        requestId: message.requestId,
+      });
+    };
+    window.addEventListener('draftroll:frame-ready', signalFrameReady, { once: true });
+    let completion;
+    try {
+      completion = await overlayRenderer.playRoll(message.result, {
+        ...message.options,
+        outcomeResolver: message.outcomes
+          ? (die) => outcomeById.get(die.id) ?? 'neutral'
+          : undefined,
+      });
+      // A custom bridge may complete without the browser engine event. Reveal
+      // its completed frame instead of leaving the host permanently hidden.
+      signalFrameReady();
+    } finally {
+      window.removeEventListener('draftroll:frame-ready', signalFrameReady);
+    }
     respond(event, {
       source: DRAFTROLL_OVERLAY_SOURCE,
       version: DRAFTROLL_OVERLAY_PROTOCOL_VERSION,

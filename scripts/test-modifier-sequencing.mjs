@@ -522,10 +522,13 @@ try {
     return overlayPreflight;
   };
   delayedOverlay.command = async (message) => {
-    overlayCommands.push(message.type);
+    overlayCommands.push(`command:${message.type}`);
     return { completion: null };
   };
-  delayedOverlay.setIframeActive = (active) => overlayVisibility.push(active);
+  delayedOverlay.setIframeActive = (active) => {
+    overlayVisibility.push(active);
+    overlayCommands.push(`visible:${String(active)}`);
+  };
 
   const staleOverlayPresentation = delayedOverlay.playRoll(revisionBase);
   await overlayPreflightStarted;
@@ -536,12 +539,42 @@ try {
     /cleared before it started/,
     'clear during overlay setup must prevent the stale roll from reaching the iframe',
   );
-  assert.deepEqual(overlayCommands, ['clear']);
+  assert.deepEqual(
+    overlayCommands,
+    ['visible:false', 'command:clear'],
+    'the host must hide the retained canvas frame before asking the iframe to clear',
+  );
   assert.equal(
     overlayVisibility.includes(true),
     false,
     'a cleared overlay preflight must not reactivate the iframe',
   );
+
+  const frameReadyEvents = [];
+  const frameReadyOverlay = new DraftrollOverlayRenderer();
+  frameReadyOverlay.mount = async () => {};
+  frameReadyOverlay.ensurePerformanceConfiguration = async () => {};
+  frameReadyOverlay.setIframeActive = (active) =>
+    frameReadyEvents.push(`visible:${String(active)}`);
+  frameReadyOverlay.command = async (message, _signal, onFrameReady) => {
+    frameReadyEvents.push(`command:${message.type}`);
+    assert.equal(
+      frameReadyEvents.includes('visible:true'),
+      false,
+      'the iframe must stay hidden while its new frame is still being prepared',
+    );
+    onFrameReady();
+    frameReadyEvents.push('frame-ready');
+    return {
+      completion: {
+        results: revisionBase.dice.map((die) => die.result),
+        total: revisionBase.total,
+        replay: null,
+      },
+    };
+  };
+  await frameReadyOverlay.playRoll(revisionBase);
+  assert.deepEqual(frameReadyEvents, ['command:play', 'visible:true', 'frame-ready']);
 
   await explosionRenderer.playRoll(shorthandExplosion);
   assert.deepEqual(
