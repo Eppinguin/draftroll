@@ -1081,9 +1081,10 @@ function spawnFallbackVisuals(specs: readonly DraftrollFallbackVisual[], seed: s
   clearFallbackVisuals();
   if (specs.length === 0) return;
   const random = createSeededRandom(`${seed}:fallbacks`);
+  const occupied: THREE.Vector2[] = [];
   fallbackVisuals = specs.map((spec, index) => {
     const visual = new FallbackVisualInstance(spec);
-    visual.configureTrajectory(index, specs.length, screenBounds, random);
+    visual.configureTrajectory(index, specs.length, screenBounds, random, occupied);
     scene.add(visual.group);
     return visual;
   });
@@ -1301,7 +1302,7 @@ function spawnPreview(
     const theme = activeThemes[i] ?? selectedTheme;
     const diePhysics = activePhysics[i] ?? {};
     const die = new DieInstance(kind, theme, dicePhysicsMaterial, {
-      mass: 1.12 * (diePhysics.massScale ?? 1),
+      mass: baseDieMass(kind) * (diePhysics.massScale ?? 1),
       sizeScale: diePhysics.sizeScale,
       inertiaScale: diePhysics.inertiaScale,
     });
@@ -1427,9 +1428,17 @@ function resolveOutcomes(results: number[]): EffectOutcome[] {
 
 function showPresetError(): void {
   presetInput.classList.add('invalid');
-  const ranges = activeKinds.map((kind) => `1–${Number(kind.slice(1))}`).join(', ');
+  const ranges = activeKinds.map((kind) => `1–${maximumDieValue(kind)}`).join(', ');
   setStatus(`Use valid values for ${ranges}`, false);
   presetInput.focus();
+}
+
+function maximumDieValue(kind: DieKind): number {
+  return kind === 'coin' ? 2 : Number(kind.slice(1));
+}
+
+function baseDieMass(kind: DieKind): number {
+  return kind === 'coin' ? 0.42 : 1.12;
 }
 
 function normalizeThemes(
@@ -1454,7 +1463,7 @@ function normalizeKinds(
     return values === null || (Array.isArray(values) && values.length === 0) ? [] : null;
   if (values === null) return Array.from({ length: expectedCount }, () => selectedKind);
   const source = Array.isArray(values) ? values : [values];
-  const valid = new Set<DieKind>(['d4', 'd6', 'd8', 'd10', 'd12', 'd20']);
+  const valid = new Set<DieKind>(['coin', 'd4', 'd6', 'd8', 'd10', 'd12', 'd20']);
   if (source.some((kind) => !valid.has(kind))) return null;
   if (source.length === 1) return Array.from({ length: expectedCount }, () => source[0]);
   if (source.length !== expectedCount) return null;
@@ -2110,11 +2119,22 @@ function createLaunchStatesForGroup(
     const quaternion = new CANNON.Quaternion();
     const sharedPitch = -0.28 + (random() - 0.5) * 0.28;
     const sharedYaw = Math.atan2(throwDirection.x, -throwDirection.y) + (random() - 0.5) * 0.46;
-    quaternion.setFromEuler(
-      sharedPitch + (random() - 0.5) * Math.PI * 0.9,
-      sharedYaw + (random() - 0.5) * Math.PI * 0.75,
-      (random() - 0.5) * Math.PI * 1.15,
-    );
+    if (die.kind === 'coin') {
+      // Release the coin face-up with a little wrist tilt. Its angular velocity
+      // below supplies the visible end-over-end flip; starting from an arbitrary
+      // 3D orientation makes the same motion read as an aimless spinning disc.
+      quaternion.setFromEuler(
+        (random() - 0.5) * 0.32,
+        sharedYaw + (random() - 0.5) * Math.PI,
+        (random() - 0.5) * 0.32,
+      );
+    } else {
+      quaternion.setFromEuler(
+        sharedPitch + (random() - 0.5) * Math.PI * 0.9,
+        sharedYaw + (random() - 0.5) * Math.PI * 0.75,
+        (random() - 0.5) * Math.PI * 1.15,
+      );
+    }
     const target = targets[index];
     const radius = DIE_COLLIDER_RADIUS[die.kind];
     const rollingRadius = Math.max(0.44, radius * 0.9);
@@ -2159,15 +2179,22 @@ function createLaunchStatesForGroup(
     const rollingZ = -velocityX / rollingRadius;
     const rollingBlend = crowded ? 0.82 : largePool ? 0.77 : 0.7;
     const tumble = crowded ? 4.15 : largePool ? 4.45 : 4.25;
-    const angularVelocity = new CANNON.Vec3(
-      rollingX * rollingBlend +
-        (random() - 0.5) * tumble +
-        throwDirection.y * globalWristTwist * 0.34,
-      globalWristTwist + (random() - 0.5) * (crowded ? 3.0 : 4.0),
-      rollingZ * rollingBlend +
-        (random() - 0.5) * tumble -
-        throwDirection.x * globalWristTwist * 0.34,
-    );
+    const angularVelocity =
+      die.kind === 'coin'
+        ? new CANNON.Vec3(
+            rollingX * 1.22 + (random() - 0.5) * 1.25,
+            globalWristTwist * 0.12 + (random() - 0.5) * 0.7,
+            rollingZ * 1.22 + (random() - 0.5) * 1.25,
+          )
+        : new CANNON.Vec3(
+            rollingX * rollingBlend +
+              (random() - 0.5) * tumble +
+              throwDirection.y * globalWristTwist * 0.34,
+            globalWristTwist + (random() - 0.5) * (crowded ? 3.0 : 4.0),
+            rollingZ * rollingBlend +
+              (random() - 0.5) * tumble -
+              throwDirection.x * globalWristTwist * 0.34,
+          );
 
     const forwardPhase = THREE.MathUtils.clamp((localForward + 1.4) / 2.8, 0, 1);
     const heightPhase = THREE.MathUtils.clamp((relativeY + 2.2) / 4.4, 0, 1);
@@ -2967,7 +2994,7 @@ function beginPlanPlayback(
   // a preview pose, a provisional spawn layout, or an earlier candidate.
   applyPlanTransform(plan, planTime);
   const fallbackProgress = plan.duration > 0 ? planTime / plan.duration : 1;
-  fallbackVisuals.forEach((visual) => visual.update(fallbackProgress));
+  fallbackVisuals.forEach((visual) => visual.update(fallbackProgress, plan.duration));
   requestRender();
   if (settleImmediately) {
     fallbackVisuals.forEach((visual) => visual.settle());
@@ -3015,7 +3042,7 @@ function playRecordedReplay(
     replay.dieKinds?.length === replay.quantity
       ? replay.dieKinds.slice()
       : Array.from({ length: replay.quantity }, () => replay.dieKind);
-  const supportedKinds = new Set<DieKind>(['d4', 'd6', 'd8', 'd10', 'd12', 'd20']);
+  const supportedKinds = new Set<DieKind>(['coin', 'd4', 'd6', 'd8', 'd10', 'd12', 'd20']);
   if (replayKinds.some((kind) => !supportedKinds.has(kind)))
     return Promise.reject(new Error('Replay die type is unsupported'));
   const totalVisuals = replay.quantity + replayFallbacks.length;
@@ -3118,8 +3145,11 @@ function createRollCompletionPromise(): Promise<DraftrollRollCompletion> {
   return registerRollCompletion().promise;
 }
 
-function createFallbackOnlyPlan(count: number): RollPlan {
-  const duration = 1.45 + Math.min(0.85, count * 0.045);
+function createFallbackOnlyPlan(specs: readonly DraftrollFallbackVisual[]): RollPlan {
+  const count = specs.length;
+  const duration = specs.some((spec) => spec.kind === 'coin')
+    ? 2.05 + Math.min(0.2, count * 0.012)
+    : 1.45 + Math.min(0.85, count * 0.045);
   const step = FIXED_STEP;
   return {
     step,
@@ -3223,11 +3253,11 @@ function normalizeAdditivePhysicalRequest(
       ? Array.from({ length: results.length }, () => rawKinds[0])
       : rawKinds.slice();
   if (kinds.length !== results.length) return null;
-  const supported = new Set<DieKind>(['d4', 'd6', 'd8', 'd10', 'd12', 'd20']);
+  const supported = new Set<DieKind>(['coin', 'd4', 'd6', 'd8', 'd10', 'd12', 'd20']);
   if (
     kinds.some(
       (kind, index) =>
-        !supported.has(kind) || results[index] < 1 || results[index] > Number(kind.slice(1)),
+        !supported.has(kind) || results[index] < 1 || results[index] > maximumDieValue(kind),
     )
   )
     return null;
@@ -3260,7 +3290,7 @@ function normalizeAdditivePhysicalRequest(
       explicit === 'none'
     )
       return explicit;
-    const maximum = Number(kinds[index].slice(1));
+    const maximum = maximumDieValue(kinds[index]);
     if (value === maximum) return 'positive';
     if (value === 1 && maximum !== 2) return 'negative';
     return 'neutral';
@@ -3412,7 +3442,7 @@ function appendPhysicalDice(
   kinds.forEach((kind, index) => {
     const properties = physics[index] ?? {};
     const die = new DieInstance(kind, themes[index] ?? selectedTheme, dicePhysicsMaterial, {
-      mass: 1.12 * (properties.massScale ?? 1),
+      mass: baseDieMass(kind) * (properties.massScale ?? 1),
       sizeScale: properties.sizeScale,
       inertiaScale: properties.inertiaScale,
     });
@@ -3435,9 +3465,10 @@ function appendFallbackVisuals(
   const start = fallbackVisuals.length;
   const total = start + specs.length;
   const random = createSeededRandom(`${seed}:additive-fallbacks`);
+  const occupied = fallbackVisuals.map((visual) => visual.getSettledPosition());
   const appended = specs.map((spec, offset) => {
     const visual = new FallbackVisualInstance(spec);
-    visual.configureTrajectory(start + offset, total, screenBounds, random);
+    visual.configureTrajectory(start + offset, total, screenBounds, random, occupied);
     scene.add(visual.group);
     fallbackVisuals.push(visual);
     return visual;
@@ -3725,9 +3756,7 @@ async function appendTableRoll(request: DiceRollRequest): Promise<DraftrollRollC
     const plan =
       newStates.length > 0
         ? await buildRollPlan([...existingStates, ...newStates], existingCount, lockedTrajectory)
-        : createStaticTablePlan(
-            createFallbackOnlyPlan(Math.max(1, appendedFallbacks.length)).duration,
-          );
+        : createStaticTablePlan(createFallbackOnlyPlan(normalized.fallbacks).duration);
     appended.forEach((die) => {
       die.group.visible = true;
     });
@@ -3789,7 +3818,7 @@ async function castDice(swipe?: THREE.Vector2): Promise<DraftrollRollCompletion>
   let plan: RollPlan;
   if (quantity === 0) {
     activeOutcomes = [];
-    plan = createFallbackOnlyPlan(activeFallbackSpecs.length);
+    plan = createFallbackOnlyPlan(activeFallbackSpecs);
   } else {
     const states = createLaunchStates(swipe, activeSeed);
     // Never leave preview/layout transforms visible while an off-screen plan is
@@ -3947,7 +3976,7 @@ function markOutcomeEffectsThrough(plan: RollPlan, time: number): void {
   );
   consumeSettledVisualIndexes(
     activeFallbackSpecs.map((_spec, index) => fallbackVisualId(index)),
-    activeFallbackSpecs.map(() => plan.duration),
+    fallbackVisuals.map((visual) => visual.getSettleTime(plan.duration)),
     time,
     playedOutcomeEffectIds,
   );
@@ -3971,7 +4000,7 @@ function playSettledOutcomeEffects(plan: RollPlan, currentTime: number): void {
   );
   const fallbackIndexes = consumeSettledVisualIndexes(
     activeFallbackSpecs.map((_spec, index) => fallbackVisualId(index)),
-    activeFallbackSpecs.map(() => plan.duration),
+    fallbackVisuals.map((visual) => visual.getSettleTime(plan.duration)),
     currentTime,
     playedOutcomeEffectIds,
   );
@@ -4804,7 +4833,8 @@ function animate(timestamp: number): void {
     if (!tableReplanPaused) planTime = Math.min(activePlan.duration, planTime + dt);
     applyPlanTransform(activePlan, planTime);
     const fallbackProgress = activePlan.duration > 0 ? planTime / activePlan.duration : 1;
-    fallbackVisuals.forEach((visual) => visual.update(fallbackProgress));
+    const fallbackPlanDuration = activePlan.duration;
+    fallbackVisuals.forEach((visual) => visual.update(fallbackProgress, fallbackPlanDuration));
     if (!tableReplanPaused) {
       playImpacts(activePlan, previousTime, planTime);
       playSettledOutcomeEffects(activePlan, planTime);

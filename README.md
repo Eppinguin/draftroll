@@ -71,7 +71,7 @@ A top-down, screen-filling polyhedral dice engine built with Three.js, Cannon-es
 
 - d4, d6, d8, d10, d12, and d20 dice
 - Mixed d4, d6, d8, d10, d12, and d20 rolls in one physical simulation
-- Synchronized coin, percentile, Fate, arbitrary-die, symbolic, and weighted/custom result fallbacks
+- Physical colliding d2 coins plus synchronized custom coin, percentile, Fate, arbitrary-die, symbolic, and weighted/custom result fallbacks
 - Mixed physical dice and fallback tokens/cards in the same roll, up to 30 visual components
 - Deterministic synchronized-start scheduling with adaptive room buffers and late-event replay seeking
 - Fixed-step rigid-body simulation with collisions, rebounds, damping, and impact audio

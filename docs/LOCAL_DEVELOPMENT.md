@@ -143,7 +143,7 @@ Open `http://127.0.0.1:5173`. The client is a minimal character sheet rather tha
 - whole-roll and individual-die rerolls
 - formula/name/theme revisions with animated or log-only updates
 
-The built-in mixed examples include `1d20+7+1d4`, `2d6+1d8+3`, and the universal fallback test `1d20+1d2+1dF+1d9+1d100`. Supported d4/d6/d8/d10/d12/d20 dice share one physical simulation; unsupported shapes join that same presentation as synchronized coin, percentile, Fate, spinner, token, or card visuals.
+The built-in mixed examples include `1d20+7+1d4`, `2d6+1d8+3`, and the universal fallback test `1d20+1d2+1dF+1d9+1d100`. Supported d2/d4/d6/d8/d10/d12/d20 dice share one physical simulation; unsupported shapes join that same presentation as synchronized coin, percentile, Fate, spinner, token, or card visuals.
 
 See `docs/CHARACTER_SHEET_TEST_CLIENT.md` for the complete workflow and protocol fields. The character sheet remains a development host and is not part of the Worker service.
 

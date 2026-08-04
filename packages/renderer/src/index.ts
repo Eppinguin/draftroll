@@ -45,11 +45,11 @@ import {
 } from '../../errors/src/index';
 
 /**
- * Physical polyhedral die kinds supported by the renderer.
+ * Physical die kinds supported by the renderer.
  *
  * @public
  */
-export type DraftrollDieKind = 'd4' | 'd6' | 'd8' | 'd10' | 'd12' | 'd20';
+export type DraftrollDieKind = 'coin' | 'd4' | 'd6' | 'd8' | 'd10' | 'd12' | 'd20';
 /**
  * Non-polyhedral fallback visual kinds supported by the renderer.
  *
@@ -96,6 +96,8 @@ export interface DraftrollFallbackVisual {
   sides?: number;
   title: string;
   label: string;
+  /** Label painted on the reverse side when the fallback is a two-sided coin. */
+  oppositeLabel?: string;
   theme: string;
   outcome: DraftrollEffectOutcome;
   metadata?: Record<string, unknown>;
@@ -906,7 +908,7 @@ export class DraftrollRenderer implements DiceRenderer {
         physicalKind !== null &&
         Number.isInteger(numericResult) &&
         numericResult >= 1 &&
-        numericResult <= Number(physicalKind.slice(1)) &&
+        numericResult <= maximumPhysicalValue(physicalKind) &&
         (physicalFace !== null || !isDistinctFallbackType(die.type));
       const outcome =
         options.outcomeResolver?.(die, result) ?? defaultOutcomeForDie(die, physicalKind);
@@ -1540,6 +1542,7 @@ function getWindowBridge(): DraftrollBridge | null {
 
 function normalizeKind(type: string, sides?: number): DraftrollDieKind | null {
   const normalized = type.toLowerCase();
+  if (normalized === 'd2') return 'coin';
   if (
     normalized === 'd4' ||
     normalized === 'd6' ||
@@ -1551,6 +1554,7 @@ function normalizeKind(type: string, sides?: number): DraftrollDieKind | null {
     return normalized;
   }
   const inferred = sides ? `d${sides}` : '';
+  if (inferred === 'd2') return 'coin';
   return inferred === 'd4' ||
     inferred === 'd6' ||
     inferred === 'd8' ||
@@ -1561,13 +1565,17 @@ function normalizeKind(type: string, sides?: number): DraftrollDieKind | null {
     : null;
 }
 
+function maximumPhysicalValue(kind: DraftrollDieKind): number {
+  return kind === 'coin' ? 2 : Number(kind.slice(1));
+}
+
 function resolvePhysicalFace(
   die: NormalizedDieResult,
   definition: CustomDiceDefinition | undefined,
 ): { kind: DraftrollDieKind; value: number } | null {
   const kind = normalizeKind(definition?.renderAs ?? '', undefined);
   if (!definition || !kind) return null;
-  const maximum = Number(kind.slice(1));
+  const maximum = maximumPhysicalValue(kind);
   let faceIndex = die.faceIndex;
   if (faceIndex === undefined) {
     const matches = definition.faces
@@ -1701,6 +1709,7 @@ function stageGenerationSource(
 function isDistinctFallbackType(type: string): boolean {
   const normalized = type.toLowerCase();
   return (
+    normalized === 'coin' ||
     normalized === 'd10x' ||
     normalized === 'd%' ||
     normalized === 'd100' ||
@@ -1729,6 +1738,7 @@ function createFallbackVisual(
     sides: die.sides,
     title,
     label,
+    oppositeLabel: kind === 'coin' ? readOppositeCoinLabel(die, definition) : undefined,
     theme,
     outcome,
     metadata: {
@@ -1738,6 +1748,37 @@ function createFallbackVisual(
       ...(die.faceIndex !== undefined ? { faceIndex: die.faceIndex } : {}),
     },
   };
+}
+
+function readOppositeCoinLabel(
+  die: NormalizedDieResult,
+  definition: CustomDiceDefinition | undefined,
+): string | undefined {
+  if (definition?.faces.length === 2) {
+    const selectedIndex =
+      die.faceIndex !== undefined
+        ? die.faceIndex
+        : definition.faces.findIndex((face) => face.result === die.result);
+    if (selectedIndex === 0 || selectedIndex === 1) {
+      const opposite = definition.faces[1 - selectedIndex];
+      return opposite.label ?? String(opposite.result);
+    }
+  }
+
+  const normalizedType = die.type.toLowerCase();
+  if (typeof die.result === 'number') {
+    if (normalizedType === 'd2' || (die.sides === 2 && die.result >= 1)) {
+      if (die.result === 1 || die.result === 2) return String(3 - die.result);
+    }
+    if (normalizedType === 'coin' && (die.result === 0 || die.result === 1)) {
+      return String(1 - die.result);
+    }
+  }
+
+  const result = String(die.result).toLowerCase();
+  if (result === 'heads') return 'Tails';
+  if (result === 'tails') return 'Heads';
+  return undefined;
 }
 
 function normalizeFallbackKind(
@@ -1818,7 +1859,7 @@ function defaultOutcomeForDie(
       if (value < 0) return 'negative';
       return 'neutral';
     }
-    const maximum = physicalKind ? Number(physicalKind.slice(1)) : die.sides;
+    const maximum = physicalKind ? maximumPhysicalValue(physicalKind) : die.sides;
     if (maximum !== undefined && value === maximum) return 'positive';
     if (value === 1 && maximum !== 2) return 'negative';
   }

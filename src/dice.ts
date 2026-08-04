@@ -14,6 +14,7 @@ import {
 export { THEMES, type ThemeName, type ThemePalette } from './themes';
 
 const VALUE_ORDERS: Record<Exclude<DieKind, 'd4'>, number[]> = {
+  coin: [1, 2],
   d6: [1, 6, 2, 5, 3, 4],
   d8: [8, 3, 6, 1, 5, 2, 7, 4],
   d10: [1, 8, 3, 6, 5, 10, 7, 4, 9, 2],
@@ -328,6 +329,12 @@ function createGeometry(kind: DieKind): GeometrySet {
   const radius = DIE_RADIUS[kind];
   let geometry: GeometrySet;
   switch (kind) {
+    case 'coin': {
+      const collider = new THREE.CylinderGeometry(radius, radius, 0.16, 64, 1, false);
+      const visual = collider.clone();
+      geometry = { visual, collider };
+      break;
+    }
     case 'd4': {
       const collider = new THREE.TetrahedronGeometry(radius, 0);
       const visual = collider.clone();
@@ -399,7 +406,12 @@ function createThemedVisual(theme: ThemeName, kind: DieKind): THREE.BufferGeomet
   const radius = DIE_RADIUS[kind];
 
   let visual: THREE.BufferGeometry;
-  if (kind === 'd6') {
+  if (kind === 'coin') {
+    // A coin's manufactured edge is already represented by the cylinder mesh;
+    // polyhedral chamfer reconstruction would incorrectly turn its rim segments
+    // into dozens of independent die faces.
+    visual = createGeometry(kind).visual.clone();
+  } else if (kind === 'd6') {
     // The d6 is a rounded box, so the profile drives its corner radius directly.
     const size = radius * 1.72;
     visual = new RoundedBoxGeometry(
@@ -490,6 +502,30 @@ function groupCoplanarTriangles(triangles: TriangleData[]): Array<{
 function getLogicalFaceTemplate(kind: DieKind): LogicalFace[] {
   const cached = logicalFaceCache.get(kind);
   if (cached) return cached;
+  if (kind === 'coin') {
+    const radius = DIE_RADIUS.coin * 0.9;
+    const ring = (y: number, reverse: boolean): THREE.Vector3[] =>
+      Array.from({ length: 24 }, (_entry, index) => {
+        const angle = ((reverse ? 23 - index : index) / 24) * Math.PI * 2;
+        return new THREE.Vector3(Math.cos(angle) * radius, y, Math.sin(angle) * radius);
+      });
+    const faces: LogicalFace[] = [
+      {
+        normal: new THREE.Vector3(0, 1, 0),
+        center: new THREE.Vector3(0, 0.08, 0),
+        vertices: ring(0.08, false),
+        value: 1,
+      },
+      {
+        normal: new THREE.Vector3(0, -1, 0),
+        center: new THREE.Vector3(0, -0.08, 0),
+        vertices: ring(-0.08, true),
+        value: 2,
+      },
+    ];
+    logicalFaceCache.set(kind, faces);
+    return faces;
+  }
   const triangles = getTriangleData(createGeometry(kind).collider);
   const groups = groupCoplanarTriangles(triangles);
 
@@ -753,6 +789,7 @@ function createLabelSet(
     }
   } else {
     const scaleByKind: Record<Exclude<DieKind, 'd4'>, [number, number]> = {
+      coin: [0.54, 0.54],
       d6: [0.42, 0.42],
       d8: [0.31, 0.31],
       d10: [0.31, 0.31],
@@ -1720,7 +1757,7 @@ function getMainMaterial(theme: ThemeName, kind: DieKind, variant = 0): THREE.Me
     sheen: theme === 'wildwood' ? 0.14 : theme === 'necrotic' ? 0.08 : 0.04,
     sheenColor: new THREE.Color(palette.edge),
     sheenRoughness: 0.72,
-    flatShading: kind !== 'd6',
+    flatShading: kind !== 'd6' && kind !== 'coin',
   });
   installSurfaceVariation(material, SURFACE_VARIANT_OFFSETS[normalizedVariant]);
   mainMaterialCache.set(key, material);
@@ -1749,7 +1786,10 @@ function getEdgeGeometry(kind: DieKind, theme: ThemeName): THREE.EdgesGeometry {
   const key = `${theme}:${kind}`;
   const cached = edgeGeometryCache.get(key);
   if (cached) return cached;
-  const geometry = new THREE.EdgesGeometry(getVisualGeometry(theme, kind), kind === 'd6' ? 32 : 10);
+  const geometry = new THREE.EdgesGeometry(
+    getVisualGeometry(theme, kind),
+    kind === 'd6' || kind === 'coin' ? 32 : 10,
+  );
   edgeGeometryCache.set(key, geometry);
   return geometry;
 }
@@ -1790,7 +1830,7 @@ export function invalidateDiceThemeResources(theme: ThemeName): void {
 
 export function prewarmDiceTheme(theme: ThemeName): void {
   getLabelMaterial(theme, 'd20');
-  (['d4', 'd6', 'd8', 'd10', 'd12', 'd20'] as DieKind[]).forEach((kind) => {
+  (['coin', 'd4', 'd6', 'd8', 'd10', 'd12', 'd20'] as DieKind[]).forEach((kind) => {
     getMainMaterial(theme, kind, 0);
     getEdgeMaterial(theme);
     getEdgeGeometry(kind, theme);
@@ -1898,7 +1938,7 @@ export class DieInstance {
     this.sizeScale = THREE.MathUtils.clamp(resolved.sizeScale ?? 1, 0.5, 2);
     this.inertiaScale = THREE.MathUtils.clamp(resolved.inertiaScale ?? 1, 0.25, 4);
     this.kind = kind;
-    this.maxValue = Number(kind.slice(1));
+    this.maxValue = kind === 'coin' ? 2 : Number(kind.slice(1));
     this.currentTheme = theme;
     this.faces = cloneLogicalFaces(kind);
     this.baseFaceValues = this.faces.map((face) => face.value);
@@ -2157,7 +2197,7 @@ export class DieInstance {
    * result direction onto another. Applying this rotation in local space to
    * every frame preserves the physical shape and the complete trajectory; it
    * only changes the die's initial orientation. This is exact for the regular
-   * Draftroll d4/d6/d8/d10/d12/d20 colliders.
+   * Draftroll coin/d4/d6/d8/d10/d12/d20 colliders.
    */
   getResultSymmetryRotation(fromValue: number, toValue: number): THREE.Quaternion {
     const from = THREE.MathUtils.clamp(Math.round(fromValue), 1, this.maxValue);
@@ -2166,6 +2206,12 @@ export class DieInstance {
     const cacheKey = `${this.kind}:${from}:${to}`;
     const cached = DieInstance.symmetryRotationCache.get(cacheKey);
     if (cached) return cached.clone();
+
+    if (this.kind === 'coin') {
+      const rotation = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI);
+      DieInstance.symmetryRotationCache.set(cacheKey, rotation.clone());
+      return rotation;
+    }
 
     const normals = Array.from({ length: this.maxValue }, (_entry, index) =>
       this.getTargetNormal(index + 1),

@@ -462,7 +462,7 @@ Rate-limit failures use `DiceRoomRequestError` with `code === 'rate_limited'`, `
 
 ## Physical renderer boundary
 
-The supplied 3D engine can combine `d4`, `d6`, `d8`, `d10`, `d12`, and `d20` in one physical throw. Each physical die has its own Three.js mesh, Cannon collision shape, requested result, theme, trajectory, and replay entry. d2/coins, percentile results, Fate dice, arbitrary dN, symbolic faces, and weighted/custom table results are represented by synchronized coin, spinner, token, or card visuals. Physical and fallback components can share one roll, and fallback-only rolls are supported. See `VISUAL_FALLBACKS.md`.
+The supplied 3D engine can combine `d2`, `d4`, `d6`, `d8`, `d10`, `d12`, and `d20` in one physical throw. Each physical die has its own Three.js mesh, Cannon collision shape, requested result, theme, trajectory, and replay entry; d2 uses a thin coin body that collides with the other dice. Custom coins, percentile results, Fate dice, arbitrary dN, symbolic faces, and weighted/custom table results are represented by synchronized coin, spinner, token, or card visuals. Physical and fallback components can share one roll, and fallback-only rolls are supported. See `VISUAL_FALLBACKS.md`.
 
 ## High-level realtime rooms
 

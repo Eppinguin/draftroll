@@ -464,6 +464,7 @@ function readFinite(value: unknown, fallback: number): number {
 
 function isPhysicalKind(value: string): value is DieKind {
   return (
+    value === 'coin' ||
     value === 'd4' ||
     value === 'd6' ||
     value === 'd8' ||

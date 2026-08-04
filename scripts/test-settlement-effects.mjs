@@ -98,6 +98,14 @@ try {
     'settled effects are not deduplicated by visual identity',
   );
   assert.ok(
+    main.includes('fallbackVisuals.map((visual) => visual.getSettleTime(plan.duration))'),
+    'fallback effects must use each visual instance settlement time',
+  );
+  assert.ok(
+    !main.includes('activeFallbackSpecs.map(() => plan.duration)'),
+    'fallback effects must not wait for the complete mixed-roll plan',
+  );
+  assert.ok(
     main.includes('time: settleTimes[dieIndex] ?? plan.duration'),
     'replay effect timelines are not aligned to per-die settlement',
   );
@@ -114,6 +122,7 @@ try {
           'additive-plan old-die deduplication',
           'no roll-completion effect replay',
           'animation-loop settlement dispatch',
+          'per-fallback settlement dispatch',
           'replay settlement timeline',
         ],
       },
