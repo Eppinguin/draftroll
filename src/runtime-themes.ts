@@ -11,6 +11,7 @@ import type { DieKind } from './physics-shapes';
 import {
   THEMES,
   THEME_MANIFESTS,
+  type ThemeGeometryProfile,
   type ThemeManifest,
   type ThemePalette,
   type ThemeSurfaceAudio,
@@ -159,6 +160,7 @@ function createPalette(theme: DiceTheme): ThemePalette {
   return {
     name: theme.name,
     surface: 'dragon-scale',
+    geometry: readGeometryProfile(theme.metadata?.geometry, fallback.geometry),
     base: parseColor(material.color, fallback.base),
     edge: parseColor(theme.metadata?.edgeColor, fallback.edge),
     emissive: parseColor(material.emissive, fallback.emissive),
@@ -420,6 +422,26 @@ function parseColor(value: unknown, fallback: number): number {
 
 function readNumber(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+/** Clamps an untrusted number into a range, falling back when absent or invalid. */
+function readClamped(value: unknown, fallback: number, minimum: number, maximum: number): number {
+  const parsed = readNumber(value, fallback);
+  return Math.min(maximum, Math.max(minimum, parsed));
+}
+
+/**
+ * Reads an optional `metadata.geometry` block so runtime themes can chamfer their
+ * dice. Bounds are enforced here because manifests are untrusted input.
+ */
+function readGeometryProfile(value: unknown, fallback: ThemeGeometryProfile): ThemeGeometryProfile {
+  if (!isRecord(value)) return { ...fallback };
+  return {
+    bevel: readClamped(value.bevel, fallback.bevel, 0, 0.3),
+    bevelDepth: readClamped(value.bevelDepth, fallback.bevelDepth, 0, 1.5),
+    cornerRadius: readClamped(value.cornerRadius, fallback.cornerRadius, 0.02, 0.42),
+    faceInset: readClamped(value.faceInset, fallback.faceInset, 0.6, 1),
+  };
 }
 
 /** Narrows an unknown value to an indexable object without asserting a shape. */

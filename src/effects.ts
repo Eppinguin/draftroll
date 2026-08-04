@@ -28,6 +28,18 @@ export type EffectPresetId =
   | 'verdant-bloom'
   | 'firefly-orbit'
   | 'thorn-bind'
+  | 'escapement-lock'
+  | 'gear-tick'
+  | 'mainspring-snap'
+  | 'facet-bloom'
+  | 'vein-glimmer'
+  | 'conchoidal-break'
+  | 'quench-strike'
+  | 'anvil-spark'
+  | 'temper-crack'
+  | 'reliquary-seal'
+  | 'dust-settle'
+  | 'ossuary-crack'
   | 'major-burst'
   | 'subtle-pulse'
   | 'void-fracture'
@@ -526,6 +538,14 @@ export class DraftrollEffects {
     tempest: { positive: 'thunder-strike', neutral: 'static-crown', negative: 'storm-fizzle' },
     necrotic: { positive: 'soul-reaper', neutral: 'grave-wisp', negative: 'soul-collapse' },
     wildwood: { positive: 'verdant-bloom', neutral: 'firefly-orbit', negative: 'thorn-bind' },
+    clockwork: {
+      positive: 'escapement-lock',
+      neutral: 'gear-tick',
+      negative: 'mainspring-snap',
+    },
+    obsidian: { positive: 'facet-bloom', neutral: 'vein-glimmer', negative: 'conchoidal-break' },
+    gunmetal: { positive: 'quench-strike', neutral: 'anvil-spark', negative: 'temper-crack' },
+    reliquary: { positive: 'reliquary-seal', neutral: 'dust-settle', negative: 'ossuary-crack' },
   };
   private shakeTime = 0;
   private shakeDuration = 0;
@@ -677,6 +697,42 @@ export class DraftrollEffects {
         break;
       case 'thorn-bind':
         this.thornBind(position);
+        break;
+      case 'escapement-lock':
+        this.escapementLock(position, options.hero !== false);
+        break;
+      case 'gear-tick':
+        this.gearTick(position);
+        break;
+      case 'mainspring-snap':
+        this.mainspringSnap(position);
+        break;
+      case 'facet-bloom':
+        this.facetBloom(position, options.hero !== false);
+        break;
+      case 'vein-glimmer':
+        this.veinGlimmer(position);
+        break;
+      case 'conchoidal-break':
+        this.conchoidalBreak(position);
+        break;
+      case 'quench-strike':
+        this.quenchStrike(position, options.hero !== false);
+        break;
+      case 'anvil-spark':
+        this.anvilSpark(position);
+        break;
+      case 'temper-crack':
+        this.temperCrack(position);
+        break;
+      case 'reliquary-seal':
+        this.reliquarySeal(position, options.hero !== false);
+        break;
+      case 'dust-settle':
+        this.dustSettle(position);
+        break;
+      case 'ossuary-crack':
+        this.ossuaryCrack(position);
         break;
       case 'major-burst':
         this.majorBurst(position, color, options.hero !== false);
@@ -1038,6 +1094,159 @@ export class DraftrollEffects {
     this.createParticleBurst(position.clone().setY(0.14), 0x6f9f4a, 62, 1.05, 2.8, 4.5, 0.045);
     this.createLight(position, 0x5a8f3d, 3.1, 0.64);
     this.shake(0.48, 0.09);
+  }
+
+  // The material themes below intentionally run tighter than the arcane presets:
+  // sparks obey gravity, rings stay close to the die, and neutral rolls never shake
+  // the camera or kick bloom. The die stays the subject instead of the explosion.
+
+  private escapementLock(position: THREE.Vector3, hero: boolean): void {
+    this.triggerFlash('success');
+    // Concentric rings snap outward in stepped beats, like an escapement releasing.
+    this.createRing(position, 0xf0c674, 0.3, hero ? 2.9 : 2.2, 0.5, 0.9);
+    this.createRing(position, 0xffe6ad, 0.22, hero ? 2.0 : 1.55, 0.72, -1.6);
+    this.createOrbitingMotifs(position, 0xf3cd82, hero ? 16 : 10, 0.85, 'shard', 0.85, 1.3, 2.6);
+    this.createParticleBurst(
+      position.clone().setY(0.16),
+      0xffd98f,
+      hero ? 46 : 28,
+      0.6,
+      2.4,
+      6.4,
+      0.038,
+    );
+    this.createLight(position, 0xffc061, hero ? 3.4 : 2.2, 0.42);
+    if (hero) this.shake(0.22, 0.05);
+    this.bloomKick = Math.max(this.bloomKick, hero ? 0.2 : 0.12);
+  }
+
+  private gearTick(position: THREE.Vector3): void {
+    this.createRing(position, 0xd9ab5e, 0.28, 1.15, 0.4, 1.9);
+    this.createOrbitingMotifs(position, 0xe8b455, 7, 0.6, 'shard', 0.7, 0.92, 2.2);
+    this.createParticleBurst(position.clone().setY(0.1), 0xf0c674, 10, 0.42, 1.1, 7.0, 0.03);
+  }
+
+  private mainspringSnap(position: THREE.Vector3): void {
+    this.triggerFlash('failure');
+    // A spring letting go: one hard outward ring, then debris that drops fast.
+    this.createRing(position, 0x8a5a22, 0.24, 2.6, 0.5, -3.4);
+    this.createOrbitingMotifs(position, 0x6b4519, 14, 0.72, 'shard', 0.5, 1.5, -5.4);
+    this.createParticleBurst(position.clone().setY(0.12), 0xb9822f, 40, 0.66, 2.7, 8.2, 0.036);
+    this.createLight(position, 0xb07a2c, 2.0, 0.3);
+    this.shake(0.26, 0.06);
+  }
+
+  private facetBloom(position: THREE.Vector3, hero: boolean): void {
+    this.triggerFlash('success');
+    // Light catching along fracture planes rather than a burst of energy.
+    this.createSpikeCrown(position, 0x7ff0dc, hero ? 10 : 7, 0.9, hero ? 0.72 : 0.52, 0.92);
+    this.createRing(position, 0x7ff0dc, 0.26, hero ? 2.8 : 2.1, 0.62, 0.5);
+    this.createOrbitingMotifs(position, 0xbafff2, hero ? 18 : 11, 1.0, 'shard', 0.6, 1.35, 1.7);
+    this.createParticleBurst(
+      position.clone().setY(0.14),
+      0x6fe6cf,
+      hero ? 40 : 24,
+      0.8,
+      2.1,
+      3.4,
+      0.036,
+    );
+    this.createLight(position, 0x4fd8c0, hero ? 3.2 : 2.0, 0.5);
+    this.bloomKick = Math.max(this.bloomKick, hero ? 0.22 : 0.12);
+  }
+
+  private veinGlimmer(position: THREE.Vector3): void {
+    this.createOrbitingMotifs(position, 0x7ff0dc, 9, 0.78, 'shard', 0.62, 0.95, 1.4);
+    this.createRing(position, 0x4fd8c0, 0.2, 1.2, 0.5, 0.6);
+    this.createParticleBurst(position.clone().setY(0.1), 0xbafff2, 12, 0.5, 0.9, 2.2, 0.028);
+  }
+
+  private conchoidalBreak(position: THREE.Vector3): void {
+    this.triggerFlash('failure');
+    // Glassy stone shears into flat plates that scatter low and land hard.
+    this.createOrbitingMotifs(position, 0x2b2740, 16, 0.66, 'shard', 0.42, 1.6, -3.0);
+    this.createRing(position, 0x1d3b39, 0.22, 2.3, 0.46, -1.1);
+    this.createParticleBurst(position.clone().setY(0.11), 0x4a4668, 44, 0.6, 2.6, 9.0, 0.034);
+    this.createLight(position, 0x2f8c7e, 1.8, 0.26);
+    this.shake(0.24, 0.06);
+  }
+
+  private quenchStrike(position: THREE.Vector3, hero: boolean): void {
+    this.triggerFlash('success');
+    // Hot steel hitting the quench: a flat shock ring and a sheet of sparks.
+    this.createRing(position, 0xc3ccd6, 0.2, hero ? 3.4 : 2.5, 0.42, 0.2);
+    this.createRing(position, 0xffd9a8, 0.3, hero ? 2.2 : 1.7, 0.6, -0.5);
+    this.createParticleBurst(
+      position.clone().setY(0.15),
+      0xffc98a,
+      hero ? 64 : 38,
+      0.72,
+      3.4,
+      9.5,
+      0.034,
+    );
+    this.createParticleBurst(
+      position.clone().setY(0.2),
+      0xdfeaf6,
+      hero ? 26 : 16,
+      0.9,
+      1.8,
+      2.2,
+      0.03,
+    );
+    this.createLight(position, 0xd8e4f0, hero ? 3.6 : 2.4, 0.4);
+    if (hero) this.shake(0.24, 0.06);
+    this.bloomKick = Math.max(this.bloomKick, hero ? 0.24 : 0.12);
+  }
+
+  private anvilSpark(position: THREE.Vector3): void {
+    this.createParticleBurst(position.clone().setY(0.12), 0xffc98a, 14, 0.44, 1.7, 9.0, 0.03);
+    this.createRing(position, 0xb8c6d4, 0.22, 1.1, 0.38, 0.4);
+    this.createOrbitingMotifs(position, 0xc3ccd6, 6, 0.54, 'shard', 0.62, 0.86, 1.6);
+  }
+
+  private temperCrack(position: THREE.Vector3): void {
+    this.triggerFlash('failure');
+    // A brittle temper failure: one dull ring, grey scale flaking off, no glow.
+    this.createRing(position, 0x5c646e, 1.8, 0.26, 0.52, -1.0);
+    this.createOrbitingMotifs(position, 0x3a4048, 15, 0.7, 'shard', 0.48, 1.45, -4.2);
+    this.createParticleBurst(position.clone().setY(0.1), 0x6b737d, 38, 0.62, 2.2, 8.6, 0.032);
+    this.createLight(position, 0x8592a0, 1.5, 0.26);
+    this.shake(0.22, 0.05);
+  }
+
+  private reliquarySeal(position: THREE.Vector3, hero: boolean): void {
+    this.triggerFlash('success');
+    // A slow, ceremonial seal: warm rune, steady halo, almost no scatter.
+    this.createRune(position, 0xc9a86e, hero ? 2.6 : 2.0, 1.15, 0.22);
+    this.createRing(position, 0xd8cbab, 0.3, hero ? 2.7 : 2.0, 0.85, 0.3);
+    this.createHaloBeams(position, 0xe4d6b4, hero ? 12 : 8, 1.05, hero ? 1.5 : 1.1);
+    this.createParticleBurst(
+      position.clone().setY(0.14),
+      0xe4d6b4,
+      hero ? 32 : 20,
+      1.0,
+      1.5,
+      1.6,
+      0.034,
+    );
+    this.createLight(position, 0xd0b57e, hero ? 2.8 : 1.9, 0.6);
+    this.bloomKick = Math.max(this.bloomKick, hero ? 0.18 : 0.1);
+  }
+
+  private dustSettle(position: THREE.Vector3): void {
+    this.createParticleBurst(position.clone().setY(0.12), 0xd8cbab, 16, 0.95, 0.8, 1.1, 0.03);
+    this.createRing(position, 0x8c6a3f, 0.24, 1.1, 0.55, 0.3);
+    this.createOrbitingMotifs(position, 0xc9a86e, 7, 0.8, 'bone', 0.6, 0.9, 1.0);
+  }
+
+  private ossuaryCrack(position: THREE.Vector3): void {
+    this.triggerFlash('failure');
+    // Bone splintering: dry fragments, a settling dust cloud, no light bloom.
+    this.createOrbitingMotifs(position, 0x8c6a3f, 14, 0.78, 'bone', 0.45, 1.4, -2.6);
+    this.createRing(position, 0x6d5330, 1.7, 0.24, 0.6, -0.9);
+    this.createParticleBurst(position.clone().setY(0.11), 0xb8a781, 36, 0.85, 1.9, 6.2, 0.034);
+    this.shake(0.2, 0.05);
   }
 
   private majorBurst(position: THREE.Vector3, color: number, major: boolean): void {

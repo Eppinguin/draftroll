@@ -4,7 +4,7 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { createDiePhysicsShape, DIE_RADIUS, type DieKind } from './physics-shapes';
 export type { DieKind } from './physics-shapes';
 
-import { THEMES, type ThemeName, type ThemePalette } from './themes';
+import { THEMES, type ThemeGeometryProfile, type ThemeName, type ThemePalette } from './themes';
 import {
   getRuntimeThemeFont,
   getRuntimeThemeMaterial,
@@ -60,6 +60,12 @@ function lerpColor(a: number, b: number, t: number): string {
   return `#${ca.lerp(cb, t).getHexString()}`;
 }
 
+/** Reports whether a CSS label colour is dark enough to need a pale outline. */
+function isDarkLabel(color: string): boolean {
+  const { r, g, b } = new THREE.Color(color);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.36;
+}
+
 function createD10Geometry(radius: number): THREE.BufferGeometry {
   const vertices: number[] = [0, radius * 1.16, 0, 0, -radius * 1.16, 0];
   const indices: number[] = [];
@@ -84,6 +90,238 @@ function createD10Geometry(radius: number): THREE.BufferGeometry {
 
 const geometryCache = new Map<DieKind, GeometrySet>();
 
+/**
+ * Replaces a polyhedron's default spherical UVs with per-face planar ones.
+ *
+ * @remarks
+ * `THREE.IcosahedronGeometry` and friends inherit equirectangular UVs from
+ * `PolyhedronGeometry`, which smears the surface texture into a thin stretched
+ * wedge on every face and puts a hard seam where neighbouring faces sample
+ * unrelated regions of the map. Projecting each face onto its own plane and
+ * scattering the faces across the texture gives every face an undistorted,
+ * uniformly scaled patch, so surface detail reads at a consistent size.
+ *
+ * Faces are placed on a grid of cells and rotated per face, which keeps repeated
+ * detail from lining up into an obvious pattern across the die.
+ */
+function applyPlanarFaceUvs(
+  geometry: THREE.BufferGeometry,
+  radius: number,
+  faceTriangleCount?: number,
+): void {
+  const nonIndexed = geometry.index ? geometry.toNonIndexed() : geometry;
+  const position = nonIndexed.getAttribute('position');
+  const triangleCount = position.count / 3;
+  const uvs = new Float32Array(position.count * 2);
+
+  // A cell grid large enough to give every face its own region of the texture.
+  const columns = Math.ceil(Math.sqrt(triangleCount));
+  const rows = Math.ceil(triangleCount / columns);
+  // Inset each cell so mipmapping cannot bleed a neighbouring face's pixels in.
+  const inset = 0.06;
+  // Half-diagonal of the largest face, so no face can overflow its own cell.
+  const extent = radius * 1.75;
+
+  const a = new THREE.Vector3();
+  const b = new THREE.Vector3();
+  const c = new THREE.Vector3();
+  const normal = new THREE.Vector3();
+  const edge1 = new THREE.Vector3();
+  const edge2 = new THREE.Vector3();
+  const basisU = new THREE.Vector3();
+  const basisV = new THREE.Vector3();
+  const centroid = new THREE.Vector3();
+  const local = new THREE.Vector3();
+
+  for (let triangle = 0; triangle < triangleCount; triangle += 1) {
+    const offset = triangle * 3;
+    a.fromBufferAttribute(position, offset);
+    b.fromBufferAttribute(position, offset + 1);
+    c.fromBufferAttribute(position, offset + 2);
+
+    edge1.subVectors(b, a);
+    edge2.subVectors(c, a);
+    normal.crossVectors(edge1, edge2).normalize();
+    // An in-plane basis: the first edge, then the perpendicular within the face.
+    basisU.copy(edge1).normalize();
+    basisV.crossVectors(normal, basisU).normalize();
+    centroid
+      .copy(a)
+      .add(b)
+      .add(c)
+      .multiplyScalar(1 / 3);
+
+    const column = triangle % columns;
+    const row = Math.floor(triangle / columns);
+    const cellU = (column + 0.5) / columns;
+    const cellV = (row + 0.5) / rows;
+    const scaleU = (1 - inset * 2) / columns;
+    const scaleV = (1 - inset * 2) / rows;
+    // Rotating each face decorrelates the sampled detail between neighbours.
+    const spin = (triangle * 2.399963) % (Math.PI * 2);
+    const cos = Math.cos(spin);
+    const sin = Math.sin(spin);
+    // Chamfer strips are narrow slivers. Sampling them at face scale would crop a
+    // random patch of texture onto every edge, so they are compressed to sample a
+    // small, near-uniform area and read as a clean machined bevel.
+    const chamfer = faceTriangleCount !== undefined && triangle >= faceTriangleCount;
+    const sampleExtent = chamfer ? extent * 3.2 : extent;
+
+    for (let vertex = 0; vertex < 3; vertex += 1) {
+      local.fromBufferAttribute(position, offset + vertex).sub(centroid);
+      const u = local.dot(basisU) / sampleExtent;
+      const v = local.dot(basisV) / sampleExtent;
+      const rotatedU = u * cos - v * sin;
+      const rotatedV = u * sin + v * cos;
+      const target = (offset + vertex) * 2;
+      uvs[target] = cellU + rotatedU * scaleU;
+      uvs[target + 1] = cellV + rotatedV * scaleV;
+    }
+  }
+
+  nonIndexed.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  if (nonIndexed !== geometry) {
+    geometry.copy(nonIndexed);
+    nonIndexed.dispose();
+  }
+}
+
+function formatVertexKey(vertex: THREE.Vector3): string {
+  return `${vertex.x.toFixed(4)},${vertex.y.toFixed(4)},${vertex.z.toFixed(4)}`;
+}
+
+/** Builds an order-independent key identifying one undirected edge. */
+function edgeKey(a: THREE.Vector3, b: THREE.Vector3): string {
+  const first = formatVertexKey(a);
+  const second = formatVertexKey(b);
+  return first < second ? `${first}|${second}` : `${second}|${first}`;
+}
+
+/**
+ * Rebuilds a polyhedron with chamfered edges.
+ *
+ * @remarks
+ * Each source face is scaled toward its own centroid and pushed slightly inward,
+ * then the gap left around it is skirted with quads that join neighbouring faces.
+ * Those skirt strips are the chamfer: they catch a specular highlight along every
+ * edge, which is what separates a solid-feeling die from a flat-shaded polyhedron.
+ *
+ * The skirt is welded from the *original* shared edges, so neighbouring faces
+ * always meet exactly and the solid stays watertight. Returns a non-indexed
+ * geometry whose face triangles come first, letting planar UV unwrapping treat
+ * face and chamfer differently.
+ */
+function createBeveledGeometry(
+  source: THREE.BufferGeometry,
+  profile: ThemeGeometryProfile,
+): { geometry: THREE.BufferGeometry; faceTriangleCount: number } {
+  const bevel = THREE.MathUtils.clamp(profile.bevel, 0, 0.3);
+  const faces = groupCoplanarTriangles(getTriangleData(source)).map((group) => ({
+    normal: group.normal.clone().normalize(),
+    center: group.vertices
+      .reduce((sum, vertex) => sum.add(vertex), new THREE.Vector3())
+      .multiplyScalar(1 / group.vertices.length),
+    vertices: group.vertices,
+  }));
+
+  const facePositions: number[] = [];
+  const skirtPositions: number[] = [];
+  // Maps an undirected original edge to the inset endpoints each face produced,
+  // so the two sides of an edge can be stitched into one chamfer strip.
+  const edges = new Map<string, { a: THREE.Vector3; b: THREE.Vector3 }[]>();
+
+  for (const face of faces) {
+    const centroid = face.center;
+    const normal = face.normal;
+    const ordered = orderFaceVertices(face.vertices, centroid, normal);
+    // Pull the face in toward its centroid and sink it along the inward normal.
+    const inset = ordered.map((vertex) =>
+      vertex
+        .clone()
+        .lerp(centroid, bevel)
+        .addScaledVector(normal, -bevel * profile.bevelDepth * centroid.length()),
+    );
+
+    for (let i = 1; i + 1 < inset.length; i += 1) {
+      facePositions.push(
+        inset[0].x,
+        inset[0].y,
+        inset[0].z,
+        inset[i].x,
+        inset[i].y,
+        inset[i].z,
+        inset[i + 1].x,
+        inset[i + 1].y,
+        inset[i + 1].z,
+      );
+    }
+
+    for (let i = 0; i < ordered.length; i += 1) {
+      const next = (i + 1) % ordered.length;
+      const key = edgeKey(ordered[i], ordered[next]);
+      const entry = edges.get(key);
+      const pair = { a: inset[i], b: inset[next] };
+      if (entry) entry.push(pair);
+      else edges.set(key, [pair]);
+    }
+  }
+
+  // Each shared edge becomes a quad bridging the two faces' inset borders.
+  for (const sides of edges.values()) {
+    if (sides.length !== 2) continue;
+    const [first, second] = sides;
+    // The neighbour traverses the shared edge in the opposite winding.
+    const near = second.b.distanceToSquared(first.a) < second.a.distanceToSquared(first.a);
+    const other = near ? { a: second.b, b: second.a } : second;
+    skirtPositions.push(
+      first.a.x,
+      first.a.y,
+      first.a.z,
+      other.a.x,
+      other.a.y,
+      other.a.z,
+      first.b.x,
+      first.b.y,
+      first.b.z,
+      first.b.x,
+      first.b.y,
+      first.b.z,
+      other.a.x,
+      other.a.y,
+      other.a.z,
+      other.b.x,
+      other.b.y,
+      other.b.z,
+    );
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute(
+    'position',
+    new THREE.Float32BufferAttribute([...facePositions, ...skirtPositions], 3),
+  );
+  geometry.computeVertexNormals();
+  return { geometry, faceTriangleCount: facePositions.length / 9 };
+}
+
+/** Sorts a face's vertices into a consistent winding around its own plane. */
+function orderFaceVertices(
+  vertices: THREE.Vector3[],
+  centroid: THREE.Vector3,
+  normal: THREE.Vector3,
+): THREE.Vector3[] {
+  const reference = vertices[0].clone().sub(centroid).normalize();
+  const bitangent = new THREE.Vector3().crossVectors(normal, reference).normalize();
+  const offset = new THREE.Vector3();
+  return vertices
+    .map((vertex) => {
+      offset.copy(vertex).sub(centroid);
+      return { vertex, angle: Math.atan2(offset.dot(bitangent), offset.dot(reference)) };
+    })
+    .toSorted((a, b) => a.angle - b.angle)
+    .map((entry) => entry.vertex);
+}
+
 function createGeometry(kind: DieKind): GeometrySet {
   const cached = geometryCache.get(kind);
   if (cached) return cached;
@@ -92,7 +330,9 @@ function createGeometry(kind: DieKind): GeometrySet {
   switch (kind) {
     case 'd4': {
       const collider = new THREE.TetrahedronGeometry(radius, 0);
-      geometry = { visual: collider.clone(), collider };
+      const visual = collider.clone();
+      applyPlanarFaceUvs(visual, radius);
+      geometry = { visual, collider };
       break;
     }
     case 'd6':
@@ -109,27 +349,79 @@ function createGeometry(kind: DieKind): GeometrySet {
       break;
     case 'd8': {
       const collider = new THREE.OctahedronGeometry(radius, 0);
-      geometry = { visual: collider.clone(), collider };
+      const visual = collider.clone();
+      applyPlanarFaceUvs(visual, radius);
+      geometry = { visual, collider };
       break;
     }
     case 'd10': {
       const collider = createD10Geometry(radius);
-      geometry = { visual: collider.clone(), collider };
+      const visual = collider.clone();
+      applyPlanarFaceUvs(visual, radius);
+      geometry = { visual, collider };
       break;
     }
     case 'd12': {
       const collider = new THREE.DodecahedronGeometry(radius, 0);
-      geometry = { visual: collider.clone(), collider };
+      const visual = collider.clone();
+      applyPlanarFaceUvs(visual, radius);
+      geometry = { visual, collider };
       break;
     }
     case 'd20': {
       const collider = new THREE.IcosahedronGeometry(radius, 0);
-      geometry = { visual: collider.clone(), collider };
+      const visual = collider.clone();
+      applyPlanarFaceUvs(visual, radius);
+      geometry = { visual, collider };
       break;
     }
   }
   geometryCache.set(kind, geometry);
   return geometry;
+}
+
+const themedVisualCache = new Map<string, THREE.BufferGeometry>();
+
+/**
+ * Builds the display mesh for one theme and die, applying that theme's chamfer.
+ *
+ * @remarks
+ * Physics and label placement keep using the unbeveled collider, so changing a
+ * theme's geometry profile alters only the silhouette, never which face a roll
+ * lands on.
+ */
+function createThemedVisual(theme: ThemeName, kind: DieKind): THREE.BufferGeometry {
+  const key = `${theme}:${kind}`;
+  const cached = themedVisualCache.get(key);
+  if (cached) return cached;
+  const palette = THEMES[theme] ?? THEMES.dragon;
+  const profile = palette.geometry;
+  const radius = DIE_RADIUS[kind];
+
+  let visual: THREE.BufferGeometry;
+  if (kind === 'd6') {
+    // The d6 is a rounded box, so the profile drives its corner radius directly.
+    const size = radius * 1.72;
+    visual = new RoundedBoxGeometry(
+      size,
+      size,
+      size,
+      6,
+      radius * THREE.MathUtils.clamp(profile.cornerRadius, 0.02, 0.42),
+    );
+    applyPlanarFaceUvs(visual, radius);
+  } else if (profile.bevel <= 0.001) {
+    visual = createGeometry(kind).visual.clone();
+  } else {
+    const { geometry, faceTriangleCount } = createBeveledGeometry(
+      createGeometry(kind).collider,
+      profile,
+    );
+    applyPlanarFaceUvs(geometry, radius, faceTriangleCount);
+    visual = geometry;
+  }
+  themedVisualCache.set(key, visual);
+  return visual;
 }
 
 interface TriangleData {
@@ -170,10 +462,12 @@ function pushUniqueVertex(vertices: THREE.Vector3[], vertex: THREE.Vector3): voi
 
 const logicalFaceCache = new Map<DieKind, LogicalFace[]>();
 
-function getLogicalFaceTemplate(kind: DieKind): LogicalFace[] {
-  const cached = logicalFaceCache.get(kind);
-  if (cached) return cached;
-  const triangles = getTriangleData(createGeometry(kind).collider);
+/** Merges coplanar triangles into the polygonal faces a die actually has. */
+function groupCoplanarTriangles(triangles: TriangleData[]): Array<{
+  normal: THREE.Vector3;
+  centers: THREE.Vector3[];
+  vertices: THREE.Vector3[];
+}> {
   const groups: Array<{
     normal: THREE.Vector3;
     centers: THREE.Vector3[];
@@ -190,6 +484,14 @@ function getLogicalFaceTemplate(kind: DieKind): LogicalFace[] {
     group.centers.push(triangle.center.clone());
     triangle.vertices.forEach((vertex) => pushUniqueVertex(group.vertices, vertex));
   }
+  return groups;
+}
+
+function getLogicalFaceTemplate(kind: DieKind): LogicalFace[] {
+  const cached = logicalFaceCache.get(kind);
+  if (cached) return cached;
+  const triangles = getTriangleData(createGeometry(kind).collider);
+  const groups = groupCoplanarTriangles(triangles);
 
   const expected = Number(kind.slice(1));
   const sorted = groups
@@ -296,6 +598,15 @@ function createNumberAtlas(theme: ThemeName): THREE.CanvasTexture {
   context.textBaseline = 'middle';
   context.lineJoin = 'round';
 
+  // Dark numerals sit on light metal or bone, so they need a pale halo instead of
+  // the dark outline that makes glowing labels legible on dark dice.
+  const engraved = isDarkLabel(palette.label);
+  const outline = engraved
+    ? 'rgba(255,248,232,.72)'
+    : theme === 'celestial'
+      ? 'rgba(65,43,12,.76)'
+      : 'rgba(4,3,7,.78)';
+
   for (let value = 1; value <= 20; value += 1) {
     const cell = value - 1;
     const column = cell % ATLAS_COLUMNS;
@@ -306,15 +617,19 @@ function createNumberAtlas(theme: ThemeName): THREE.CanvasTexture {
     const runtimeFont = getRuntimeThemeFont(theme);
     context.font = `700 ${fontSize}px ${runtimeFont ? `'${runtimeFont}', ` : ''}Cinzel, Georgia, serif`;
     context.lineWidth = cellHeight * 0.055;
-    context.strokeStyle = theme === 'celestial' ? 'rgba(65,43,12,.76)' : 'rgba(4,3,7,.78)';
+    context.strokeStyle = outline;
     context.shadowColor = palette.labelGlow;
-    context.shadowBlur = theme === 'tempest' ? 18 : 10;
+    context.shadowBlur = engraved ? 3 : theme === 'tempest' ? 18 : 10;
     context.strokeText(String(value), x, y - cellHeight * 0.015);
     context.fillStyle = palette.label;
     context.fillText(String(value), x, y - cellHeight * 0.015);
     if (value === 6 || value === 9) {
-      context.shadowBlur = 4;
-      context.strokeStyle = theme === 'celestial' ? 'rgba(65,43,12,.9)' : 'rgba(10,3,20,.9)';
+      context.shadowBlur = engraved ? 2 : 4;
+      context.strokeStyle = engraved
+        ? palette.label
+        : theme === 'celestial'
+          ? 'rgba(65,43,12,.9)'
+          : 'rgba(10,3,20,.9)';
       context.lineWidth = cellHeight * 0.026;
       context.beginPath();
       context.moveTo(x - cellWidth * 0.17, y + cellHeight * 0.31);
@@ -917,6 +1232,338 @@ function createWildwoodSurface(palette: ThemePalette): SurfaceSet {
   return finalizeSurface(colorCanvas, bumpCanvas, palette);
 }
 
+/**
+ * Draws seamless straight scratches by repeating each stroke across the wrap seams.
+ * Tiling matters here because the surface variation shader offsets UVs per die.
+ */
+function drawWrappedStreaks(
+  ctx: CanvasRenderingContext2D,
+  size: number,
+  options: {
+    count: number;
+    angle: number;
+    jitter: number;
+    stroke: string;
+    alphaRange: [number, number];
+    widthRange: [number, number];
+  },
+): void {
+  const { count, angle, jitter, stroke, alphaRange, widthRange } = options;
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = stroke;
+  for (let i = 0; i < count; i += 1) {
+    const localAngle = angle + (Math.random() - 0.5) * jitter;
+    const length = size * (0.5 + Math.random() * 0.9);
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    const dx = Math.cos(localAngle) * length;
+    const dy = Math.sin(localAngle) * length;
+    ctx.globalAlpha = alphaRange[0] + Math.random() * (alphaRange[1] - alphaRange[0]);
+    ctx.lineWidth = widthRange[0] + Math.random() * (widthRange[1] - widthRange[0]);
+    for (const offsetX of [-size, 0, size]) {
+      for (const offsetY of [-size, 0, size]) {
+        ctx.beginPath();
+        ctx.moveTo(x + offsetX, y + offsetY);
+        ctx.lineTo(x + offsetX + dx, y + offsetY + dy);
+        ctx.stroke();
+      }
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+/** Draws a toothed gear silhouette used by the clockwork surface. */
+function drawGear(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  radius: number,
+  teeth: number,
+  rotation: number,
+): void {
+  ctx.beginPath();
+  const inner = radius * 0.82;
+  for (let i = 0; i < teeth * 2; i += 1) {
+    const angle = rotation + (i / (teeth * 2)) * Math.PI * 2;
+    const r = i % 2 === 0 ? radius : inner;
+    const px = x + Math.cos(angle) * r;
+    const py = y + Math.sin(angle) * r;
+    if (i === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(x, y, radius * 0.34, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(x, y, radius * 0.14, 0, Math.PI * 2);
+  ctx.stroke();
+}
+
+function createClockworkSurface(palette: ThemePalette): SurfaceSet {
+  const size = 512;
+  const { colorCanvas, bumpCanvas, ctx, btx } = createSurfaceCanvases(size);
+  const bg = ctx.createLinearGradient(0, 0, size, size);
+  bg.addColorStop(0, lerpColor(palette.base, palette.edge, 0.34));
+  bg.addColorStop(0.46, hexToCss(palette.base));
+  bg.addColorStop(1, lerpColor(palette.base, palette.shadow, 0.62));
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, size, size);
+  btx.fillStyle = '#8a8a8a';
+  btx.fillRect(0, 0, size, size);
+
+  // Etched gear plates give the brass a machined identity at a glance.
+  for (let i = 0; i < 7; i += 1) {
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    const radius = 42 + Math.random() * 62;
+    const teeth = 9 + Math.floor(Math.random() * 8);
+    const rotation = Math.random() * Math.PI;
+    for (const offsetX of [-size, 0, size]) {
+      for (const offsetY of [-size, 0, size]) {
+        ctx.globalAlpha = 0.3;
+        ctx.lineWidth = 3.2;
+        ctx.strokeStyle = lerpColor(palette.shadow, palette.base, 0.35);
+        drawGear(ctx, x + offsetX, y + offsetY, radius, teeth, rotation);
+        ctx.globalAlpha = 0.24;
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = lerpColor(palette.edge, 0xffffff, 0.4);
+        drawGear(ctx, x + offsetX + 1.4, y + offsetY - 1.4, radius, teeth, rotation);
+        btx.globalAlpha = 0.42;
+        btx.lineWidth = 4;
+        btx.strokeStyle = '#4a4a4a';
+        drawGear(btx, x + offsetX, y + offsetY, radius, teeth, rotation);
+      }
+    }
+  }
+  ctx.globalAlpha = 1;
+  btx.globalAlpha = 1;
+
+  // Fine lathe polish, then a sparse patina wash in the recesses.
+  drawWrappedStreaks(ctx, size, {
+    count: 210,
+    angle: Math.PI * 0.22,
+    jitter: 0.1,
+    stroke: 'rgba(255,232,182,.5)',
+    alphaRange: [0.03, 0.11],
+    widthRange: [0.5, 1.5],
+  });
+  drawWrappedStreaks(btx, size, {
+    count: 150,
+    angle: Math.PI * 0.22,
+    jitter: 0.1,
+    stroke: '#b4b4b4',
+    alphaRange: [0.05, 0.13],
+    widthRange: [0.6, 1.8],
+  });
+  for (let i = 0; i < 220; i += 1) {
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    const r = 4 + Math.random() * 16;
+    ctx.globalAlpha = 0.03 + Math.random() * 0.06;
+    ctx.fillStyle = i % 3 === 0 ? '#4f7a5a' : lerpColor(palette.shadow, palette.base, 0.2);
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  return finalizeSurface(colorCanvas, bumpCanvas, palette);
+}
+
+/**
+ * Traces an irregular polygon facet. The caller supplies the radii so the colour
+ * and bump canvases can draw the exact same shape and stay registered.
+ */
+function traceFacet(
+  target: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  radii: readonly number[],
+  rotation: number,
+): void {
+  target.beginPath();
+  radii.forEach((r, index) => {
+    const angle = rotation + (index / radii.length) * Math.PI * 2;
+    const px = x + Math.cos(angle) * r;
+    const py = y + Math.sin(angle) * r;
+    if (index === 0) target.moveTo(px, py);
+    else target.lineTo(px, py);
+  });
+  target.closePath();
+}
+
+function createObsidianSurface(palette: ThemePalette): SurfaceSet {
+  const size = 512;
+  const { colorCanvas, bumpCanvas, ctx, btx } = createSurfaceCanvases(size);
+  ctx.fillStyle = hexToCss(palette.shadow);
+  ctx.fillRect(0, 0, size, size);
+  // Broad tonal drift keeps the black from reading as a flat fill.
+  for (let i = 0; i < 26; i += 1) {
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    const radius = 90 + Math.random() * 170;
+    const wash = ctx.createRadialGradient(x, y, 0, x, y, radius);
+    wash.addColorStop(0, `rgba(38,34,54,${0.16 + Math.random() * 0.2})`);
+    wash.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = wash;
+    ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+  }
+  btx.fillStyle = '#828282';
+  btx.fillRect(0, 0, size, size);
+
+  // Conchoidal fracture facets: the signature of a glassy volcanic break.
+  for (let i = 0; i < 30; i += 1) {
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    const radius = 26 + Math.random() * 76;
+    const rotation = Math.random() * Math.PI * 2;
+    const points = 5 + Math.floor(Math.random() * 4);
+    const radii = Array.from({ length: points }, () => radius * (0.58 + Math.random() * 0.5));
+    ctx.globalAlpha = 0.16 + Math.random() * 0.16;
+    ctx.fillStyle = lerpColor(palette.base, 0x4a4668, 0.2 + Math.random() * 0.5);
+    traceFacet(ctx, x, y, radii, rotation);
+    ctx.fill();
+    ctx.globalAlpha = 0.3;
+    ctx.strokeStyle = 'rgba(150,150,190,.34)';
+    ctx.lineWidth = 0.9;
+    ctx.stroke();
+    btx.globalAlpha = 0.22;
+    btx.fillStyle = Math.random() > 0.5 ? '#9c9c9c' : '#666';
+    traceFacet(btx, x, y, radii, rotation);
+    btx.fill();
+  }
+  ctx.globalAlpha = 1;
+  btx.globalAlpha = 1;
+
+  // Teal mineral veins threading the fracture planes.
+  for (let i = 0; i < 16; i += 1) {
+    drawJaggedVein(ctx, size, hexToCss(palette.edge), 0.12 + Math.random() * 0.16, 1.1, 7);
+    drawJaggedVein(ctx, size, '#bafff2', 0.08, 0.55, 7);
+  }
+  ctx.globalAlpha = 1;
+  return finalizeSurface(colorCanvas, bumpCanvas, palette);
+}
+
+function createGunmetalSurface(palette: ThemePalette): SurfaceSet {
+  const size = 512;
+  const { colorCanvas, bumpCanvas, ctx, btx } = createSurfaceCanvases(size);
+  const bg = ctx.createLinearGradient(0, size, size, 0);
+  bg.addColorStop(0, lerpColor(palette.base, palette.shadow, 0.55));
+  bg.addColorStop(0.5, hexToCss(palette.base));
+  bg.addColorStop(1, lerpColor(palette.base, palette.edge, 0.28));
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, size, size);
+  btx.fillStyle = '#8d8d8d';
+  btx.fillRect(0, 0, size, size);
+
+  // Dense unidirectional brushing is what sells a machined steel blank.
+  drawWrappedStreaks(ctx, size, {
+    count: 620,
+    angle: Math.PI * 0.5,
+    jitter: 0.045,
+    stroke: 'rgba(226,238,250,.55)',
+    alphaRange: [0.02, 0.09],
+    widthRange: [0.4, 1.5],
+  });
+  drawWrappedStreaks(ctx, size, {
+    count: 260,
+    angle: Math.PI * 0.5,
+    jitter: 0.045,
+    stroke: 'rgba(12,16,22,.6)',
+    alphaRange: [0.03, 0.1],
+    widthRange: [0.4, 1.2],
+  });
+  drawWrappedStreaks(btx, size, {
+    count: 480,
+    angle: Math.PI * 0.5,
+    jitter: 0.045,
+    stroke: '#c2c2c2',
+    alphaRange: [0.04, 0.12],
+    widthRange: [0.5, 1.7],
+  });
+
+  // Milled chamfer bands plus a few tool-chatter nicks along the edges.
+  for (let i = 0; i < 5; i += 1) {
+    const x = Math.random() * size;
+    ctx.globalAlpha = 0.09;
+    ctx.fillStyle = 'rgba(20,24,30,.9)';
+    ctx.fillRect(x, 0, 5 + Math.random() * 12, size);
+    btx.globalAlpha = 0.16;
+    btx.fillStyle = '#5c5c5c';
+    btx.fillRect(x, 0, 5 + Math.random() * 12, size);
+  }
+  for (let i = 0; i < 90; i += 1) {
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    const w = 2 + Math.random() * 7;
+    ctx.globalAlpha = 0.06 + Math.random() * 0.1;
+    ctx.fillStyle = Math.random() > 0.45 ? '#e9f2fb' : '#0f1318';
+    ctx.fillRect(x, y, w, 1 + Math.random() * 1.6);
+  }
+  ctx.globalAlpha = 1;
+  btx.globalAlpha = 1;
+  return finalizeSurface(colorCanvas, bumpCanvas, palette);
+}
+
+function createReliquarySurface(palette: ThemePalette): SurfaceSet {
+  const size = 512;
+  const { colorCanvas, bumpCanvas, ctx, btx } = createSurfaceCanvases(size);
+  const bg = ctx.createRadialGradient(
+    size * 0.4,
+    size * 0.36,
+    24,
+    size * 0.5,
+    size * 0.5,
+    size * 0.7,
+  );
+  bg.addColorStop(0, lerpColor(palette.base, 0xffffff, 0.24));
+  bg.addColorStop(0.58, hexToCss(palette.base));
+  bg.addColorStop(1, lerpColor(palette.base, palette.shadow, 0.5));
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, size, size);
+  btx.fillStyle = '#7d7d7d';
+  btx.fillRect(0, 0, size, size);
+
+  // Aged ivory: porous mottling, hairline cracks, and grime settling in the cracks.
+  for (let i = 0; i < 520; i += 1) {
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    const r = 2 + Math.random() * 13;
+    ctx.globalAlpha = 0.03 + Math.random() * 0.07;
+    ctx.fillStyle =
+      i % 4 === 0
+        ? lerpColor(palette.edge, palette.shadow, 0.4)
+        : lerpColor(palette.base, 0xffffff, 0.5);
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+    btx.globalAlpha = 0.03 + Math.random() * 0.05;
+    btx.fillStyle = i % 4 === 0 ? '#5e5e5e' : '#a6a6a6';
+    btx.beginPath();
+    btx.arc(x, y, r * 0.8, 0, Math.PI * 2);
+    btx.fill();
+  }
+  ctx.globalAlpha = 1;
+  btx.globalAlpha = 1;
+
+  for (let i = 0; i < 26; i += 1) {
+    drawJaggedVein(ctx, size, lerpColor(palette.edge, palette.shadow, 0.45), 0.14, 1.1, 9);
+    drawJaggedVein(btx, size, '#585858', 0.16, 1.4, 9);
+  }
+  // Scrimshaw hatching along the cracks reads as carved detail under raking light.
+  drawWrappedStreaks(ctx, size, {
+    count: 90,
+    angle: Math.PI * 0.78,
+    jitter: 0.5,
+    stroke: 'rgba(88,64,32,.5)',
+    alphaRange: [0.04, 0.1],
+    widthRange: [0.5, 1.2],
+  });
+  ctx.globalAlpha = 1;
+  return finalizeSurface(colorCanvas, bumpCanvas, palette);
+}
+
 function createSurface(theme: ThemeName, palette: ThemePalette): SurfaceSet {
   const cached = surfaceCache.get(theme);
   if (cached) return cached;
@@ -946,6 +1593,18 @@ function createSurface(theme: ThemeName, palette: ThemePalette): SurfaceSet {
     case 'wildwood':
       surface = createWildwoodSurface(palette);
       break;
+    case 'clockwork':
+      surface = createClockworkSurface(palette);
+      break;
+    case 'obsidian':
+      surface = createObsidianSurface(palette);
+      break;
+    case 'gunmetal':
+      surface = createGunmetalSurface(palette);
+      break;
+    case 'reliquary':
+      surface = createReliquarySurface(palette);
+      break;
   }
   surfaceCache.set(theme, surface);
   return surface;
@@ -965,9 +1624,19 @@ function radicalInverse(value: number, base: number): number {
   return result;
 }
 
+/**
+ * Faces occupy individual texture cells, so the per-die offset has to stay well
+ * inside one cell. A full-range offset would slide a face into its neighbour's
+ * region and reintroduce the seams that planar unwrapping removes.
+ */
+const SURFACE_VARIANT_RANGE = 0.045;
+
 const SURFACE_VARIANT_OFFSETS = Array.from({ length: SURFACE_VARIANT_COUNT }, (_value, index) => {
   // A low-discrepancy sequence gives visibly different crops without clustering.
-  return new THREE.Vector2(radicalInverse(index + 1, 2), radicalInverse(index + 1, 3));
+  return new THREE.Vector2(
+    (radicalInverse(index + 1, 2) - 0.5) * SURFACE_VARIANT_RANGE,
+    (radicalInverse(index + 1, 3) - 0.5) * SURFACE_VARIANT_RANGE,
+  );
 });
 
 function installSurfaceVariation(
@@ -999,7 +1668,7 @@ function installSurfaceVariation(
     );
   };
   // All variants share one GPU program. Only the immutable uniform differs per material.
-  material.customProgramCacheKey = () => 'draftroll-surface-v3';
+  material.customProgramCacheKey = () => 'draftroll-surface-v4';
 }
 
 const mainMaterialCache = new Map<string, THREE.MeshPhysicalMaterial>();
@@ -1019,6 +1688,11 @@ function getMainMaterial(theme: ThemeName, kind: DieKind, variant = 0): THREE.Me
   const normalTexture = getRuntimeThemeTexture(theme, kind, 'normal');
   const roughnessTexture = getRuntimeThemeTexture(theme, kind, 'roughness');
   const magical = theme === 'nebula' || theme === 'frost' || theme === 'celestial';
+  // Metals need a much stronger environment response and no iridescence, while
+  // polished stone wants a high IOR. Keying these off the surface kind keeps the
+  // optical behaviour tied to the material rather than to a theme name.
+  const metallic = palette.surface === 'clockwork' || palette.surface === 'gunmetal';
+  const glassy = palette.surface === 'obsidian';
   const material = new THREE.MeshPhysicalMaterial({
     color: runtime?.color ?? 0xffffff,
     map: surfaceTexture ?? surface.map,
@@ -1035,8 +1709,8 @@ function getMainMaterial(theme: ThemeName, kind: DieKind, variant = 0): THREE.Me
     emissiveIntensity: runtime?.emissiveIntensity ?? palette.emissiveIntensity * 0.62,
     transparent: (runtime?.opacity ?? 1) < 1,
     opacity: runtime?.opacity ?? 1,
-    envMapIntensity: 0.62,
-    ior: theme === 'frost' ? 1.36 : 1.46,
+    envMapIntensity: metallic ? 1.35 : glassy ? 1.05 : 0.62,
+    ior: theme === 'frost' ? 1.36 : glassy ? 1.5 : 1.46,
     specularIntensity: theme === 'wildwood' || theme === 'necrotic' ? 0.46 : 0.72,
     specularColor: new THREE.Color(palette.edge).lerp(new THREE.Color(0xffffff), 0.72),
     iridescence:
@@ -1068,7 +1742,7 @@ function getEdgeMaterial(theme: ThemeName): THREE.LineBasicMaterial {
 }
 
 function getVisualGeometry(theme: ThemeName, kind: DieKind): THREE.BufferGeometry {
-  return getRuntimeThemeMesh(theme, kind) ?? createGeometry(kind).visual;
+  return getRuntimeThemeMesh(theme, kind) ?? createThemedVisual(theme, kind);
 }
 
 function getEdgeGeometry(kind: DieKind, theme: ThemeName): THREE.EdgesGeometry {
@@ -1093,6 +1767,11 @@ export function invalidateDiceThemeResources(theme: ThemeName): void {
     if (!key.startsWith(`${theme}:`)) continue;
     geometry.dispose();
     edgeGeometryCache.delete(key);
+  }
+  for (const [key, geometry] of themedVisualCache) {
+    if (!key.startsWith(`${theme}:`)) continue;
+    geometry.dispose();
+    themedVisualCache.delete(key);
   }
   for (const [key, material] of labelMaterialCache) {
     if (!key.startsWith(`${theme}:`)) continue;

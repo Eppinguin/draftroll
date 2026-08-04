@@ -634,6 +634,34 @@ h1 {
 .theme-swatch[data-theme='wildwood'] span {
   background: linear-gradient(135deg, #0c2513, #2f6840 55%, #a2db68);
 }
+.theme-swatch[data-theme='clockwork'] {
+  color: #f0c674;
+}
+.theme-swatch[data-theme='clockwork'] span {
+  background:
+    radial-gradient(circle at 34% 30%, #fff0c8 0 14%, transparent 17%),
+    linear-gradient(135deg, #3d2607, #a8701f 52%, #f0c674);
+}
+.theme-swatch[data-theme='gunmetal'] {
+  color: #c3ccd6;
+}
+.theme-swatch[data-theme='gunmetal'] span {
+  background: linear-gradient(150deg, #1d2126 0 32%, #78838f 46% 54%, #2f353c 66%, #d4dde7);
+}
+.theme-swatch[data-theme='obsidian'] {
+  color: #7ff0dc;
+}
+.theme-swatch[data-theme='obsidian'] span {
+  background:
+    radial-gradient(circle at 68% 26%, #bafff2 0 9%, transparent 12%),
+    linear-gradient(135deg, #08070d, #24213a 58%, #3f8f83);
+}
+.theme-swatch[data-theme='reliquary'] {
+  color: #c9a86e;
+}
+.theme-swatch[data-theme='reliquary'] span {
+  background: linear-gradient(135deg, #6b5735, #c2b28f 48%, #f0e6cc);
+}
 .theme-swatch.active {
   border-color: currentColor;
   box-shadow: 0 0 11px color-mix(in srgb, currentColor 38%, transparent);
