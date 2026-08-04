@@ -48,6 +48,67 @@ test('concurrent SDK presentations are serialized instead of failing with Render
   expect(results.every((result) => Number.isFinite(result.total))).toBe(true);
 });
 
+test('clear invalidates an in-flight pool before accepting a fresh roll', async ({ page }) => {
+  test.setTimeout(30_000);
+  await page.goto('http://127.0.0.1:4174/overlay.html');
+  await page.waitForFunction(() => Boolean(window.draftrollDice));
+
+  const report = await page.evaluate(async () => {
+    const bridge = window.draftrollDice;
+    const staleRoll = bridge
+      .roll({
+        results: Array.from({ length: 30 }, (_, index) => (index % 20) + 1),
+        kinds: Array.from({ length: 30 }, () => 'd20'),
+        seed: 'clear-in-flight-pool',
+      })
+      .then(
+        () => 'unexpectedly resolved',
+        (error: unknown) => (error instanceof Error ? error.message : String(error)),
+      );
+    const queuedRoll = bridge
+      .roll({ results: [5], kinds: ['d6'], seed: 'queued-before-clear' })
+      .then(
+        () => 'unexpectedly resolved',
+        (error: unknown) => (error instanceof Error ? error.message : String(error)),
+      );
+
+    const planningDeadline = performance.now() + 5_000;
+    while (bridge.getPerformanceSnapshot().physicalDice !== 30) {
+      if (performance.now() > planningDeadline) throw new Error('The stale pool never started');
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 10));
+    }
+
+    bridge.clear();
+    const immediatelyAfterClear = bridge.getPerformanceSnapshot();
+    const staleOutcome = await staleRoll;
+    const queuedOutcome = await queuedRoll;
+    const freshCompletion = await bridge.roll({
+      results: [6],
+      kinds: ['d6'],
+      settleImmediately: true,
+      seed: 'roll-after-clear',
+    });
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 100));
+    const afterFreshRoll = bridge.getPerformanceSnapshot();
+
+    return {
+      immediatelyAfterClear,
+      staleOutcome,
+      queuedOutcome,
+      freshCompletion,
+      afterFreshRoll,
+    };
+  });
+
+  expect(report.immediatelyAfterClear.physicalDice).toBe(0);
+  expect(report.immediatelyAfterClear.fallbackVisuals).toBe(0);
+  expect(report.staleOutcome).toContain('cleared');
+  expect(report.queuedOutcome).toContain('cleared');
+  expect(report.freshCompletion.results).toEqual([6]);
+  expect(report.afterFreshRoll.physicalDice).toBe(1);
+  expect(report.afterFreshRoll.fallbackVisuals).toBe(0);
+});
+
 test('30-dice benchmark exposes bounded frame and planning diagnostics', async ({
   page,
 }, testInfo) => {

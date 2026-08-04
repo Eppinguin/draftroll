@@ -59,6 +59,9 @@ try {
   const { DraftrollRenderer } = await import(
     pathToFileURL(join(outDir, 'renderer/src/index.js')).href
   );
+  const { DraftrollOverlayRenderer } = await import(
+    pathToFileURL(join(outDir, 'overlay/src/index.js')).href
+  );
   const { Draftroll } = await import(pathToFileURL(join(outDir, 'sdk/src/index.js')).href);
   const { DiceEngine } = core;
 
@@ -436,6 +439,109 @@ try {
     'presentation history must recover after a replacement fallback',
   );
   assert.equal(retryCalls[3].context.renderedDice.length, 3);
+
+  const staleCalls = [];
+  const staleLifecycle = [];
+  let settleStaleRoll;
+  let markStaleRollStarted;
+  const staleRollStarted = new Promise((resolveStarted) => {
+    markStaleRollStarted = resolveStarted;
+  });
+  let staleClearCount = 0;
+  const staleBridge = {
+    roll(request) {
+      staleCalls.push(request);
+      if (staleCalls.length > 1) {
+        return Promise.resolve({
+          results: request.results ?? [],
+          total: Number(request.context?.normalizedTotal ?? 0),
+          replay: null,
+        });
+      }
+      markStaleRollStarted();
+      return new Promise((settle) => {
+        settleStaleRoll = () =>
+          settle({
+            results: request.results ?? [],
+            total: Number(request.context?.normalizedTotal ?? 0),
+            replay: null,
+          });
+      });
+    },
+    setDie() {},
+    setQuantity() {},
+    setTheme() {},
+    clear() {
+      staleClearCount += 1;
+    },
+    getThemes() {
+      return [{ id: 'dragon', name: 'Wyrmfire' }];
+    },
+  };
+  const staleRenderer = new DraftrollRenderer({ bridge: staleBridge });
+  staleRenderer.on('completed', () => staleLifecycle.push('completed'));
+  const stalePresentation = staleRenderer.playRoll(revisionBase);
+  await staleRollStarted;
+  await staleRenderer.clear();
+  settleStaleRoll();
+  await assert.rejects(
+    stalePresentation,
+    /cleared/,
+    'a bridge completion that arrives after clear must remain invalidated',
+  );
+  assert.equal(staleClearCount, 1);
+  assert.deepEqual(
+    staleLifecycle,
+    [],
+    'a stale bridge completion must not emit a completed presentation after clear',
+  );
+  await staleRenderer.playRoll(rerollRevision, {
+    preservePreviousDice: true,
+    replaceFallbackResult: rerollRevision,
+  });
+  assert.deepEqual(
+    staleCalls.map((request) => request.tableMode),
+    ['replace', 'replace'],
+    'a new roll after clear must replace an empty table instead of appending to stale state',
+  );
+
+  const overlayCommands = [];
+  const overlayVisibility = [];
+  let releaseOverlayPreflight;
+  let markOverlayPreflightStarted;
+  const overlayPreflightStarted = new Promise((resolveStarted) => {
+    markOverlayPreflightStarted = resolveStarted;
+  });
+  const overlayPreflight = new Promise((resolvePreflight) => {
+    releaseOverlayPreflight = resolvePreflight;
+  });
+  const delayedOverlay = new DraftrollOverlayRenderer();
+  delayedOverlay.mount = async () => {};
+  delayedOverlay.ensurePerformanceConfiguration = () => {
+    markOverlayPreflightStarted();
+    return overlayPreflight;
+  };
+  delayedOverlay.command = async (message) => {
+    overlayCommands.push(message.type);
+    return { completion: null };
+  };
+  delayedOverlay.setIframeActive = (active) => overlayVisibility.push(active);
+
+  const staleOverlayPresentation = delayedOverlay.playRoll(revisionBase);
+  await overlayPreflightStarted;
+  await delayedOverlay.clear();
+  releaseOverlayPreflight();
+  await assert.rejects(
+    staleOverlayPresentation,
+    /cleared before it started/,
+    'clear during overlay setup must prevent the stale roll from reaching the iframe',
+  );
+  assert.deepEqual(overlayCommands, ['clear']);
+  assert.equal(
+    overlayVisibility.includes(true),
+    false,
+    'a cleared overlay preflight must not reactivate the iframe',
+  );
 
   await explosionRenderer.playRoll(shorthandExplosion);
   assert.deepEqual(

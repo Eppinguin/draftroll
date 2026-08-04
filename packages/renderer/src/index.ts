@@ -411,7 +411,7 @@ export interface DraftrollBridge {
   ): Promise<DraftrollThemeManifest> | DraftrollThemeManifest;
   unloadTheme?(themeId: string): void | Promise<void>;
   dismiss?(options?: RendererDismissOptions): void | Promise<void>;
-  clear?(): void;
+  clear?(): void | Promise<void>;
   configure?(options: RendererPerformanceOptions): void;
   pause?(): void | Promise<void>;
   resume?(): void | Promise<void>;
@@ -520,6 +520,7 @@ interface PhysicalVisual {
 }
 
 interface PreparedRollPresentation {
+  presentationGeneration: number;
   result: NormalizedRollResult;
   options: RendererPlayOptions;
   physical: PhysicalVisual[];
@@ -613,6 +614,7 @@ export class DraftrollRenderer implements DiceRenderer {
   private participantFilter?: RendererParticipantFilter;
   private readonly activeRollIds = new Set<string>();
   private hasActivePresentation = false;
+  private presentationGeneration = 0;
   private paused = false;
 
   /**
@@ -713,6 +715,7 @@ export class DraftrollRenderer implements DiceRenderer {
     options: RendererPlayOptions = {},
   ): Promise<RendererCompletion> {
     throwIfAborted(options.signal, 'Renderer presentation');
+    const presentationGeneration = this.presentationGeneration;
     if (
       options.preservePreviousDice === true &&
       options.replaceFallbackResult &&
@@ -737,9 +740,15 @@ export class DraftrollRenderer implements DiceRenderer {
             (stage) => stage.generatedBy !== 'initial' && stage.generatedBy !== 'external',
           ));
       if (shouldUseModifierSequence) {
-        return await this.playModifierSequence(result, options, modifierStages);
+        return await this.playModifierSequence(
+          result,
+          options,
+          modifierStages,
+          presentationGeneration,
+        );
       }
-      const prepared = await this.prepareRoll(result, options);
+      const prepared = await this.prepareRoll(result, options, {}, presentationGeneration);
+      this.assertPresentationGeneration(presentationGeneration);
       if (prepared.table.mode !== 'concurrent') {
         const [completion] = await raceWithAbort(
           this.executePreparedBatch([prepared]),
@@ -766,6 +775,9 @@ export class DraftrollRenderer implements DiceRenderer {
         this.scheduleTableFlush(prepared);
       });
     } catch (caught) {
+      if (presentationGeneration !== this.presentationGeneration) {
+        throw this.presentationClearedError();
+      }
       let error = caught;
       if (
         options.preservePreviousDice === true &&
@@ -791,6 +803,7 @@ export class DraftrollRenderer implements DiceRenderer {
     result: NormalizedRollResult,
     options: RendererPlayOptions,
     stages: readonly ModifierPresentationStage[],
+    presentationGeneration: number,
   ): Promise<RendererCompletion> {
     const visualCount = stages.reduce((sum, stage) => sum + stage.dieIds.length, 0);
     if (visualCount > this.maximumDice) {
@@ -837,6 +850,7 @@ export class DraftrollRenderer implements DiceRenderer {
               generatedBy: stages[Math.min(stageIndex + 1, stages.length - 1)].generatedBy,
             },
           },
+          presentationGeneration,
         ),
       );
     }
@@ -845,6 +859,7 @@ export class DraftrollRenderer implements DiceRenderer {
     let presentationMode: RendererCompletion['presentationMode'];
     for (let stageIndex = 0; stageIndex < preparedStages.length; stageIndex += 1) {
       throwIfAborted(options.signal, 'Renderer modifier sequence');
+      this.assertPresentationGeneration(presentationGeneration);
       const [completion] = await this.executePreparedBatch([preparedStages[stageIndex]], {
         emitStarted: stageIndex === 0,
         emitCompleted: stageIndex === preparedStages.length - 1,
@@ -869,6 +884,7 @@ export class DraftrollRenderer implements DiceRenderer {
       tableMode?: 'replace' | 'add';
       sequence?: ModifierPresentationSequence;
     } = {},
+    presentationGeneration = this.presentationGeneration,
   ): Promise<PreparedRollPresentation> {
     const requestedIds = internal.dieIds ?? options.dieIds;
     const selectedIds = requestedIds ? new Set(requestedIds) : null;
@@ -971,6 +987,7 @@ export class DraftrollRenderer implements DiceRenderer {
         : (fallbacks[entry.index]?.result ?? ''),
     );
     return {
+      presentationGeneration,
       result,
       options,
       physical,
@@ -1079,6 +1096,18 @@ export class DraftrollRenderer implements DiceRenderer {
     entries: PreparedRollPresentation[],
     execution: ExecutePreparedBatchOptions = {},
   ): Promise<RendererCompletion[]> {
+    const presentationGeneration =
+      entries[0]?.presentationGeneration ?? this.presentationGeneration;
+    if (entries.some((entry) => entry.presentationGeneration !== presentationGeneration)) {
+      throw new DraftrollStateError(
+        'Draftroll cannot batch presentations from different table generations',
+        {
+          package: 'renderer',
+          recoverable: true,
+        },
+      );
+    }
+    this.assertPresentationGeneration(presentationGeneration);
     const numericResults: number[] = [];
     const physicalKinds: DraftrollDieKind[] = [];
     const themes: string[] = [];
@@ -1216,6 +1245,7 @@ export class DraftrollRenderer implements DiceRenderer {
       entries.length === 1 ? entries[0].options.signal : undefined,
       'Renderer bridge presentation',
     );
+    this.assertPresentationGeneration(presentationGeneration);
     this.recordActivePresentations(entries);
     const completions = entries.map((entry) => ({
       results: entry.expectedResults.slice(),
@@ -1256,7 +1286,7 @@ export class DraftrollRenderer implements DiceRenderer {
         options.signal,
         'Renderer dismissal',
       );
-    else this.bridge.clear?.();
+    else await this.bridge.clear?.();
     this.resetActivePresentations();
     this.emitLifecycle('dissolveFinished', { options });
   }
@@ -1264,7 +1294,8 @@ export class DraftrollRenderer implements DiceRenderer {
   /**
    * Clears all table groups and presentation history.
    */
-  clear(): void {
+  async clear(): Promise<void> {
+    this.presentationGeneration += 1;
     this.cancelAutoClear();
     this.cancelPendingTablePresentations(
       new DraftrollStateError('Draftroll table presentations were cleared', {
@@ -1272,9 +1303,12 @@ export class DraftrollRenderer implements DiceRenderer {
         recoverable: true,
       }),
     );
-    this.bridge.clear?.();
     this.resetActivePresentations();
-    this.emitLifecycle('cleared', {});
+    try {
+      await this.bridge.clear?.();
+    } finally {
+      this.emitLifecycle('cleared', {});
+    }
   }
 
   /**
@@ -1430,6 +1464,17 @@ export class DraftrollRenderer implements DiceRenderer {
   private resetActivePresentations(): void {
     this.activeRollIds.clear();
     this.hasActivePresentation = false;
+  }
+
+  private presentationClearedError(): DraftrollStateError {
+    return new DraftrollStateError('Draftroll table presentations were cleared', {
+      package: 'renderer',
+      recoverable: true,
+    });
+  }
+
+  private assertPresentationGeneration(generation: number): void {
+    if (generation !== this.presentationGeneration) throw this.presentationClearedError();
   }
 
   private cancelPendingTablePresentations(error: Error): void {

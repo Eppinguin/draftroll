@@ -540,7 +540,9 @@ export class DraftrollOverlayRenderer implements DiceRenderer {
 
     this.emitLifecycle('loading', { result, options });
     await this.mount(options.signal);
+    this.assertPresentationGeneration(generation);
     await this.ensurePerformanceConfiguration();
+    this.assertPresentationGeneration(generation);
     const themeIds = new Set<string>();
     if (result.themeId) themeIds.add(result.themeId);
     if (options.defaultThemeId) themeIds.add(options.defaultThemeId);
@@ -548,6 +550,7 @@ export class DraftrollOverlayRenderer implements DiceRenderer {
       if (die.themeId) themeIds.add(die.themeId);
     });
     for (const themeId of themeIds) await this.ensureTheme(themeId, options.signal);
+    this.assertPresentationGeneration(generation);
     this.setIframeActive(true);
     this.panel?.show(result, 'rolling', options.dieIds);
 
@@ -812,6 +815,14 @@ export class DraftrollOverlayRenderer implements DiceRenderer {
     if (!this.iframe) return;
     this.iframe.style.visibility = active ? 'visible' : 'hidden';
     this.iframe.style.opacity = active ? '1' : '0';
+  }
+
+  private assertPresentationGeneration(generation: number): void {
+    if (generation === this.presentationGeneration) return;
+    throw new DraftrollStateError('Draftroll overlay presentation was cleared before it started', {
+      package: 'overlay',
+      recoverable: true,
+    });
   }
 
   /**

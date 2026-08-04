@@ -757,7 +757,8 @@ const replayQuaternionB = new THREE.Quaternion();
 const dynamicBodies: CANNON.Body[] = [];
 
 interface RendererTask<T> {
-  run: () => Promise<T>;
+  generation: number;
+  run: (generation: number) => Promise<T>;
   resolve: (value: T) => void;
   reject: (error: Error) => void;
 }
@@ -766,6 +767,15 @@ const MAX_RENDERER_QUEUE = 32;
 const rendererTaskQueue: RendererTask<unknown>[] = [];
 const rendererIdleWaiters = new Set<() => void>();
 let rendererTaskRunning = false;
+let presentationGeneration = 0;
+
+function presentationClearedError(): Error {
+  return new Error('Draftroll presentation was cleared');
+}
+
+function assertPresentationGeneration(generation: number): void {
+  if (generation !== presentationGeneration) throw presentationClearedError();
+}
 
 function notifyRendererIdle(): void {
   if (isRolling || isPlanning) return;
@@ -778,7 +788,7 @@ function waitForRendererIdle(): Promise<void> {
   return new Promise<void>((resolve) => rendererIdleWaiters.add(resolve));
 }
 
-function enqueueRendererTask<T>(run: () => Promise<T>): Promise<T> {
+function enqueueRendererTask<T>(run: (generation: number) => Promise<T>): Promise<T> {
   if (rendererTaskQueue.length >= MAX_RENDERER_QUEUE) {
     return Promise.reject(
       new Error(`Renderer presentation queue exceeded ${MAX_RENDERER_QUEUE} entries`),
@@ -787,8 +797,13 @@ function enqueueRendererTask<T>(run: () => Promise<T>): Promise<T> {
   const promise = new Promise<T>((resolve, reject) => {
     // The queue is heterogeneous, so entries store their resolver at `unknown`. Each entry is
     // only ever settled with the value its own `run` produced, which is this promise's `T`.
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion
-    rendererTaskQueue.push({ run, resolve: resolve as (value: unknown) => void, reject });
+    rendererTaskQueue.push({
+      generation: presentationGeneration,
+      run,
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+      resolve: resolve as (value: unknown) => void,
+      reject,
+    });
   });
   void drainRendererTaskQueue();
   return promise;
@@ -801,7 +816,8 @@ async function drainRendererTaskQueue(): Promise<void> {
   rendererTaskRunning = true;
   try {
     await waitForRendererIdle();
-    task.resolve(await task.run());
+    assertPresentationGeneration(task.generation);
+    task.resolve(await task.run(task.generation));
   } catch (error) {
     task.reject(error instanceof Error ? error : new Error(String(error)));
   } finally {
@@ -2573,6 +2589,12 @@ function releaseRollWorker(): void {
   rollWorkerReleaseTimer = null;
 }
 
+function cancelPendingRollPlans(error: Error): void {
+  for (const pending of pendingPlans.values()) pending.reject(error);
+  pendingPlans.clear();
+  releaseRollWorker();
+}
+
 function scheduleRollWorkerRelease(): void {
   if (rollWorkerReleaseTimer !== null) window.clearTimeout(rollWorkerReleaseTimer);
   rollWorkerReleaseTimer = window.setTimeout(releaseRollWorker, 45_000);
@@ -3698,6 +3720,7 @@ function mergeAdditiveContext(
 }
 
 async function appendTableRoll(request: DiceRollRequest): Promise<DraftrollRollCompletion> {
+  const generation = presentationGeneration;
   const normalized = normalizeAdditivePhysicalRequest(request);
   if (
     !normalized ||
@@ -3798,6 +3821,7 @@ async function appendTableRoll(request: DiceRollRequest): Promise<DraftrollRollC
       newStates.length > 0
         ? await buildRollPlan([...existingStates, ...newStates], existingCount, lockedTrajectory)
         : createStaticTablePlan(createFallbackOnlyPlan(normalized.fallbacks).duration);
+    assertPresentationGeneration(generation);
     appended.forEach((die) => {
       die.group.visible = true;
     });
@@ -3808,6 +3832,7 @@ async function appendTableRoll(request: DiceRollRequest): Promise<DraftrollRollC
   } catch (error) {
     pendingRollCompletions.delete(registered.pending);
     registered.pending.reject(error instanceof Error ? error : new Error(String(error)));
+    if (generation !== presentationGeneration) throw presentationClearedError();
     removeAppendedDice(appended);
     removeAppendedFallbackVisuals(appendedFallbacks);
     activeKinds = previous.activeKinds;
@@ -3841,7 +3866,11 @@ function canAppendTableRequest(request: DiceRollRequest): boolean {
   );
 }
 
-async function castDice(swipe?: THREE.Vector2): Promise<DraftrollRollCompletion> {
+async function castDice(
+  swipe?: THREE.Vector2,
+  generation = presentationGeneration,
+): Promise<DraftrollRollCompletion> {
+  assertPresentationGeneration(generation);
   if (isRolling || isPlanning) throw new Error('Renderer is busy');
   // The host can reveal an iframe that was laid out at a provisional size.
   // Re-measure immediately before every presentation so camera and backing
@@ -3876,6 +3905,7 @@ async function castDice(swipe?: THREE.Vector2): Promise<DraftrollRollCompletion>
     try {
       plan = await buildRollPlan(states);
     } catch (error) {
+      assertPresentationGeneration(generation);
       console.error('Roll planner failed; using local fallback.', error);
       try {
         plan = applyShapeSymmetryTargets(buildRollPlanSync(states));
@@ -3889,6 +3919,7 @@ async function castDice(swipe?: THREE.Vector2): Promise<DraftrollRollCompletion>
     } finally {
       isPlanning = false;
     }
+    assertPresentationGeneration(generation);
     activeOutcomes = resolveOutcomes(plan.results);
   }
 
@@ -3897,6 +3928,7 @@ async function castDice(swipe?: THREE.Vector2): Promise<DraftrollRollCompletion>
   const scheduledDelay = scheduledStartAtMs === null ? 0 : scheduledStartAtMs - Date.now();
   if (scheduledDelay > 0)
     await new Promise<void>((resolve) => window.setTimeout(resolve, scheduledDelay));
+  assertPresentationGeneration(generation);
 
   const authoritativeDurationMs = Math.max(1, activeAnimationDurationMs ?? plan.duration * 1_000);
   const startLatenessMs =
@@ -4289,7 +4321,9 @@ document
   .querySelector<HTMLButtonElement>('#quantity-plus')
   ?.addEventListener('click', () => updateQuantity(quantity + 1));
 rollButton.addEventListener('click', () => {
-  void enqueueRendererTask(() => castDice()).catch((error) => console.error(error));
+  void enqueueRendererTask((generation) => castDice(undefined, generation)).catch((error) =>
+    console.error(error),
+  );
 });
 soundToggle.addEventListener('click', () => {
   audio.setEnabled(!audio.enabled);
@@ -4318,7 +4352,9 @@ presetInput.addEventListener('input', () => {
 presetInput.addEventListener('keydown', (event) => {
   if (event.key === 'Enter') {
     event.preventDefault();
-    void enqueueRendererTask(() => castDice()).catch((error) => console.error(error));
+    void enqueueRendererTask((generation) => castDice(undefined, generation)).catch((error) =>
+      console.error(error),
+    );
   }
 });
 
@@ -4332,7 +4368,7 @@ window.draftrollDice = {
     ) {
       return appendTableRoll(request);
     }
-    return enqueueRendererTask(async () => {
+    return enqueueRendererTask(async (generation) => {
       queuedApiResults = null;
       queuedOutcomes = null;
       queuedContext = {};
@@ -4401,7 +4437,7 @@ window.draftrollDice = {
             ? THREE.MathUtils.clamp(request.settleAfterProgress, 0, 1)
             : 0.78;
       }
-      return castDice();
+      return castDice(undefined, generation);
     });
   },
   setResults: (results) => {
@@ -4516,7 +4552,15 @@ window.draftrollDice = {
   playReplay: (replay, options) => enqueueRendererTask(() => playRecordedReplay(replay, options)),
   dismiss: (options) => dissolveDice(options),
   clear: () => {
-    if (isRolling || isPlanning) return;
+    presentationGeneration += 1;
+    const error = presentationClearedError();
+    rendererTaskQueue.splice(0).forEach((task) => task.reject(error));
+    cancelPendingRollPlans(error);
+    for (const pending of pendingRollCompletions) pending.reject(error);
+    pendingRollCompletions.clear();
+    isRolling = false;
+    isPlanning = false;
+    tableReplanPaused = false;
     cancelDissolve();
     clearDice();
     hasCast = false;
@@ -4611,7 +4655,9 @@ window.addEventListener('keydown', (event) => {
   if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) return;
   if (event.code === 'Space') {
     event.preventDefault();
-    void enqueueRendererTask(() => castDice()).catch((error) => console.error(error));
+    void enqueueRendererTask((generation) => castDice(undefined, generation)).catch((error) =>
+      console.error(error),
+    );
   }
   const mapping: Record<string, DieKind> = {
     Digit1: 'd4',
@@ -4730,7 +4776,9 @@ canvas.addEventListener('pointerup', (event) => {
   const swipe = new THREE.Vector2(event.clientX, event.clientY).sub(pointerStart);
   pointerStart = null;
   if (swipe.length() > 22) {
-    void enqueueRendererTask(() => castDice(swipe)).catch((error) => console.error(error));
+    void enqueueRendererTask((generation) => castDice(swipe, generation)).catch((error) =>
+      console.error(error),
+    );
     return;
   }
   if (hasCast && interactionOptions.click !== 'none') {
@@ -4741,7 +4789,9 @@ canvas.addEventListener('pointerup', (event) => {
       }),
     );
     if (interactionOptions.click === 'reroll')
-      void enqueueRendererTask(() => castDice()).catch((error) => console.error(error));
+      void enqueueRendererTask((generation) => castDice(undefined, generation)).catch((error) =>
+        console.error(error),
+      );
     if (interactionOptions.click === 'drop')
       void dissolveDice({ durationMs: 180 }).catch(() => undefined);
     if (interactionOptions.click === 'explode')
