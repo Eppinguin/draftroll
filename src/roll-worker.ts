@@ -1,5 +1,10 @@
 import * as CANNON from 'cannon-es';
 import { createDiePhysicsShape, type DieKind } from './physics-shapes';
+import {
+  minimumRestingAlignment,
+  readRestingAlignment,
+  releaseUnstableRestPose,
+} from './resting-physics';
 
 const FIXED_STEP = 1 / 120;
 const RECORD_EVERY = 1;
@@ -33,6 +38,7 @@ interface LockedMotion {
 }
 
 interface PlannerCache {
+  kinds: DieKind[];
   kindsKey: string;
   count: number;
   boundsX: number;
@@ -153,8 +159,8 @@ function createPlanner(kinds: readonly DieKind[], boundsX: number, boundsZ: numb
     body.linearDamping = 0.095 + crowd * 0.025;
     body.angularDamping = 0.085 + crowd * 0.045;
     body.allowSleep = true;
-    body.sleepSpeedLimit = 0.18 + crowd * 0.035;
-    body.sleepTimeLimit = 0.5;
+    body.sleepSpeedLimit = 0.09 + crowd * 0.015;
+    body.sleepTimeLimit = 0.72;
     body.addEventListener('collide', (event: { contact: CANNON.ContactEquation }) => {
       if (!currentActiveFlags[index]) return;
       const strength = Math.abs(event.contact.getImpactVelocityAlongNormal());
@@ -168,7 +174,16 @@ function createPlanner(kinds: readonly DieKind[], boundsX: number, boundsZ: numb
   const bodyKeys = new Map<number, number>();
   bodies.forEach((body, index) => bodyKeys.set(body.id, index));
   staticBodies.forEach((body, index) => bodyKeys.set(body.id, count + index));
-  return { kindsKey: kinds.join(','), count, boundsX, boundsZ, world, bodies, bodyKeys };
+  return {
+    kinds: kinds.slice(),
+    kindsKey: kinds.join(','),
+    count,
+    boundsX,
+    boundsZ,
+    world,
+    bodies,
+    bodyKeys,
+  };
 }
 
 function ensurePlanner(kinds: readonly DieKind[], boundsX: number, boundsZ: number): PlannerCache {
@@ -337,12 +352,6 @@ function enforceBounds(
       if (simulationTime > 4.6 && speed < 0.22 && angularSpeed < 0.46) {
         body.velocity.scale(0.72, body.velocity);
         body.angularVelocity.scale(0.62, body.angularVelocity);
-        if (
-          simulationTime > 5.25 &&
-          body.velocity.length() < 0.075 &&
-          body.angularVelocity.length() < 0.16
-        )
-          body.sleep();
       }
     }
 
@@ -546,8 +555,11 @@ function simulate(
   let slowTime = 0;
   let contactStableTime = 0;
   let displacementStableTime = 0;
+  let wellSeatedTime = 0;
   let previousContacts: number[] = [];
   const stablePositions = new Float32Array(planner.bodies.length * 3);
+  const restingAxes = planner.bodies.map(() => new CANNON.Vec3());
+  const restingAlignments = new Float32Array(planner.bodies.length);
   copyPositions(stablePositions, planner.bodies, lockedCount);
   let settleReason = 'timeout';
   let finalAverageLinear = 0;
@@ -571,6 +583,7 @@ function simulate(
     if (activatedThisStep) {
       contactStableTime = 0;
       displacementStableTime = 0;
+      wellSeatedTime = 0;
       previousContacts = [];
       copyPositions(stablePositions, planner.bodies, lockedCount);
     }
@@ -596,6 +609,7 @@ function simulate(
     let angularSum = 0;
     let activeCount = 0;
     let allSlow = allActive;
+    let allWellSeated = allActive;
     planner.bodies.forEach((body, index) => {
       if (!currentActiveFlags[index] || index < lockedCount) return;
       activeCount += 1;
@@ -605,6 +619,13 @@ function simulate(
       angularSum += angularSpeed;
       if (!(body.sleepState === CANNON.Body.SLEEPING || (speed < 0.2 && angularSpeed < 0.28)))
         allSlow = false;
+      const alignment = readRestingAlignment(
+        planner.kinds[index],
+        body.quaternion,
+        restingAxes[index],
+      );
+      restingAlignments[index] = alignment;
+      if (alignment < minimumRestingAlignment(planner.kinds[index])) allWellSeated = false;
     });
     activeCount = Math.max(1, activeCount);
     const averageLinear = linearSum / activeCount;
@@ -612,6 +633,7 @@ function simulate(
     finalAverageLinear = averageLinear;
     finalAverageAngular = averageAngular;
     slowTime = allSlow ? slowTime + options.step : 0;
+    wellSeatedTime = allWellSeated ? wellSeatedTime + options.step : 0;
 
     const contacts = contactSignature(planner.world, planner.bodyKeys);
     if (contactSimilarity(contacts, previousContacts) >= 0.82) contactStableTime += options.step;
@@ -641,6 +663,13 @@ function simulate(
       : 0;
     const afterLastActivation =
       simulationTime >= Math.max(maximumDelay + 0.3, lockedDuration + 0.15);
+    if (afterLastActivation && !allWellSeated) {
+      planner.bodies.forEach((body, index) => {
+        if (!currentActiveFlags[index] || index < lockedCount) return;
+        if (restingAlignments[index] >= minimumRestingAlignment(planner.kinds[index])) return;
+        releaseUnstableRestPose(body, restingAxes[index]);
+      });
+    }
     const sleepSettled = afterLastActivation && slowTime > 0.5;
     const contactSettled =
       afterLastActivation &&
@@ -654,7 +683,10 @@ function simulate(
       averageAngular < 0.065 &&
       displacementStableTime > 0.2;
     const mayStop =
-      currentStep >= MIN_STEPS && (sleepSettled || contactSettled || microMotionSettled);
+      currentStep >= MIN_STEPS &&
+      allWellSeated &&
+      wellSeatedTime > 0.18 &&
+      (sleepSettled || contactSettled || microMotionSettled);
     if (mayStop) {
       settleReason = contactSettled
         ? 'stable-contact-graph'

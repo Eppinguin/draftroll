@@ -17,6 +17,11 @@ import {
   type ThemeName,
 } from './dice';
 import { DIE_COLLIDER_RADIUS, DIE_RADIUS, isDieKind } from './physics-shapes';
+import {
+  minimumRestingAlignment,
+  readRestingAlignment,
+  releaseUnstableRestPose,
+} from './resting-physics';
 import { THEME_MANIFESTS, type ThemeManifest } from './themes';
 import { FallbackVisualInstance } from './fallback-visuals';
 import { consumeSettledVisualIndexes, deriveDieSettleTimes } from './settlement';
@@ -1237,12 +1242,6 @@ function enforceBodiesBounds(bodies: CANNON.Body[], simulationTime = 0): void {
       if (simulationTime > 4.6 && speed < 0.22 && angularSpeed < 0.46) {
         body.velocity.scale(0.72, body.velocity);
         body.angularVelocity.scale(0.62, body.angularVelocity);
-        if (
-          simulationTime > 5.25 &&
-          body.velocity.length() < 0.075 &&
-          body.angularVelocity.length() < 0.16
-        )
-          body.sleep();
       }
     }
 
@@ -2319,8 +2318,8 @@ function buildRollPlanSync(states: LaunchState[]): RollPlan {
   for (const body of plannerDice) {
     body.linearDamping = 0.095 + plannerCrowd * 0.025;
     body.angularDamping = 0.085 + plannerCrowd * 0.045;
-    body.sleepSpeedLimit = 0.18 + plannerCrowd * 0.035;
-    body.sleepTimeLimit = 0.5;
+    body.sleepSpeedLimit = 0.09 + plannerCrowd * 0.015;
+    body.sleepTimeLimit = 0.72;
   }
   const plannerMasses = plannerDice.map((body) => body.mass);
   const activeFlags = Array.from({ length: plannerDice.length }, () => false);
@@ -2388,7 +2387,10 @@ function buildRollPlanSync(states: LaunchState[]): RollPlan {
   let slowTime = 0;
   let contactStableTime = 0;
   let displacementStableTime = 0;
+  let wellSeatedTime = 0;
   let previousContacts: number[] = [];
+  const restingAxes = plannerDice.map(() => new CANNON.Vec3());
+  const restingAlignments = new Float32Array(plannerDice.length);
   let settleReason = 'timeout';
   const maxSteps = 1_080;
   const minSteps = 120;
@@ -2408,6 +2410,7 @@ function buildRollPlanSync(states: LaunchState[]): RollPlan {
     if (activated) {
       contactStableTime = 0;
       displacementStableTime = 0;
+      wellSeatedTime = 0;
       previousContacts = [];
       copyStablePositions();
     }
@@ -2417,6 +2420,7 @@ function buildRollPlanSync(states: LaunchState[]): RollPlan {
     let linearSum = 0;
     let angularSum = 0;
     let allSlow = activeFlags.every(Boolean);
+    let allWellSeated = activeFlags.every(Boolean);
     let activeCount = 0;
     plannerDice.forEach((body, index) => {
       if (!activeFlags[index]) return;
@@ -2427,8 +2431,13 @@ function buildRollPlanSync(states: LaunchState[]): RollPlan {
       angularSum += angularSpeed;
       if (!(body.sleepState === CANNON.Body.SLEEPING || (speed < 0.2 && angularSpeed < 0.28)))
         allSlow = false;
+      const kind = activeKinds[index] ?? selectedKind;
+      const alignment = readRestingAlignment(kind, body.quaternion, restingAxes[index]);
+      restingAlignments[index] = alignment;
+      if (alignment < minimumRestingAlignment(kind)) allWellSeated = false;
     });
     slowTime = allSlow ? slowTime + PLANNER_STEP : 0;
+    wellSeatedTime = allWellSeated ? wellSeatedTime + PLANNER_STEP : 0;
     const contacts = getContacts();
     if (contactSimilarity(contacts, previousContacts) >= 0.82) contactStableTime += PLANNER_STEP;
     else {
@@ -2445,6 +2454,14 @@ function buildRollPlanSync(states: LaunchState[]): RollPlan {
       appendFrame(frameData, plannerDice);
       frameCount += 1;
       const afterLastActivation = simulationTime >= maximumDelay + 0.3;
+      if (afterLastActivation && !allWellSeated) {
+        plannerDice.forEach((body, index) => {
+          if (!activeFlags[index]) return;
+          const kind = activeKinds[index] ?? selectedKind;
+          if (restingAlignments[index] >= minimumRestingAlignment(kind)) return;
+          releaseUnstableRestPose(body, restingAxes[index]);
+        });
+      }
       const averageLinear = linearSum / Math.max(1, activeCount);
       const averageAngular = angularSum / Math.max(1, activeCount);
       const sleepSettled = afterLastActivation && slowTime > 0.5;
@@ -2459,7 +2476,12 @@ function buildRollPlanSync(states: LaunchState[]): RollPlan {
         averageLinear < 0.035 &&
         averageAngular < 0.065 &&
         displacementStableTime > 0.2;
-      if (currentStep >= minSteps && (sleepSettled || contactSettled || microMotionSettled)) {
+      if (
+        currentStep >= minSteps &&
+        allWellSeated &&
+        wellSeatedTime > 0.18 &&
+        (sleepSettled || contactSettled || microMotionSettled)
+      ) {
         settleReason = contactSettled
           ? 'stable-contact-graph'
           : microMotionSettled

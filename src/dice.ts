@@ -2007,8 +2007,8 @@ export class DieInstance {
     this.body.linearDamping = 0.095;
     this.body.angularDamping = 0.085;
     this.body.allowSleep = true;
-    this.body.sleepSpeedLimit = 0.18;
-    this.body.sleepTimeLimit = 0.5;
+    this.body.sleepSpeedLimit = 0.09;
+    this.body.sleepTimeLimit = 0.72;
   }
 
   getPhysicsOptions(): Required<DiePhysicsOptions> {
