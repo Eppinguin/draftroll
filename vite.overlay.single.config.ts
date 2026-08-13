@@ -30,7 +30,7 @@ function singleOverlay(): Plugin {
       const src = `./${script.fileName}`;
       html = html.replace(
         `<script type="module" crossorigin src="${src}"></script>`,
-        `<script type="module>${script.code}</script>`,
+        `<script type="module">${script.code}</script>`,
       );
       delete bundle[script.fileName];
 
