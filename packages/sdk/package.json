@@ -22,10 +22,6 @@
     "./deck": {
       "types": "./dist/deck.d.ts",
       "default": "./dist/deck.js"
-    },
-    "./polyhedra": {
-      "types": "./dist/polyhedra.d.ts",
-      "default": "./dist/polyhedra.js"
     }
   },
   "dependencies": {
