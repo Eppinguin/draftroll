@@ -2,7 +2,12 @@
 import type { CustomDiceDefinition, CustomDieFace, DisplayRollInput, ExternalDieResult } from '../../protocol/src/index';
 
 export interface DraftrollCardDefinition extends Omit<CustomDieFace, 'weight'> { copies?: number; }
-export interface DraftrollDeckOptions { shuffle?: boolean; random?: () => number; metadata?: Record<string, unknown>; }
+export interface DraftrollDeckOptions {
+  shuffle?: boolean;
+  /** Deterministic/test random source in [0, 1). Production defaults to unbiased WebCrypto sampling. */
+  random?: () => number;
+  metadata?: Record<string, unknown>;
+}
 export interface DraftrollCard {
   id: string; deckId: string; faceIndex: number; copyIndex: number;
   result: number | string; numericValue: number; label: string; metadata?: Record<string, unknown>;
@@ -16,30 +21,47 @@ export interface DraftrollCardDraw {
   toDisplayInput(options?: DraftrollCardDisplayOptions): DisplayRollInput;
 }
 
+type IndexSampler = (upperExclusive: number) => number;
 const cloneMeta = (value?: Record<string, unknown>) => value ? { ...value } : undefined;
 const cloneCard = (card: DraftrollCard): DraftrollCard => ({ ...card, metadata: cloneMeta(card.metadata) });
 
-function defaultRandom(): number {
+function secureIndex(upperExclusive: number): number {
+  if (upperExclusive <= 1) return 0;
+  if (!Number.isSafeInteger(upperExclusive) || upperExclusive < 1 || upperExclusive > 0x1_0000_0000) {
+    throw new Error('Deck sample range must be a positive integer no larger than 2^32');
+  }
   if (!globalThis.crypto?.getRandomValues) throw new Error('DraftrollDeck requires WebCrypto or an injected random()');
-  const data = new Uint32Array(1); globalThis.crypto.getRandomValues(data); return data[0] / 0x1_0000_0000;
+  const limit = Math.floor(0x1_0000_0000 / upperExclusive) * upperExclusive;
+  const data = new Uint32Array(1);
+  do { globalThis.crypto.getRandomValues(data); } while (data[0] >= limit);
+  return data[0] % upperExclusive;
 }
-function shuffle<T>(items: T[], random: () => number): void {
-  for (let i = items.length - 1; i > 0; i -= 1) {
+
+function samplerFromRandom(random?: () => number): IndexSampler {
+  if (!random) return secureIndex;
+  return (upperExclusive) => {
     const sample = random();
     if (!Number.isFinite(sample) || sample < 0 || sample >= 1) throw new Error('Deck random() must return a value in [0, 1)');
-    const j = Math.floor(sample * (i + 1)); [items[i], items[j]] = [items[j], items[i]];
+    return Math.floor(sample * upperExclusive);
+  };
+}
+
+function shuffle<T>(items: T[], sampleIndex: IndexSampler): void {
+  for (let i = items.length - 1; i > 0; i -= 1) {
+    const j = sampleIndex(i + 1); [items[i], items[j]] = [items[j], items[i]];
   }
 }
 
 /**
- * Owns shuffle/depletion/discard state while Draftroll remains stateless at the result boundary.
- * The card is chosen before rendering; `toDisplayInput()` turns the draw into an exact external result.
+ * Owns generic shuffle/depletion/discard state while Draftroll remains stateless at the result boundary.
+ * The card is selected before rendering; `toDisplayInput()` turns the draw into an exact external result.
+ * Named game rules intentionally do not live here.
  * @public
  */
 export class DraftrollDeck {
   readonly id: string;
   readonly definition: CustomDiceDefinition;
-  private readonly random: () => number;
+  private readonly sampleIndex: IndexSampler;
   private readonly source: DraftrollCard[];
   private drawPile: DraftrollCard[];
   private discardPile: DraftrollCard[] = [];
@@ -49,7 +71,7 @@ export class DraftrollDeck {
     this.id = id.trim();
     if (!this.id) throw new Error('A deck ID is required');
     if (!cards.length) throw new Error(`Deck '${this.id}' requires at least one card`);
-    this.random = options.random ?? defaultRandom;
+    this.sampleIndex = samplerFromRandom(options.random);
     const normalized = cards.map((card, index) => {
       if (typeof card.result !== 'number' && typeof card.result !== 'string') throw new Error(`Card ${index + 1} requires a result`);
       if (typeof card.result === 'number' && !Number.isFinite(card.result)) throw new Error(`Card ${index + 1} result must be finite`);
@@ -78,7 +100,7 @@ export class DraftrollDeck {
   get remainingCards(): readonly DraftrollCard[] { return this.drawPile.map(cloneCard); }
   get discardedCards(): readonly DraftrollCard[] { return this.discardPile.map(cloneCard); }
 
-  shuffle(): this { shuffle(this.drawPile, this.random); return this; }
+  shuffle(): this { shuffle(this.drawPile, this.sampleIndex); return this; }
 
   draw(count = 1): DraftrollCardDraw {
     if (!Number.isSafeInteger(count) || count < 1) throw new Error('Draw count must be a positive safe integer');
