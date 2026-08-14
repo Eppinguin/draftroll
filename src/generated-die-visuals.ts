@@ -56,6 +56,7 @@ interface BridgePending {
 const UP = new THREE.Vector3(0, 1, 0);
 const GENERATED_STEP = 1 / 120;
 const activeGeneratedDice = new Set<NaturalGeneratedDie>();
+const pendingGeneratedDice = new Set<NaturalGeneratedDie>();
 const bridgePending = new Map<number, BridgePending>();
 let sharedPlannerWorker: Worker | null = null;
 
@@ -777,6 +778,7 @@ class NaturalGeneratedDie {
     if (newlyIntroduced) this.applyRequestedResult(landed);
     this.trajectory = trajectory;
     this.needsPlanning = false;
+    pendingGeneratedDice.delete(this);
     this.lastProgress = 0;
     const last = Math.max(0, trajectory.frameCount - 1) * 3;
     this.end.set(trajectory.positions[last] ?? 0, trajectory.positions[last + 2] ?? 0);
@@ -798,6 +800,7 @@ class NaturalGeneratedDie {
     this.configured = true;
     this.trajectory = null;
     this.needsPlanning = true;
+    pendingGeneratedDice.add(this);
     this.lastProgress = 0;
     this.settled = false;
     this.presented = false;
@@ -819,7 +822,7 @@ class NaturalGeneratedDie {
 
   update(progress: number, _duration = 1): void {
     if (this.settled) return;
-    if (!this.trajectory) finalizeGeneratedFallbackBatch();
+    if (pendingGeneratedDice.size > 0) finalizeGeneratedFallbackBatch();
     if (!this.trajectory) return;
     const normalized = THREE.MathUtils.clamp(progress, 0, 1);
     this.lastProgress = normalized;
@@ -861,6 +864,7 @@ class NaturalGeneratedDie {
 
   dispose(): void {
     activeGeneratedDice.delete(this);
+    pendingGeneratedDice.delete(this);
     for (const geometry of this.extraGeometries) geometry.dispose();
     this.base.dispose();
   }
@@ -872,8 +876,9 @@ class NaturalGeneratedDie {
  * current pose/momentum and only launching newly configured dice from the hand.
  */
 export function finalizeGeneratedFallbackBatch(): void {
+  if (pendingGeneratedDice.size === 0) return;
   const entries = configuredGeneratedDice();
-  if (entries.length === 0 || !entries.some((entry) => entry.requiresPlanning)) return;
+  if (entries.length === 0) return;
   simulateLocalBatch(entries);
 }
 
