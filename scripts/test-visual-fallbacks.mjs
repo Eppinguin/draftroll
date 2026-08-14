@@ -26,17 +26,29 @@ assert.match(visuals, /class FallbackVisualInstance/);
 assert.match(visuals, /createGeneratedDieVisual/);
 assert.match(visuals, /triangulateTexturedShape/);
 assert.match(visuals, /createDieSurfaceTexture/);
-assert.match(visuals, /createFaceLabelTexture/);
-assert.match(visuals, /faceCenterAndNormal/);
+assert.match(visuals, /logicalFaceValues/);
+assert.match(visuals, /\[1, 1, 2, 2, 3, 3\]/);
+assert.match(visuals, /createNumberTexture/);
+assert.match(visuals, /facesToLabel/);
+assert.match(visuals, /shape\.exact/);
+assert.match(visuals, /faceFrame/);
 assert.match(visuals, /settledRotation/);
 assert.match(visuals, /THREE\.DoubleSide/);
+
 assert.match(visuals, /createCardVisual/);
 assert.match(visuals, /createCardFrontTexture/);
 assert.match(visuals, /createCardBackTexture/);
-assert.match(visuals, /new RoundedBoxGeometry/);
-assert.match(visuals, /cardSettledPosition/);
+assert.match(visuals, /createRoundedCardShape/);
+assert.match(visuals, /new THREE\.ExtrudeGeometry/);
+assert.match(visuals, /new THREE\.ShapeGeometry/);
+assert.match(visuals, /normalizeCardUvs/);
+assert.match(visuals, /cardSettledLayout/);
+assert.match(visuals, /CARD_WIDTH \* scale \+ CARD_GAP/);
+assert.match(visuals, /CARD_HEIGHT \* scale \+ CARD_ROW_GAP/);
 assert.match(visuals, /easeInOutCubic/);
-assert.match(visuals, /Math\.PI, trajectory\.finalYaw/);
+assert.match(visuals, /faceDown/);
+assert.match(visuals, /faceUp/);
+assert.doesNotMatch(visuals, /RoundedBoxGeometry/);
 assert.match(visuals, /spec\.oppositeLabel/);
 assert.match(visuals, /getSettleTime/);
 
@@ -52,9 +64,12 @@ assert.match(html, /1d20\+1d2\+1dF\+1d9\+1d100/);
 
 console.log(JSON.stringify({
   ok: true,
-  fallbacks: ['physical coin', 'd10x/d100', 'dF', 'textured arbitrary dN', 'symbolic', 'dealt 3d cards'],
+  fallbacks: ['physical coin', 'd10x/d100', 'dF', 'fully numbered arbitrary dN', 'symbolic', 'rounded dealt cards'],
   mixedWithPhysical: true,
   arbitraryNumericSolid: true,
-  faceBoundResultLabel: true,
+  exactDiceNumberEveryLandingFace: true,
+  d3OppositeFaceValues: true,
+  roundedCardGeometry: true,
+  collisionFreeCardLayout: true,
   cardDealAnimation: true,
 }, null, 2));
