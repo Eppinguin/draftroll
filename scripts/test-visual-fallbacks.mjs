@@ -1,12 +1,15 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { access, readFile } from 'node:fs/promises';
 
 const [
   renderer,
   engine,
   visuals,
-  generatedVisuals,
-  generatedWorker,
+  physicalDice,
+  physicalVisuals,
+  physicalPlanner,
+  physicalWorker,
+  physicsShapes,
   visualBase,
   polyhedra,
   html,
@@ -14,8 +17,11 @@ const [
   readFile(new URL('../packages/renderer/src/index.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/main.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/fallback-visuals.ts', import.meta.url), 'utf8'),
-  readFile(new URL('../src/generated-die-visuals.ts', import.meta.url), 'utf8'),
-  readFile(new URL('../src/generated-roll-worker.ts', import.meta.url), 'utf8'),
+  readFile(new URL('../src/physical-dice.ts', import.meta.url), 'utf8'),
+  readFile(new URL('../src/physical-die-visuals.ts', import.meta.url), 'utf8'),
+  readFile(new URL('../src/physical-roll-planner.ts', import.meta.url), 'utf8'),
+  readFile(new URL('../src/physical-roll-worker.ts', import.meta.url), 'utf8'),
+  readFile(new URL('../src/physics-shapes.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/fallback-visuals-base.ts', import.meta.url), 'utf8'),
   readFile(new URL('../packages/renderer/src/polyhedra.ts', import.meta.url), 'utf8'),
   readFile(new URL('../index.html', import.meta.url), 'utf8'),
@@ -34,64 +40,85 @@ assert.match(engine, /collectOrderedVisualResults/);
 assert.match(engine, /visual\.update\(fallbackProgress, plan\.duration\)/);
 assert.match(engine, /fallbacks:\s*activeFallbackSpecs/);
 
-assert.match(visuals, /MAXIMUM_EXACT_GENERATED_SIDES = 256/);
-assert.match(visuals, /GeneratedFallbackVisualInstance/);
-assert.match(visuals, /BaseFallbackVisualInstance/);
-assert.match(visuals, /usesGeneratedPhysics/);
-assert.match(visuals, /sides <= MAXIMUM_EXACT_GENERATED_SIDES/);
+// One physical model owns canonical, generated, and future theme/custom dice.
+assert.match(physicalDice, /interface PhysicalDieDefinition/);
+assert.match(physicalDice, /PhysicalDieGeometrySource = 'canonical' \| 'generated' \| 'theme'/);
+assert.match(physicalDice, /PhysicalDieTargetingMode = 'symmetry' \| 'relabel' \| 'fixed'/);
+for (const content of ['number', 'text', 'icon', 'texture']) {
+  assert.match(physicalDice, new RegExp(`kind: '${content}'`), `physical face content ${content} missing`);
+}
+assert.match(physicalDice, /interface PhysicalDieOutcomeSlot/);
+assert.match(physicalDice, /supportNormals/);
+assert.match(physicalDice, /labelAnchors/);
+assert.match(physicalDice, /createCanonicalPhysicalDieDefinition/);
+assert.match(physicalDice, /createGeneratedPhysicalDieDefinition/);
+assert.match(physicalDice, /createPhysicalDieCollider/);
+assert.match(physicalDice, /physicalDieColliderRadius/);
+assert.match(physicalDice, /resolveLandedPhysicalOutcome/);
+assert.match(physicalDice, /remapPhysicalDiePresentation/);
+assert.match(physicalDice, /targeting: 'symmetry'/);
+assert.match(physicalDice, /targeting: 'relabel'/);
 
-// Generated-only pools share one world. On additive fallback-only rolls, old dice enter
-// from their current visible state/momentum instead of being replayed from their old spawn.
-assert.match(generatedVisuals, /activeGeneratedDice/);
-assert.match(generatedVisuals, /pendingGeneratedDice/);
-assert.match(generatedVisuals, /simulateLocalBatch/);
-assert.match(generatedVisuals, /entries\.map\(\(entry\) => entry\.plannerState\(\)\)/);
-assert.match(generatedVisuals, /pendingGeneratedDice\.size > 0/);
-assert.match(generatedVisuals, /bridgePending\.size === 0/);
-assert.match(generatedVisuals, /bridgePending\.size > 0/);
-assert.match(generatedVisuals, /new CANNON\.ContactMaterial\(dieMaterial, dieMaterial/);
-assert.match(generatedVisuals, /world\.step\(GENERATED_STEP\)/);
-assert.match(generatedVisuals, /finalizeGeneratedFallbackBatch/);
-assert.match(generatedVisuals, /lastProgress/);
-assert.match(generatedVisuals, /angularX/);
-assert.match(generatedVisuals, /newlyIntroduced/);
-assert.match(generatedVisuals, /pendingGeneratedDice\.delete\(this\)/);
+// The old canonical physics helper is now only a compatibility facade over PhysicalDieDefinition.
+assert.match(physicsShapes, /createCanonicalPhysicalDieDefinition/);
+assert.match(physicsShapes, /createPhysicalDieCollider/);
+assert.match(physicsShapes, /CANONICAL_COLLISION_SCALE/);
+assert.doesNotMatch(physicsShapes, /COLLIDER_DATA/);
 
-// Mixed and additive standard/generated rolls reuse one warm collision worker. The bridge
-// forwards the standard planner's locked trajectory so old normal dice keep the same
-// additive semantics while generated dice can still be hit and move naturally.
-assert.match(generatedVisuals, /installSharedWorkerBridge/);
-assert.match(generatedVisuals, /generated-roll-worker\.ts/);
-assert.match(generatedVisuals, /sharedPlannerWorker/);
-assert.match(generatedVisuals, /bridgePending/);
-assert.match(generatedVisuals, /splitGeneratedTrajectories/);
-assert.match(generatedVisuals, /message\.lockedTrajectory instanceof ArrayBuffer/);
-assert.match(generatedVisuals, /nativePostMessage\.call\(\s*planner/);
-assert.doesNotMatch(generatedVisuals, /\(message\.lockedCount \?\? 0\) > 0/);
+// One shared planner owns Cannon setup, contacts, locked motion, caching and trajectory recording.
+assert.match(physicalPlanner, /class PhysicalRollPlanner/);
+assert.match(physicalPlanner, /private cache: PlannerCache \| null/);
+assert.match(physicalPlanner, /cacheKey/);
+assert.match(physicalPlanner, /createPhysicalDieCollider/);
+assert.match(physicalPlanner, /new CANNON\.ContactMaterial\(this\.diceMaterial, this\.diceMaterial/);
+assert.match(physicalPlanner, /lockedMotion/);
+assert.match(physicalPlanner, /updateLockedBodies/);
+assert.match(physicalPlanner, /world\.step\(PHYSICAL_PLANNER_STEP\)/);
+assert.match(physicalPlanner, /resolveLandedPhysicalOutcome/);
+assert.match(physicalPlanner, /extractPhysicalTransforms/);
 
-assert.match(generatedWorker, /createDiePhysicsShape/);
-assert.match(generatedWorker, /createReadablePolyhedron/);
-assert.match(generatedWorker, /generatedShapeCache/);
-assert.match(generatedWorker, /createGeneratedCollider/);
-assert.match(generatedWorker, /lockedTrajectory/);
-assert.match(generatedWorker, /sampleLocked/);
-assert.match(generatedWorker, /updateLockedBodies/);
-assert.match(generatedWorker, /configureLocked/);
-assert.match(generatedWorker, /const totalCount = standardCount \+ generatedShapes\.length/);
-assert.match(generatedWorker, /new CANNON\.ContactMaterial\(diceMaterial, diceMaterial/);
-assert.match(generatedWorker, /generatedTransforms/);
-assert.match(generatedWorker, /generatedLandings/);
-assert.match(generatedWorker, /shared-contact-stable/);
+// The worker is generic: canonical bodies and arbitrary additional physical definitions share it.
+assert.match(physicalWorker, /PhysicalRollPlanner/);
+assert.match(physicalWorker, /AdditionalPhysicalPlanEntry/);
+assert.match(physicalWorker, /definition\?: PhysicalDieDefinition/);
+assert.match(physicalWorker, /createCanonicalPhysicalDieDefinition/);
+assert.match(physicalWorker, /createGeneratedPhysicalDieDefinition/);
+assert.match(physicalWorker, /additionalTransforms/);
+assert.match(physicalWorker, /additionalLandings/);
+assert.doesNotMatch(physicalWorker, /new CANNON\.World/);
 
-assert.match(generatedVisuals, /landedOutcome/);
-assert.match(generatedVisuals, /applyRequestedResult/);
-assert.match(generatedVisuals, /originalLabelMaps/);
-assert.match(generatedVisuals, /secondaryAnchor/);
-assert.match(generatedVisuals, /covered\.has\(faceIndex\)/);
-assert.match(generatedVisuals, /labelMaterials/);
-assert.doesNotMatch(generatedVisuals, /settledRotation/);
-assert.doesNotMatch(generatedVisuals, /resultOutcome\.settledUp/);
+// Numeric spinner inputs are promoted immediately into the physical model.
+assert.match(visuals, /PhysicalDieVisualInstance/);
+assert.match(visuals, /usesPhysicalDieModel/);
+assert.doesNotMatch(visuals, /GeneratedFallbackVisualInstance/);
+assert.match(physicalVisuals, /class PhysicalDieVisualInstance/);
+assert.match(physicalVisuals, /createGeneratedPhysicalDieDefinition/);
+assert.match(physicalVisuals, /createDefaultPhysicalDiePresentation/);
+assert.match(physicalVisuals, /remapPhysicalDiePresentation/);
+assert.match(physicalVisuals, /physicalDieColliderRadius/);
+assert.match(physicalVisuals, /localPlanner\.simulate/);
+assert.match(physicalVisuals, /physical-roll-worker\.ts/);
+assert.match(physicalVisuals, /installPhysicalWorkerBridge/);
+assert.match(physicalVisuals, /activePhysicalDice/);
+assert.match(physicalVisuals, /pendingPhysicalDice/);
+assert.doesNotMatch(physicalVisuals, /new CANNON\.World/);
+assert.doesNotMatch(physicalVisuals, /settledRotation/);
 
+// Generated geometry remains the arbitrary-shape provider, not a separate die architecture.
+assert.match(polyhedra, /function fibonacciPoints/);
+assert.match(polyhedra, /function convexHull/);
+assert.match(polyhedra, /function facetedSphere/);
+assert.match(polyhedra, /function featureCandidates/);
+assert.match(polyhedra, /function vertexAnchors/);
+assert.match(polyhedra, /function edgeAnchors/);
+assert.match(polyhedra, /labelKind: PolyhedronLabelKind/);
+assert.match(polyhedra, /settledUp: PolyhedronVertex/);
+assert.match(polyhedra, /Fibonacci-sphere polar dual/);
+assert.doesNotMatch(polyhedra, /function triangularPrism/);
+assert.doesNotMatch(polyhedra, /function bipyramid/);
+assert.doesNotMatch(polyhedra, /function prismBarrel/);
+
+// Cards/coins/symbolic visuals still belong to the non-die presentation layer.
 assert.match(visualBase, /createGeneratedDieVisual/);
 assert.match(visualBase, /triangulateTexturedShape/);
 assert.match(visualBase, /createDieSurfaceTexture/);
@@ -114,37 +141,28 @@ assert.match(visualBase, /faceUp/);
 assert.match(visualBase, /spec\.oppositeLabel/);
 assert.match(visualBase, /getSettleTime/);
 
-assert.match(polyhedra, /function fibonacciPoints/);
-assert.match(polyhedra, /function convexHull/);
-assert.match(polyhedra, /function facetedSphere/);
-assert.match(polyhedra, /function featureCandidates/);
-assert.match(polyhedra, /function vertexAnchors/);
-assert.match(polyhedra, /function edgeAnchors/);
-assert.match(polyhedra, /labelKind: PolyhedronLabelKind/);
-assert.match(polyhedra, /settledUp: PolyhedronVertex/);
-assert.match(polyhedra, /Fibonacci-sphere polar dual/);
-assert.doesNotMatch(polyhedra, /function triangularPrism/);
-assert.doesNotMatch(polyhedra, /function bipyramid/);
-assert.doesNotMatch(polyhedra, /function prismBarrel/);
 assert.match(html, /1d20\+1d2\+1dF\+1d9\+1d100/);
+
+// These modules were the old parallel generated-dice architecture and must stay deleted.
+for (const legacy of ['../src/generated-die-visuals.ts', '../src/generated-roll-worker.ts']) {
+  await assert.rejects(access(new URL(legacy, import.meta.url)));
+}
 
 console.log(JSON.stringify({
   ok: true,
-  fallbacks: ['physical coin', 'd10x/d100', 'dF', 'natural generated dN', 'symbolic', 'rounded dealt cards'],
-  mixedWithPhysical: true,
-  arbitraryNumericSolid: true,
-  generatedSupportStates: true,
+  physicalDieArchitecture: true,
+  canonicalAndGeneratedDefinitions: true,
+  extensibleFaceContent: ['number', 'text', 'icon', 'texture'],
+  targetingModes: ['symmetry', 'relabel', 'fixed'],
+  sharedPhysicalPlanner: true,
+  cachedPlannerWorlds: true,
+  additiveLockedMotion: true,
+  generatedGeneratedCollisions: true,
+  generatedStandardCollisions: true,
+  noParallelGeneratedPhysicsEngine: true,
   automaticFaceEdgeVertexLabels: true,
   generatedFaceLabelCoverage: true,
   naturalGeneratedPhysics: true,
-  generatedGeneratedCollisions: true,
-  generatedStandardCollisions: true,
-  additiveGeneratedCollisions: true,
-  noAdditiveGeneratedRewind: true,
-  noDuplicateAdditivePlanning: true,
-  persistentGeneratedPlannerWorker: true,
-  noLateGeneratedCorrection: true,
-  representativeHighCountFallback: true,
   roundedCardGeometry: true,
   collisionFreeCardLayout: true,
   cardDealAnimation: true,
