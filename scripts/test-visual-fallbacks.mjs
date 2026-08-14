@@ -9,8 +9,10 @@ const [
   physicalDice,
   physicalVisuals,
   physicalPlanner,
+  rollWorker,
   physicalWorker,
   physicsShapes,
+  restingPhysics,
   visualBase,
   polyhedra,
   html,
@@ -22,8 +24,10 @@ const [
   readFile(new URL('../src/physical-dice.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/physical-die-visuals.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/physical-roll-planner.ts', import.meta.url), 'utf8'),
+  readFile(new URL('../src/roll-worker.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/physical-roll-worker.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/physics-shapes.ts', import.meta.url), 'utf8'),
+  readFile(new URL('../src/resting-physics.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/fallback-visuals-base.ts', import.meta.url), 'utf8'),
   readFile(new URL('../packages/renderer/src/polyhedra.ts', import.meta.url), 'utf8'),
   readFile(new URL('../index.html', import.meta.url), 'utf8'),
@@ -78,6 +82,13 @@ assert.match(physicsShapes, /createPhysicalDieCollider/);
 assert.match(physicsShapes, /CANONICAL_COLLISION_SCALE/);
 assert.doesNotMatch(physicsShapes, /COLLIDER_DATA/);
 
+// Resting-state correction is definition-driven rather than hard-coded by DieKind.
+assert.match(restingPhysics, /minimumPhysicalRestingAlignment/);
+assert.match(restingPhysics, /readPhysicalRestingAlignment/);
+assert.match(restingPhysics, /definition\.outcomes/);
+assert.match(restingPhysics, /createCanonicalPhysicalDieDefinition/);
+assert.doesNotMatch(restingPhysics, /RESULT_DIRECTIONS/);
+
 // One shared planner owns Cannon setup, contacts, locked motion, caching and trajectory recording.
 assert.match(physicalPlanner, /class PhysicalRollPlanner/);
 assert.match(physicalPlanner, /private cache: PlannerCache \| null/);
@@ -87,17 +98,25 @@ assert.match(physicalPlanner, /new CANNON\.ContactMaterial\(this\.diceMaterial, 
 assert.match(physicalPlanner, /lockedMotion/);
 assert.match(physicalPlanner, /updateLockedBodies/);
 assert.match(physicalPlanner, /world\.step\(PHYSICAL_PLANNER_STEP\)/);
+assert.match(physicalPlanner, /readPhysicalRestingAlignment/);
+assert.match(physicalPlanner, /releaseUnstableRestPose/);
 assert.match(physicalPlanner, /resolveLandedPhysicalOutcome/);
 assert.match(physicalPlanner, /extractPhysicalTransforms/);
 
-// The worker is generic: canonical bodies and arbitrary additional physical definitions share it.
-assert.match(physicalWorker, /PhysicalRollPlanner/);
-assert.match(physicalWorker, /AdditionalPhysicalPlanEntry/);
-assert.match(physicalWorker, /definition\?: PhysicalDieDefinition/);
-assert.match(physicalWorker, /createCanonicalPhysicalDieDefinition/);
-assert.match(physicalWorker, /createGeneratedPhysicalDieDefinition/);
-assert.match(physicalWorker, /additionalTransforms/);
-assert.match(physicalWorker, /additionalLandings/);
+// The established roll worker is now the generic physical worker for canonical + additional dice.
+assert.match(rollWorker, /PhysicalRollPlanner/);
+assert.match(rollWorker, /AdditionalPhysicalPlanEntry/);
+assert.match(rollWorker, /definition\?: PhysicalDieDefinition/);
+assert.match(rollWorker, /createCanonicalPhysicalDieDefinition/);
+assert.match(rollWorker, /createGeneratedPhysicalDieDefinition/);
+assert.match(rollWorker, /additionalTransforms/);
+assert.match(rollWorker, /additionalLandings/);
+assert.match(rollWorker, /extractPhysicalTransforms/);
+assert.doesNotMatch(rollWorker, /new CANNON\.World/);
+
+// Transitional physical worker entrypoint must not grow a second planner implementation.
+assert.match(physicalWorker, /import '\.\/roll-worker'/);
+assert.doesNotMatch(physicalWorker, /PhysicalRollPlanner/);
 assert.doesNotMatch(physicalWorker, /new CANNON\.World/);
 
 // Numeric spinner inputs are promoted immediately into the physical model.
@@ -170,8 +189,10 @@ console.log(JSON.stringify({
   extensibleFaceContent: ['number', 'text', 'icon', 'texture'],
   targetingModes: ['symmetry', 'relabel', 'fixed'],
   sharedPhysicalPlanner: true,
+  unifiedRollWorkerProtocol: true,
   cachedPlannerWorlds: true,
   additiveLockedMotion: true,
+  genericRestingPhysics: true,
   generatedGeneratedCollisions: true,
   generatedStandardCollisions: true,
   noParallelGeneratedPhysicsEngine: true,
