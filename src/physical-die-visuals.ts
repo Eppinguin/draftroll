@@ -15,6 +15,7 @@ import {
   PhysicalRollPlanner,
   type PhysicalRollEntry,
 } from './physical-roll-planner';
+import { getRuntimeThemeMaterial, getRuntimeThemeTexture } from './runtime-themes';
 
 export interface PhysicalVisualBounds {
   x: number;
@@ -45,15 +46,8 @@ interface PhysicalWorkerResponse {
   id: number;
   step: number;
   frameCount: number;
-  dieCount: number;
-  transforms: ArrayBuffer;
-  impacts: ArrayBuffer;
-  duration: number;
-  settleReason: string;
-  physicsSteps: number;
-  diagnostics?: unknown;
-  additionalTransforms: ArrayBuffer;
-  additionalLandings: ArrayBuffer;
+  additionalTransforms?: ArrayBuffer;
+  additionalLandings?: ArrayBuffer;
 }
 
 interface BridgePending {
@@ -62,11 +56,13 @@ interface BridgePending {
 }
 
 const MAXIMUM_EXACT_GENERATED_SIDES = 256;
+const LABEL_ATLAS_COLUMNS = 5;
+const LABEL_ATLAS_ROWS = 4;
+const LABEL_ATLAS_PADDING = 0.055;
 const activePhysicalDice = new Set<PhysicalDieVisualInstance>();
 const pendingPhysicalDice = new Set<PhysicalDieVisualInstance>();
 const bridgePending = new Map<number, BridgePending>();
 const localPlanner = new PhysicalRollPlanner();
-let sharedPlannerWorker: Worker | null = null;
 
 export function numericPhysicalSides(spec: DraftrollFallbackVisual): number | null {
   if (Number.isSafeInteger(spec.sides) && (spec.sides ?? 0) >= 1) return spec.sides!;
@@ -133,6 +129,26 @@ function anchorQuaternion(anchor: PolyhedronLabelAnchor): THREE.Quaternion {
   return new THREE.Quaternion().setFromRotationMatrix(
     new THREE.Matrix4().makeBasis(right, up, normal),
   );
+}
+
+function atlasCellTexture(atlas: THREE.Texture, value: number): THREE.Texture {
+  const clamped = THREE.MathUtils.clamp(Math.round(value), 1, 20);
+  const cell = clamped - 1;
+  const column = cell % LABEL_ATLAS_COLUMNS;
+  const row = Math.floor(cell / LABEL_ATLAS_COLUMNS);
+  const padU = LABEL_ATLAS_PADDING / LABEL_ATLAS_COLUMNS;
+  const padV = LABEL_ATLAS_PADDING / LABEL_ATLAS_ROWS;
+  const u0 = column / LABEL_ATLAS_COLUMNS + padU;
+  const u1 = (column + 1) / LABEL_ATLAS_COLUMNS - padU;
+  const v0 = 1 - (row + 1) / LABEL_ATLAS_ROWS + padV;
+  const v1 = 1 - row / LABEL_ATLAS_ROWS - padV;
+  const texture = atlas.clone();
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.offset.set(u0, v0);
+  texture.repeat.set(u1 - u0, v1 - v0);
+  texture.needsUpdate = true;
+  return texture;
 }
 
 function sample(
@@ -317,58 +333,11 @@ function commitAdditionalTrajectories(
   });
 }
 
-function sharedWorker(): Worker {
-  if (sharedPlannerWorker) return sharedPlannerWorker;
-  const worker = new Worker(new URL('./physical-roll-worker.ts', import.meta.url), {
-    type: 'module',
-  });
-  worker.addEventListener('message', (event: MessageEvent<PhysicalWorkerResponse>) => {
-    const response = event.data;
-    const pending = bridgePending.get(response.id);
-    if (!pending) return;
-    bridgePending.delete(response.id);
-    commitAdditionalTrajectories(
-      new Float32Array(response.additionalTransforms),
-      response.frameCount,
-      response.step,
-      pending.entries,
-      new Int32Array(response.additionalLandings),
-    );
-    pending.owner.dispatchEvent(
-      new MessageEvent('message', {
-        data: {
-          id: response.id,
-          step: response.step,
-          frameCount: response.frameCount,
-          dieCount: response.dieCount,
-          transforms: response.transforms,
-          impacts: response.impacts,
-          duration: response.duration,
-          settleReason: response.settleReason,
-          physicsSteps: response.physicsSteps,
-          diagnostics: response.diagnostics,
-        },
-      }),
-    );
-  });
-  worker.addEventListener('error', (event) => {
-    for (const pending of bridgePending.values()) {
-      pending.owner.dispatchEvent(
-        new ErrorEvent('error', {
-          message: event.message || 'Physical dice collision planner failed.',
-        }),
-      );
-    }
-    bridgePending.clear();
-    sharedPlannerWorker = null;
-  });
-  sharedPlannerWorker = worker;
-  return worker;
-}
-
 /**
- * Transitional bridge from the legacy canonical-only planner request to the generic physical
- * planner. Once main.ts accepts PhysicalDieDefinition[] directly this adapter can disappear.
+ * Transitional bridge from the legacy canonical-only request shape to the generic physical worker.
+ * It augments the existing worker request and observes that same worker's response; no second
+ * worker or second physics simulation is created. Once main.ts accepts PhysicalDieDefinition[]
+ * directly this adapter can disappear.
  */
 function installPhysicalWorkerBridge(): void {
   if (typeof Worker === 'undefined') return;
@@ -396,21 +365,44 @@ function installPhysicalWorkerBridge(): void {
       return;
     }
 
-    const planner = sharedWorker();
-    bridgePending.set(message.id, { owner: this, entries });
-    const additional = entries.map((entry) => ({
-      sides: entry.sides,
-      state: entry.plannerState(),
-    }));
-    const transfer: Transferable[] = [message.states];
-    if (message.lockedTrajectory instanceof ArrayBuffer) transfer.push(message.lockedTrajectory);
+    const owner = this;
+    const requestId = message.id;
+    bridgePending.set(requestId, { owner, entries });
+    const onMessage = (event: MessageEvent<PhysicalWorkerResponse>): void => {
+      const response = event.data;
+      if (response?.id !== requestId) return;
+      owner.removeEventListener('message', onMessage as EventListener);
+      owner.removeEventListener('error', onError as EventListener);
+      const pending = bridgePending.get(requestId);
+      if (!pending || pending.owner !== owner) return;
+      bridgePending.delete(requestId);
+      if (!(response.additionalTransforms instanceof ArrayBuffer)) return;
+      if (!(response.additionalLandings instanceof ArrayBuffer)) return;
+      commitAdditionalTrajectories(
+        new Float32Array(response.additionalTransforms),
+        response.frameCount,
+        response.step,
+        pending.entries,
+        new Int32Array(response.additionalLandings),
+      );
+    };
+    const onError = (): void => {
+      owner.removeEventListener('message', onMessage as EventListener);
+      bridgePending.delete(requestId);
+    };
+    owner.addEventListener('message', onMessage as EventListener);
+    owner.addEventListener('error', onError as EventListener, { once: true });
+
     nativePostMessage.call(
-      planner,
+      owner,
       {
         ...message,
-        additional,
+        additional: entries.map((entry) => ({
+          sides: entry.sides,
+          state: entry.plannerState(),
+        })),
       },
-      transfer,
+      transferOrOptions,
     );
   } as Worker['postMessage'];
 
@@ -435,6 +427,7 @@ export class PhysicalDieVisualInstance {
   private readonly inner: THREE.Group;
   private readonly labelMaterials: THREE.MeshBasicMaterial[];
   private readonly originalLabelMaps: Array<THREE.Texture | null>;
+  private readonly ownedLabelTextures: THREE.Texture[] = [];
   private readonly extraGeometries: THREE.BufferGeometry[] = [];
   private readonly defaultPresentation: PhysicalDiePresentation;
   private trajectory: RecordedTrajectory | null = null;
@@ -457,6 +450,29 @@ export class PhysicalDieVisualInstance {
     if (!(inner instanceof THREE.Group)) throw new Error('Physical die visual group is missing.');
     this.inner = inner;
 
+    const body = inner.children[0];
+    if (body instanceof THREE.Mesh && body.material instanceof THREE.MeshPhysicalMaterial) {
+      const runtimeMaterial = getRuntimeThemeMaterial(spec.theme, spec.type);
+      const surface = getRuntimeThemeTexture(spec.theme, spec.type, 'surface');
+      const normal = getRuntimeThemeTexture(spec.theme, spec.type, 'normal');
+      const roughness = getRuntimeThemeTexture(spec.theme, spec.type, 'roughness');
+      if (surface) body.material.map = surface;
+      if (normal) body.material.normalMap = normal;
+      if (roughness) body.material.roughnessMap = roughness;
+      if (runtimeMaterial?.color !== undefined) body.material.color.set(runtimeMaterial.color);
+      if (runtimeMaterial?.emissive !== undefined) body.material.emissive.set(runtimeMaterial.emissive);
+      if (runtimeMaterial?.emissiveIntensity !== undefined) {
+        body.material.emissiveIntensity = runtimeMaterial.emissiveIntensity;
+      }
+      if (runtimeMaterial?.roughness !== undefined) body.material.roughness = runtimeMaterial.roughness;
+      if (runtimeMaterial?.metalness !== undefined) body.material.metalness = runtimeMaterial.metalness;
+      if (runtimeMaterial?.clearcoat !== undefined) body.material.clearcoat = runtimeMaterial.clearcoat;
+      if (runtimeMaterial?.clearcoatRoughness !== undefined) {
+        body.material.clearcoatRoughness = runtimeMaterial.clearcoatRoughness;
+      }
+      body.material.needsUpdate = true;
+    }
+
     const labelMeshes = inner.children
       .slice(2)
       .filter((child): child is THREE.Mesh => child instanceof THREE.Mesh);
@@ -469,7 +485,23 @@ export class PhysicalDieVisualInstance {
       }
       return mesh.material;
     });
-    this.originalLabelMaps = this.labelMaterials.map((material) => material.map);
+
+    const runtimeAtlas =
+      getRuntimeThemeTexture(spec.theme, spec.type, 'label') ??
+      getRuntimeThemeTexture(spec.theme, `d${sides}`, 'label');
+    if (runtimeAtlas && sides <= 20) {
+      this.originalLabelMaps = this.definition.outcomes.map((outcome) => {
+        const texture = atlasCellTexture(runtimeAtlas, outcome.value);
+        this.ownedLabelTextures.push(texture);
+        return texture;
+      });
+      this.labelMaterials.forEach((material, index) => {
+        material.map = this.originalLabelMaps[index] ?? null;
+        material.needsUpdate = true;
+      });
+    } else {
+      this.originalLabelMaps = this.labelMaterials.map((material) => material.map);
+    }
 
     const shape = this.definition.readableShape;
     if (!shape) throw new Error('Generated physical die is missing readable geometry.');
@@ -692,15 +724,16 @@ export class PhysicalDieVisualInstance {
   dispose(): void {
     activePhysicalDice.delete(this);
     pendingPhysicalDice.delete(this);
+    for (const texture of this.ownedLabelTextures) texture.dispose();
     for (const geometry of this.extraGeometries) geometry.dispose();
     this.base.dispose();
   }
 }
 
 /**
- * Fallback-only numeric dice have no canonical planner request to intercept. They still use the
- * exact same PhysicalRollPlanner and PhysicalDieDefinition pipeline, just synchronously from the
- * visual boundary. Existing dice enter from their current pose/momentum.
+ * Fallback-only numeric dice have no canonical planner request to augment. They still use the
+ * exact same PhysicalRollPlanner and PhysicalDieDefinition pipeline, starting existing dice from
+ * their current pose/momentum and newly configured dice from their launch state.
  */
 export function finalizePhysicalFallbackBatch(): void {
   if (pendingPhysicalDice.size === 0 || bridgePending.size > 0) return;
