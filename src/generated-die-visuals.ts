@@ -17,6 +17,7 @@ interface RecordedTrajectory {
   positions: Float32Array;
   quaternions: Float32Array;
   frameCount: number;
+  step: number;
 }
 
 interface PlannerRequest {
@@ -27,6 +28,9 @@ interface PlannerRequest {
   boundsZ: number;
   states: ArrayBuffer;
   lockedCount?: number;
+  lockedTrajectory?: ArrayBuffer;
+  lockedTrajectoryStep?: number;
+  lockedTrajectoryFrameCount?: number;
 }
 
 interface GeneratedWorkerResponse {
@@ -44,9 +48,16 @@ interface GeneratedWorkerResponse {
   generatedLandings: ArrayBuffer;
 }
 
+interface BridgePending {
+  owner: Worker;
+  entries: NaturalGeneratedDie[];
+}
+
 const UP = new THREE.Vector3(0, 1, 0);
+const GENERATED_STEP = 1 / 120;
 const activeGeneratedDice = new Set<NaturalGeneratedDie>();
-const bridgedWorkers = new WeakMap<Worker, Worker>();
+const bridgePending = new Map<number, BridgePending>();
+let sharedPlannerWorker: Worker | null = null;
 
 function sidesOf(spec: DraftrollFallbackVisual): number | null {
   if (Number.isSafeInteger(spec.sides) && (spec.sides ?? 0) >= 1) return spec.sides!;
@@ -356,8 +367,9 @@ function simulateLocalBatch(entries: NaturalGeneratedDie[]): void {
   world.addBody(floor);
   addLocalWalls(world, tableMaterial, bounds);
 
-  const bodies = entries.map((entry) => {
-    const state = entry.launchState;
+  const states = entries.map((entry) => entry.plannerState());
+  const bodies = entries.map((entry, index) => {
+    const state = states[index];
     const body = new CANNON.Body({
       mass: 1.12,
       material: dieMaterial,
@@ -376,7 +388,7 @@ function simulateLocalBatch(entries: NaturalGeneratedDie[]): void {
   const active = entries.map(() => false);
   const activate = (index: number): void => {
     const body = bodies[index];
-    const state = entries[index].launchState;
+    const state = states[index];
     body.type = CANNON.Body.DYNAMIC;
     body.mass = 1.12;
     body.updateMassProperties();
@@ -386,8 +398,8 @@ function simulateLocalBatch(entries: NaturalGeneratedDie[]): void {
     body.wakeUp();
     active[index] = true;
   };
-  entries.forEach((entry, index) => {
-    if (entry.launchState[13] <= 0) activate(index);
+  states.forEach((state, index) => {
+    if (state[13] <= 0) activate(index);
     else {
       bodies[index].type = CANNON.Body.KINEMATIC;
       bodies[index].mass = 0;
@@ -412,13 +424,13 @@ function simulateLocalBatch(entries: NaturalGeneratedDie[]): void {
   record();
   let frameCount = 1;
   let stableTime = 0;
-  const maximumDelay = Math.max(...entries.map((entry) => entry.launchState[13]));
+  const maximumDelay = Math.max(0, ...states.map((state) => state[13]));
   for (let step = 1; step <= 840; step += 1) {
-    const time = step / 120;
-    entries.forEach((entry, index) => {
-      if (!active[index] && time + 1e-6 >= entry.launchState[13]) activate(index);
+    const time = step * GENERATED_STEP;
+    states.forEach((state, index) => {
+      if (!active[index] && time + 1e-6 >= state[13]) activate(index);
     });
-    world.step(1 / 120);
+    world.step(GENERATED_STEP);
     record();
     frameCount += 1;
     if (time < maximumDelay + 0.3) continue;
@@ -427,7 +439,7 @@ function simulateLocalBatch(entries: NaturalGeneratedDie[]): void {
         body.sleepState === CANNON.Body.SLEEPING ||
         (body.velocity.length() < 0.13 && body.angularVelocity.length() < 0.22),
     );
-    stableTime = settled ? stableTime + 1 / 120 : 0;
+    stableTime = settled ? stableTime + GENERATED_STEP : 0;
     if (step >= 120 && stableTime > 0.5) break;
   }
 
@@ -437,6 +449,7 @@ function simulateLocalBatch(entries: NaturalGeneratedDie[]): void {
         positions: Float32Array.from(positionFrames[index]),
         quaternions: Float32Array.from(quaternionFrames[index]),
         frameCount,
+        step: GENERATED_STEP,
       },
       landedOutcome(entry.shape, bodies[index].quaternion),
     );
@@ -461,6 +474,7 @@ function configuredGeneratedDice(): NaturalGeneratedDie[] {
 function splitGeneratedTrajectories(
   transforms: Float32Array,
   frameCount: number,
+  step: number,
   entries: readonly NaturalGeneratedDie[],
   landings: Int32Array,
 ): void {
@@ -481,10 +495,59 @@ function splitGeneratedTrajectories(
       quaternions[quaternion + 3] = transforms[source + 6];
     }
     entry.commitTrajectory(
-      { positions, quaternions, frameCount },
+      { positions, quaternions, frameCount, step },
       landings[generatedIndex] ?? 0,
     );
   });
+}
+
+function sharedWorker(): Worker {
+  if (sharedPlannerWorker) return sharedPlannerWorker;
+  const worker = new Worker(new URL('./generated-roll-worker.ts', import.meta.url), {
+    type: 'module',
+  });
+  worker.addEventListener('message', (event: MessageEvent<GeneratedWorkerResponse>) => {
+    const response = event.data;
+    const pending = bridgePending.get(response.id);
+    if (!pending) return;
+    bridgePending.delete(response.id);
+    splitGeneratedTrajectories(
+      new Float32Array(response.generatedTransforms),
+      response.frameCount,
+      response.step,
+      pending.entries,
+      new Int32Array(response.generatedLandings),
+    );
+    pending.owner.dispatchEvent(
+      new MessageEvent('message', {
+        data: {
+          id: response.id,
+          step: response.step,
+          frameCount: response.frameCount,
+          dieCount: response.dieCount,
+          transforms: response.transforms,
+          impacts: response.impacts,
+          duration: response.duration,
+          settleReason: response.settleReason,
+          physicsSteps: response.physicsSteps,
+          diagnostics: response.diagnostics,
+        },
+      }),
+    );
+  });
+  worker.addEventListener('error', (event) => {
+    for (const pending of bridgePending.values()) {
+      pending.owner.dispatchEvent(
+        new ErrorEvent('error', {
+          message: event.message || 'Generated dice collision planner failed.',
+        }),
+      );
+    }
+    bridgePending.clear();
+    sharedPlannerWorker = null;
+  });
+  sharedPlannerWorker = worker;
+  return worker;
 }
 
 function installSharedWorkerBridge(): void {
@@ -508,79 +571,33 @@ function installSharedWorkerBridge(): void {
     transferOrOptions?: Transferable[] | StructuredSerializeOptions,
   ): void {
     const entries = configuredGeneratedDice();
-    if (
-      entries.length === 0 ||
-      !isPlannerRequest(message) ||
-      (message.lockedCount ?? 0) > 0
-    ) {
+    if (entries.length === 0 || !isPlannerRequest(message)) {
       nativePostMessage.call(this, message, transferOrOptions);
       return;
     }
 
-    const owner = this;
-    const bridge = new Worker(new URL('./generated-roll-worker.ts', import.meta.url), {
-      type: 'module',
-    });
-    bridgedWorkers.set(owner, bridge);
+    const planner = sharedWorker();
+    bridgePending.set(message.id, { owner: this, entries });
     const generated = entries.map((entry) => ({
       sides: entry.sides,
-      state: [...entry.launchState],
+      state: entry.plannerState(),
     }));
-
-    bridge.addEventListener(
-      'message',
-      (event: MessageEvent<GeneratedWorkerResponse>) => {
-        const response = event.data;
-        splitGeneratedTrajectories(
-          new Float32Array(response.generatedTransforms),
-          response.frameCount,
-          entries,
-          new Int32Array(response.generatedLandings),
-        );
-        const standardResponse = {
-          id: response.id,
-          step: response.step,
-          frameCount: response.frameCount,
-          dieCount: response.dieCount,
-          transforms: response.transforms,
-          impacts: response.impacts,
-          duration: response.duration,
-          settleReason: response.settleReason,
-          physicsSteps: response.physicsSteps,
-          diagnostics: response.diagnostics,
-        };
-        bridgedWorkers.delete(owner);
-        bridge.terminate();
-        owner.dispatchEvent(new MessageEvent('message', { data: standardResponse }));
-      },
-      { once: true },
-    );
-    bridge.addEventListener(
-      'error',
-      (event) => {
-        bridgedWorkers.delete(owner);
-        bridge.terminate();
-        owner.dispatchEvent(
-          new ErrorEvent('error', {
-            message: event.message || 'Generated dice collision planner failed.',
-          }),
-        );
-      },
-      { once: true },
-    );
+    const transfer: Transferable[] = [message.states];
+    if (message.lockedTrajectory instanceof ArrayBuffer) transfer.push(message.lockedTrajectory);
     nativePostMessage.call(
-      bridge,
+      planner,
       {
         ...message,
         generated,
       },
-      [message.states],
+      transfer,
     );
   } as Worker['postMessage'];
 
   Worker.prototype.terminate = function terminate(this: Worker): void {
-    bridgedWorkers.get(this)?.terminate();
-    bridgedWorkers.delete(this);
+    for (const [id, pending] of bridgePending) {
+      if (pending.owner === this) bridgePending.delete(id);
+    }
     nativeTerminate.call(this);
   };
 }
@@ -602,6 +619,9 @@ class NaturalGeneratedDie {
   private trajectory: RecordedTrajectory | null = null;
   private end = new THREE.Vector2();
   private settled = false;
+  private needsPlanning = false;
+  private lastProgress = 0;
+  private presented = false;
 
   constructor(spec: DraftrollFallbackVisual) {
     this.spec = spec;
@@ -660,6 +680,10 @@ class NaturalGeneratedDie {
     return this.trajectory !== null;
   }
 
+  get requiresPlanning(): boolean {
+    return this.needsPlanning;
+  }
+
   private applyRequestedResult(landed: number): void {
     this.labelMaterials.forEach((material, index) => {
       material.map = this.originalLabelMaps[index] ?? null;
@@ -678,9 +702,82 @@ class NaturalGeneratedDie {
     this.labelMaterials[landed].needsUpdate = true;
   }
 
+  plannerState(): number[] {
+    if (this.needsPlanning || !this.trajectory) return [...this.launchState];
+    const position = this.group.position;
+    const quaternion = this.inner.quaternion;
+    let velocityX = 0;
+    let velocityY = 0;
+    let velocityZ = 0;
+    let angularX = 0;
+    let angularY = 0;
+    let angularZ = 0;
+
+    if (!this.settled && this.lastProgress < 0.995 && this.trajectory.frameCount > 1) {
+      const scaled = this.lastProgress * (this.trajectory.frameCount - 1);
+      let first = Math.floor(scaled);
+      let second = Math.min(this.trajectory.frameCount - 1, first + 1);
+      if (first === second && first > 0) {
+        first -= 1;
+        second = first + 1;
+      }
+      const dt = Math.max(1e-6, (second - first) * this.trajectory.step);
+      const a = first * 3;
+      const b = second * 3;
+      velocityX = (this.trajectory.positions[b] - this.trajectory.positions[a]) / dt;
+      velocityY = (this.trajectory.positions[b + 1] - this.trajectory.positions[a + 1]) / dt;
+      velocityZ = (this.trajectory.positions[b + 2] - this.trajectory.positions[a + 2]) / dt;
+
+      const qa = first * 4;
+      const qb = second * 4;
+      const before = new THREE.Quaternion(
+        this.trajectory.quaternions[qa],
+        this.trajectory.quaternions[qa + 1],
+        this.trajectory.quaternions[qa + 2],
+        this.trajectory.quaternions[qa + 3],
+      );
+      const after = new THREE.Quaternion(
+        this.trajectory.quaternions[qb],
+        this.trajectory.quaternions[qb + 1],
+        this.trajectory.quaternions[qb + 2],
+        this.trajectory.quaternions[qb + 3],
+      );
+      const delta = after.multiply(before.invert()).normalize();
+      if (delta.w < 0) delta.set(-delta.x, -delta.y, -delta.z, -delta.w);
+      const halfSin = Math.hypot(delta.x, delta.y, delta.z);
+      if (halfSin > 1e-6) {
+        const angle = 2 * Math.atan2(halfSin, THREE.MathUtils.clamp(delta.w, -1, 1));
+        const speed = Math.min(28, angle / dt);
+        angularX = delta.x / halfSin * speed;
+        angularY = delta.y / halfSin * speed;
+        angularZ = delta.z / halfSin * speed;
+      }
+    }
+
+    return [
+      position.x,
+      position.y,
+      position.z,
+      quaternion.x,
+      quaternion.y,
+      quaternion.z,
+      quaternion.w,
+      velocityX,
+      velocityY,
+      velocityZ,
+      angularX,
+      angularY,
+      angularZ,
+      0,
+    ];
+  }
+
   commitTrajectory(trajectory: RecordedTrajectory, landed: number): void {
-    this.applyRequestedResult(landed);
+    const newlyIntroduced = this.needsPlanning;
+    if (newlyIntroduced) this.applyRequestedResult(landed);
     this.trajectory = trajectory;
+    this.needsPlanning = false;
+    this.lastProgress = 0;
     const last = Math.max(0, trajectory.frameCount - 1) * 3;
     this.end.set(trajectory.positions[last] ?? 0, trajectory.positions[last + 2] ?? 0);
     this.settled = false;
@@ -700,7 +797,10 @@ class NaturalGeneratedDie {
     this.launchState = buildLaunchState(index, count, bounds, this.end, random);
     this.configured = true;
     this.trajectory = null;
+    this.needsPlanning = true;
+    this.lastProgress = 0;
     this.settled = false;
+    this.presented = false;
     this.group.position.set(this.launchState[0], this.launchState[1], this.launchState[2]);
     this.inner.quaternion.set(
       this.launchState[3],
@@ -722,10 +822,13 @@ class NaturalGeneratedDie {
     if (!this.trajectory) finalizeGeneratedFallbackBatch();
     if (!this.trajectory) return;
     const normalized = THREE.MathUtils.clamp(progress, 0, 1);
-    this.group.visible = normalized > 0;
-    if (normalized <= 0) return;
+    this.lastProgress = normalized;
+    const wasPresented = this.presented;
+    if (normalized > 0) this.presented = true;
+    this.group.visible = this.presented;
+    if (!this.presented) return;
     sample(this.trajectory, normalized, this.group.position, this.inner.quaternion);
-    const opacity = THREE.MathUtils.clamp(normalized * 7, 0, 1);
+    const opacity = wasPresented ? 1 : THREE.MathUtils.clamp(normalized * 7, 0, 1);
     this.inner.traverse((object) => {
       if (object instanceof THREE.Mesh || object instanceof THREE.LineSegments) {
         const materials = Array.isArray(object.material) ? object.material : [object.material];
@@ -737,6 +840,9 @@ class NaturalGeneratedDie {
   settle(): void {
     if (!this.settled) {
       this.update(1, 1);
+      this.lastProgress = 1;
+      this.presented = true;
+      this.group.visible = true;
       this.settled = true;
     }
   }
@@ -761,15 +867,13 @@ class NaturalGeneratedDie {
 }
 
 /**
- * Plans all currently configured generated fallback dice in one local Cannon world.
- *
- * Mixed physical/generated rolls are re-planned by the shared worker bridge before
- * playback, adding standard dice to the same collision world. This local pass is
- * what gives fallback-only pools such as 6d5 true generated-to-generated collisions.
+ * Fallback-only generated rolls have no standard-dice planner request to intercept.
+ * Plan the whole active generated table together, starting existing dice from their
+ * current pose/momentum and only launching newly configured dice from the hand.
  */
 export function finalizeGeneratedFallbackBatch(): void {
   const entries = configuredGeneratedDice();
-  if (entries.length === 0 || entries.every((entry) => entry.hasTrajectory)) return;
+  if (entries.length === 0 || !entries.some((entry) => entry.requiresPlanning)) return;
   simulateLocalBatch(entries);
 }
 
@@ -777,7 +881,7 @@ installSharedWorkerBridge();
 
 type Implementation = BaseFallbackVisualInstance | NaturalGeneratedDie;
 
-/** Routes arbitrary numeric dice through recorded convex-body physics; other visuals retain the established renderer. */
+/** Routes arbitrary numeric dice through shared convex-body physics; other visuals retain the established renderer. */
 export class FallbackVisualInstance {
   readonly group: THREE.Group;
   readonly spec: DraftrollFallbackVisual;
