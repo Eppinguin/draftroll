@@ -50,7 +50,10 @@ function finish(
     faceKinds: options.faceKinds ? [...options.faceKinds] : undefined,
     requestedFacets,
     displayFacets: landingFaces.length,
-    exact: (options.exact ?? true) && requestedFacets === landingFaces.length,
+    // Some exact logical dice deliberately duplicate results across physical
+    // landing faces (d1 and d3), so an explicit exact=true overrides the
+    // one-result-per-face count heuristic.
+    exact: options.exact ?? requestedFacets === landingFaces.length,
     family,
   };
 }
@@ -65,6 +68,7 @@ function cube(requestedFacets = 6): ReadablePolyhedron {
     [1, 2, 6, 5], [3, 7, 6, 2], [0, 1, 5, 4],
   ];
   return finish(requestedFacets, vertices, faces, 'cube', {
+    exact: requestedFacets === 3 ? true : undefined,
     landingFaces: faces.map((_face, index) => index),
     faceKinds: faces.map(() => 'landing'),
   });
@@ -99,6 +103,7 @@ function d1Cylinder(segments = 18): ReadablePolyhedron {
     faces.push([index, next, segments + next, segments + index]);
   }
   return finish(1, vertices, faces, 'd1-cylinder', {
+    exact: true,
     landingFaces: [0, 1],
     faceKinds: faces.map((_face, index) => index < 2 ? 'cap' : 'rim'),
   });
@@ -170,7 +175,11 @@ function prismBarrel(facets: number): ReadablePolyhedron {
 }
 
 /** High-count visual drum. Caps are decorative; the vertical facets are outcomes. */
-function drum(facets: number, family: 'drum' | 'representative', exact = true): ReadablePolyhedron {
+function drum(
+  facets: number,
+  family: 'drum' | 'representative',
+  exact = true,
+): ReadablePolyhedron {
   const ring = facets;
   const half = 0.42;
   const vertices: number[][] = [];
