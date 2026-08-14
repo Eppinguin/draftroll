@@ -6,15 +6,15 @@ Draftroll's overlay renderer is designed to consume no animation-frame budget wh
 
 The default `auto` profile applies these budgets:
 
-| Situation | Target |
-|---|---:|
-| Idle overlay | 0 animation frames |
-| 1–20 visual components | 60 frames per second |
-| More than 20 components | 30 frames per second |
-| Overlay device-pixel-ratio cap | 1.35 |
-| Overlay dynamic resolution range | 0.80–1.00 |
-| Pending presentation queue | 32 entries |
-| Idle physics-worker lifetime | 45 seconds |
+| Situation                        |               Target |
+| -------------------------------- | -------------------: |
+| Idle overlay                     |   0 animation frames |
+| 1–20 visual components           | 60 frames per second |
+| More than 20 components          | 30 frames per second |
+| Overlay device-pixel-ratio cap   |                 1.35 |
+| Overlay dynamic resolution range |            0.80–1.00 |
+| Pending presentation queue       |           32 entries |
+| Idle physics-worker lifetime     |           45 seconds |
 
 Dynamic resolution uses a 90-frame sample window with hysteresis. Renderer resizing therefore occurs only after sustained missed-frame pressure or sustained recovery; it does not oscillate every few frames.
 
@@ -190,6 +190,7 @@ allowBuilds:
   esbuild: true
   workerd: true
 ```
+
 ## Exact-result targeting diagnostics
 
 Exact-result presentation uses one ordinary worker trajectory followed by a constant local shape symmetry for each die that needs a different printed face. It does not run an iterative candidate search or an assistance phase.

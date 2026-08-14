@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { runTsc } from './lib/load-typescript.mjs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -72,7 +72,16 @@ class MockWebSocket extends EventTarget {
         authority: 'server',
         expression: message.input.expression ?? 'external',
         total: 1,
-        dice: [{ id: `${rollId}-die`, type: 'd1', sides: 1, result: 1, kept: true, generatedBy: 'initial' }],
+        dice: [
+          {
+            id: `${rollId}-die`,
+            type: 'd1',
+            sides: 1,
+            result: 1,
+            kept: true,
+            generatedBy: 'initial',
+          },
+        ],
         operations: [],
         createdAt: now,
       };
@@ -138,28 +147,41 @@ class TestRenderer {
     this.plays.push(result.rollId);
     return { results: result.dice.map((die) => die.result), total: result.total, replay: null };
   }
-  async clear() { this.clears += 1; }
-  destroy() { this.destroyed += 1; }
-  setRerollHandler(handler) { this.rerollHandler = handler; }
+  async clear() {
+    this.clears += 1;
+  }
+  destroy() {
+    this.destroyed += 1;
+  }
+  setRerollHandler(handler) {
+    this.rerollHandler = handler;
+  }
 }
 
 try {
-  await writeFile(configPath, JSON.stringify({
-    compilerOptions: {
-      target: 'ES2022',
-      module: 'CommonJS',
-      moduleResolution: 'Node',
-      rootDir: join(projectRoot, 'packages'),
-      outDir,
-      strict: true,
-      skipLibCheck: true,
-      esModuleInterop: true,
-      lib: ['ES2022', 'DOM', 'DOM.Iterable'],
-    },
-    include: [join(projectRoot, 'packages/**/*.ts')],
-  }, null, 2));
+  await writeFile(
+    configPath,
+    JSON.stringify(
+      {
+        compilerOptions: {
+          target: 'ES2022',
+          module: 'CommonJS',
+          moduleResolution: 'Node',
+          rootDir: join(projectRoot, 'packages'),
+          outDir,
+          strict: true,
+          skipLibCheck: true,
+          esModuleInterop: true,
+          lib: ['ES2023', 'DOM', 'DOM.Iterable'],
+        },
+        include: [join(projectRoot, 'packages/**/*.ts')],
+      },
+      null,
+      2,
+    ),
+  );
 
-  const compile = spawnSync('tsc', ['-p', configPath], { cwd: projectRoot, encoding: 'utf8' });
+  const compile = runTsc(['-p', configPath], { cwd: projectRoot });
   if (compile.status !== 0) {
     process.stderr.write(compile.stdout);
     process.stderr.write(compile.stderr);
@@ -204,7 +226,10 @@ try {
   assert.equal(session.snapshot.roomId, 'lifecycle');
   assert.equal(session.draftroll, stableSdk);
   assert.equal(room.roomId, 'lifecycle');
-  const readyAfterConnect = MockWebSocket.instances.at(-1).sent.map(JSON.parse).filter((event) => event.type === 'client_ready');
+  const readyAfterConnect = MockWebSocket.instances
+    .at(-1)
+    .sent.map(JSON.parse)
+    .filter((event) => event.type === 'client_ready');
   assert.equal(readyAfterConnect.at(-1).rendererReady, true);
 
   const remote = await session.roll('1d1', { clientRollId: 'remote-stable-id' });
@@ -218,7 +243,10 @@ try {
   assert.equal(ownedRenderer.clears, 1);
   assert.equal(ownedRenderer.destroyed, 1, 'owned renderer is destroyed on detach');
   assert.equal(ownedRenderer.rerollHandler, null);
-  const readyAfterDisable = MockWebSocket.instances.at(-1).sent.map(JSON.parse).filter((event) => event.type === 'client_ready');
+  const readyAfterDisable = MockWebSocket.instances
+    .at(-1)
+    .sent.map(JSON.parse)
+    .filter((event) => event.type === 'client_ready');
   assert.equal(readyAfterDisable.at(-1).rendererReady, false);
 
   const unrenderedRemote = await session.roll('1d1', { clientRollId: 'remote-headless' });
@@ -231,7 +259,10 @@ try {
   const localAgain = await session.roll('1d1');
   assert.equal(localAgain.total, 1);
   assert.equal(session.draftroll, stableSdk);
-  assert.ok(session.draftroll.rollLog.length >= 3, 'local/server history remains on the stable Draftroll instance');
+  assert.ok(
+    session.draftroll.rollLog.length >= 3,
+    'local/server history remains on the stable Draftroll instance',
+  );
 
   const externalRenderer = new TestRenderer('external');
   await session.setRenderer(externalRenderer);
@@ -246,17 +277,23 @@ try {
   assert.ok(observedRolls.includes('remote-stable-id'));
   await assert.rejects(session.roll('1d1'), /disposed/);
 
-  console.log(JSON.stringify({
-    passed: true,
-    checks: [
-      'stable local SDK identity and subscriptions',
-      'local to realtime to local routing',
-      'renderer attach/detach readiness',
-      'owned versus external renderer cleanup',
-      'room and local history continuity',
-      'disposed lifecycle guard',
-    ],
-  }, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        passed: true,
+        checks: [
+          'stable local SDK identity and subscriptions',
+          'local to realtime to local routing',
+          'renderer attach/detach readiness',
+          'owned versus external renderer cleanup',
+          'room and local history continuity',
+          'disposed lifecycle guard',
+        ],
+      },
+      null,
+      2,
+    ),
+  );
 } finally {
   await rm(tempRoot, { recursive: true, force: true });
 }

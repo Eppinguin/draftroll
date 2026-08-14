@@ -71,14 +71,14 @@ Parser and evaluator failures emit one final profile before the original error i
 const profiles: DiceProfile[] = [];
 const engine = new DiceEngine({
   limits: { maxOperations: 20 },
-  instrumentation: { onProfile: profile => profiles.push(profile) },
+  instrumentation: { onProfile: (profile) => profiles.push(profile) },
 });
 
 try {
   engine.roll(complexFormula);
 } catch (error) {
   const failedEvaluation = profiles.find(
-    profile => profile.kind === 'evaluate' && profile.status === 'error',
+    (profile) => profile.kind === 'evaluate' && profile.status === 'error',
   );
   console.log(failedEvaluation?.evaluationSteps);
 }

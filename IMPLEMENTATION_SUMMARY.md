@@ -41,6 +41,7 @@ Draftroll currently provides:
 - conditional browser/headless SDK entry points plus TypeScript-AST import-graph regression tests that keep WebGL and physics-renderer code out of server-safe package graphs
 - generated ESM/declaration builds, workspace-local dependency linking, and offline staged-tarball smoke tests for every public package
 - TSDoc package documentation, explicit release tags, public class/member guidance, parser-backed checks, and declaration-preservation tests
+- strict Oxlint syntax/type-aware analysis, deterministic Oxfmt formatting, editor integration, and configuration regression checks
 
 - stable shared errors and AbortSignal cancellation across public packages
 - generic React, Vue, and Svelte bindings plus production-oriented generic examples
@@ -54,7 +55,6 @@ Draftroll currently provides:
 The MVP intentionally has no accounts, login, API keys, billing, or account-linked room ownership. Public package artifacts are build- and install-tested locally; registry publication, signing, provenance, and release-channel operation remain deployment-owner decisions.
 
 All repository-level feature work is complete. Remaining gates require deployment-owner resources or controlled execution environments: real Cloudflare IDs/domains/secrets, staging/production smoke execution, installed Playwright browser binaries, and recorded desktop/mobile hardware baselines. Package versions remain `0.1.0`, protocol version remains 2, and the source snapshot itself is not a deployed service.
-
 
 Mixed built-in die types (d4/d6/d8/d10/d12/d20) now share one physical worker plan, playback, and replay. Evaluator-generated rerolls and explosions retain their discarded/triggering dice, record immediate causal ancestry, and append follow-up dice only after the prior wave settles; the complete total appears only after the last wave. Individual SDK rerolls use the same persistent-table model: the original die and prior replacements remain visible as discarded history, the newest replacement is appended, and repeated revisions remain one logical table group. Additive stages bypass legacy bridge setters that rebuild the scene, and result-panel rerolls synchronously cancel deferred click dismissal before asynchronous overlay setup, so settled dice are not cleared immediately before the replacement throw. The iframe overlay forwards the complete persistence contract. A cleared, auto-cleared, raced, or capacity-limited table safely falls back to a complete revised presentation and resets presentation history to what is actually visible. Physical and fallback-only modifier chains follow the same rule. Built-in pending result panels and the test-client dice log show one neutral placeholder rather than one row per already-known future die, preventing explosion/reroll counts from being disclosed before the sequence settles. The root Vite host is now a basic character sheet with named server formulas, room controls, persisted dice history, and reroll/revision actions.
 

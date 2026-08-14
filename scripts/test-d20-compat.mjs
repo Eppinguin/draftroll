@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { runTsc } from './lib/load-typescript.mjs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -11,32 +11,42 @@ const outDir = join(tempRoot, 'build');
 const configPath = join(tempRoot, 'tsconfig.json');
 
 class SequenceRng {
-  constructor(values) { this.values = [...values]; }
+  constructor(values) {
+    this.values = [...values];
+  }
   integer(min, max) {
     const value = this.values.shift();
     if (value === undefined) throw new Error(`Sequence RNG exhausted for ${min}..${max}`);
-    if (value < min || value > max) throw new Error(`Sequence value ${value} outside ${min}..${max}`);
+    if (value < min || value > max)
+      throw new Error(`Sequence value ${value} outside ${min}..${max}`);
     return value;
   }
 }
 
 try {
-  await writeFile(configPath, JSON.stringify({
-    compilerOptions: {
-      target: 'ES2022',
-      module: 'CommonJS',
-      moduleResolution: 'Node',
-      rootDir: join(projectRoot, 'packages'),
-      outDir,
-      strict: true,
-      skipLibCheck: true,
-      esModuleInterop: true,
-      lib: ['ES2022', 'DOM', 'DOM.Iterable'],
-    },
-    include: [join(projectRoot, 'packages/**/*.ts')],
-  }, null, 2));
+  await writeFile(
+    configPath,
+    JSON.stringify(
+      {
+        compilerOptions: {
+          target: 'ES2022',
+          module: 'CommonJS',
+          moduleResolution: 'Node',
+          rootDir: join(projectRoot, 'packages'),
+          outDir,
+          strict: true,
+          skipLibCheck: true,
+          esModuleInterop: true,
+          lib: ['ES2023', 'DOM', 'DOM.Iterable'],
+        },
+        include: [join(projectRoot, 'packages/**/*.ts')],
+      },
+      null,
+      2,
+    ),
+  );
 
-  const compile = spawnSync('tsc', ['-p', configPath], { cwd: projectRoot, encoding: 'utf8' });
+  const compile = runTsc(['-p', configPath], { cwd: projectRoot });
   if (compile.status !== 0) {
     process.stderr.write(compile.stdout);
     process.stderr.write(compile.stderr);
@@ -49,7 +59,8 @@ try {
   const { DiceEngine, normalizeExternalRoll, formatRollResult, filterRollNodes } = core;
   const { Draftroll, dice, operations, selectors, defineDie } = sdkModule;
 
-  const rollWith = (expression, values, options = {}) => new DiceEngine({ rng: new SequenceRng(values) }).roll(expression, options);
+  const rollWith = (expression, values, options = {}) =>
+    new DiceEngine({ rng: new SequenceRng(values) }).roll(expression, options);
 
   assert.equal(new DiceEngine().roll('1.5 + 2.25').total, 3.75);
   assert.equal(rollWith('d%', [73]).dice[0].type, 'd100');
@@ -85,11 +96,19 @@ try {
 
   const healing = rollWith('-(1d8 + 3) [healing]', [7]);
   assert.equal(healing.total, -10);
-  assert.ok(healing.tree && filterRollNodes(healing.tree, (node) => node.annotations.includes('healing')).length === 1);
+  assert.ok(
+    healing.tree &&
+      filterRollNodes(healing.tree, (node) => node.annotations.includes('healing')).length === 1,
+  );
 
-  const annotated = rollWith('3d6 [fire] + 1d4 [piercing] attack damage', [3, 2, 2, 4], { allowComments: true });
+  const annotated = rollWith('3d6 [fire] + 1d4 [piercing] attack damage', [3, 2, 2, 4], {
+    allowComments: true,
+  });
   assert.equal(annotated.comment, 'attack damage');
-  assert.deepEqual(annotated.dice.slice(0, 3).map((die) => die.annotations), [['fire'], ['fire'], ['fire']]);
+  assert.deepEqual(
+    annotated.dice.slice(0, 3).map((die) => die.annotations),
+    [['fire'], ['fire'], ['fire']],
+  );
   assert.deepEqual(annotated.dice[3].annotations, ['piercing']);
 
   const advantage = rollWith('1d20 + 5', [8, 20], { advantage: 'advantage' });
@@ -104,16 +123,17 @@ try {
   const fate = rollWith('4dF', [-1, 0, 1, 1]);
   assert.equal(fate.total, 1);
 
-
   const customEngine = new DiceEngine({
     rng: new SequenceRng([1, 3, 2]),
-    customDice: [{
-      id: 'weather',
-      faces: [
-        { result: 'sun', value: 2, weight: 1, label: 'Clear' },
-        { result: 'rain', value: 0, weight: 2, label: 'Rain' },
-      ],
-    }],
+    customDice: [
+      {
+        id: 'weather',
+        faces: [
+          { result: 'sun', value: 2, weight: 1, label: 'Clear' },
+          { result: 'rain', value: 0, weight: 2, label: 'Rain' },
+        ],
+      },
+    ],
   });
   const custom = customEngine.evaluate({
     mode: 'evaluate',
@@ -122,7 +142,10 @@ try {
       { id: 'weather_2', type: 'weather', customDiceId: 'weather' },
     ],
   });
-  assert.deepEqual(custom.dice.map((die) => die.result), ['sun', 'rain']);
+  assert.deepEqual(
+    custom.dice.map((die) => die.result),
+    ['sun', 'rain'],
+  );
   assert.equal(custom.total, 2);
   const customRerolled = customEngine.reroll(custom, 'weather_2');
   assert.equal(customRerolled.dice.find((die) => die.id === 'weather_2').result, 'rain');
@@ -135,7 +158,10 @@ try {
       { result: 'spark', value: 1 },
     ],
   };
-  const structuredOnceEngine = new DiceEngine({ rng: new SequenceRng([1, 2, 1, 2]), customDice: [sparkDefinition] });
+  const structuredOnceEngine = new DiceEngine({
+    rng: new SequenceRng([1, 2, 1, 2]),
+    customDice: [sparkDefinition],
+  });
   const structuredOnce = structuredOnceEngine.evaluate({
     mode: 'evaluate',
     dice: [{ id: 'spark_1', type: 'spark', customDiceId: 'spark', themeId: 'ember' }],
@@ -157,7 +183,10 @@ try {
   assert.equal(structuredCorrected.dice.length, 1);
   assert.equal(structuredCorrected.dice[0].numericValue, 1);
 
-  const structuredAddEngine = new DiceEngine({ rng: new SequenceRng([1, 2]), customDice: [sparkDefinition] });
+  const structuredAddEngine = new DiceEngine({
+    rng: new SequenceRng([1, 2]),
+    customDice: [sparkDefinition],
+  });
   const structuredAdd = structuredAddEngine.evaluate({
     mode: 'evaluate',
     dice: [{ id: 'spark_1', type: 'spark', customDiceId: 'spark' }],
@@ -167,7 +196,10 @@ try {
   assert.equal(structuredAdd.dice.length, 2);
   assert.ok(structuredAdd.dice.every((die) => die.kept));
 
-  const structuredExplodeEngine = new DiceEngine({ rng: new SequenceRng([2, 2, 1]), customDice: [sparkDefinition] });
+  const structuredExplodeEngine = new DiceEngine({
+    rng: new SequenceRng([2, 2, 1]),
+    customDice: [sparkDefinition],
+  });
   const structuredExplode = structuredExplodeEngine.evaluate({
     mode: 'evaluate',
     dice: [{ id: 'spark_1', type: 'spark', customDiceId: 'spark' }],
@@ -199,7 +231,10 @@ try {
       { type: 'success-count', selector: { type: 'greater-equal', target: 4 } },
     ],
   });
-  assert.deepEqual(structuredSelectors.dice.map((die) => die.numericValue), [2, 5, 3]);
+  assert.deepEqual(
+    structuredSelectors.dice.map((die) => die.numericValue),
+    [2, 5, 3],
+  );
   assert.equal(structuredSelectors.total, 1);
 
   const portableEngine = new DiceEngine({ rng: new SequenceRng([1, 2, 1, 2]) });
@@ -226,7 +261,15 @@ try {
   const repeated = repeatedEngine.evaluate({
     mode: 'evaluate',
     customDice: [repeatedDefinition],
-    dice: [{ id: 'repeat_1', type: 'repeat-face', customDiceId: 'repeat-face', result: 'blank', faceIndex: 1 }],
+    dice: [
+      {
+        id: 'repeat_1',
+        type: 'repeat-face',
+        customDiceId: 'repeat-face',
+        result: 'blank',
+        faceIndex: 1,
+      },
+    ],
   });
   assert.equal(repeated.total, 1);
   assert.equal(repeated.dice[0].faceLabel, 'Marked');
@@ -240,7 +283,15 @@ try {
   const repeatedExternal = normalizeExternalRoll({
     mode: 'display',
     customDice: [repeatedDefinition],
-    dice: [{ id: 'external_repeat', type: 'repeat-face', customDiceId: 'repeat-face', result: 'blank', faceIndex: 1 }],
+    dice: [
+      {
+        id: 'external_repeat',
+        type: 'repeat-face',
+        customDiceId: 'repeat-face',
+        result: 'blank',
+        faceIndex: 1,
+      },
+    ],
   });
   assert.equal(repeatedExternal.total, 1);
   assert.equal(repeatedExternal.dice[0].faceLabel, 'Marked');
@@ -255,7 +306,11 @@ try {
   const engine = new DiceEngine({ rng: new SequenceRng([4, 5, 2, 6]) });
   const compiled = engine.compile('2d6kh1');
   assert.equal(compiled.roll().total, 5);
-  assert.equal(compiled.roll().total, 6, 'compiled expressions must be reusable without accumulating advantage/operations');
+  assert.equal(
+    compiled.roll().total,
+    6,
+    'compiled expressions must be reusable without accumulating advantage/operations',
+  );
 
   assert.equal(new DiceEngine().validate('2d6kh1').valid, true);
   assert.equal(new DiceEngine().validate('2d6wat').valid, false);
@@ -267,13 +322,19 @@ try {
   const sdkEngine = new DiceEngine({ rng: new SequenceRng([4, 6, 2, 5]) });
   const draftroll = new Draftroll({ engine: sdkEngine });
   let rollEvents = 0;
-  const stopListening = draftroll.on('roll', () => { rollEvents += 1; });
-  const sdkRoll = draftroll.roll({ expression: '2d6kh1', render: false, themes: ['iron', 'glass'] });
+  const stopListening = draftroll.on('roll', () => {
+    rollEvents += 1;
+  });
+  const sdkRoll = draftroll.roll({
+    expression: '2d6kh1',
+    render: false,
+    themes: ['iron', 'glass'],
+  });
   assert.equal(sdkRoll.total, 6);
   assert.equal(sdkRoll.dice[0].themeId, 'iron');
   assert.equal(sdkRoll.dice[1].themeId, 'glass');
   assert.equal(rollEvents, 1);
-  assert.equal((await sdkRoll.wait()), undefined);
+  assert.equal(await sdkRoll.wait(), undefined);
   assert.equal(draftroll.getRoll(sdkRoll.id)?.total, 6);
   const corrected = sdkRoll.setDieResult(sdkRoll.dice[1].id, 3);
   assert.equal(corrected.total, 4);
@@ -303,20 +364,17 @@ try {
     ],
     render: false,
   });
-  assert.deepEqual(coinFlip.dice.map((die) => die.result), ['heads', 'tails']);
+  assert.deepEqual(
+    coinFlip.dice.map((die) => die.result),
+    ['heads', 'tails'],
+  );
   assert.equal(coinFlip.total, 1);
   assert.equal(customSdk.listDice().length, 1);
 
   const builderSdk = new Draftroll({ engine: new DiceEngine({ rng: new SequenceRng([1, 6, 2]) }) });
   const builderPool = builderSdk.rollDice({
-    dice: [
-      dice.d6('first', { themeId: 'iron' }),
-      dice.d6('second', { themeId: 'glass' }),
-    ],
-    operations: [
-      operations.rerollOnce(selectors.equal(1), ['first']),
-      operations.keepHighest(1),
-    ],
+    dice: [dice.d6('first', { themeId: 'iron' }), dice.d6('second', { themeId: 'glass' })],
+    operations: [operations.rerollOnce(selectors.equal(1), ['first']), operations.keepHighest(1)],
     render: false,
   });
   assert.equal(builderPool.total, 6);
@@ -324,16 +382,47 @@ try {
   assert.equal(builderPool.dice.filter((die) => die.kept).length, 1);
   assert.equal(defineDie({ id: 'marker', faces: [{ result: 'yes', value: 1 }] }).id, 'marker');
 
-  console.log(JSON.stringify({
-    ok: true,
-    tested: [
-      'decimals', 'd%', 'd1/zero-dice pools', 'sets', 'keep/drop selectors', 'rr', 'ro', 'ra', 'explode',
-      'minimum/maximum', 'integer division', 'comparisons', 'annotations/comments',
-      'advantage/disadvantage', 'critical classification', 'Fate dice',
-      'success-count extension', 'custom weighted/symbol dice', 'structured custom reroll/explode operations', 'portable inline custom definitions', 'repeated custom faces by index', 'compiled expressions', 'validation', 'tree traversal', 'formatting',
-      'developer-friendly SDK facade', 'typed dice/selector/operation builders', 'stable roll handles', 'events', 'formula/result correction helpers',
-    ],
-  }, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        ok: true,
+        tested: [
+          'decimals',
+          'd%',
+          'd1/zero-dice pools',
+          'sets',
+          'keep/drop selectors',
+          'rr',
+          'ro',
+          'ra',
+          'explode',
+          'minimum/maximum',
+          'integer division',
+          'comparisons',
+          'annotations/comments',
+          'advantage/disadvantage',
+          'critical classification',
+          'Fate dice',
+          'success-count extension',
+          'custom weighted/symbol dice',
+          'structured custom reroll/explode operations',
+          'portable inline custom definitions',
+          'repeated custom faces by index',
+          'compiled expressions',
+          'validation',
+          'tree traversal',
+          'formatting',
+          'developer-friendly SDK facade',
+          'typed dice/selector/operation builders',
+          'stable roll handles',
+          'events',
+          'formula/result correction helpers',
+        ],
+      },
+      null,
+      2,
+    ),
+  );
 } finally {
   await rm(tempRoot, { recursive: true, force: true });
 }

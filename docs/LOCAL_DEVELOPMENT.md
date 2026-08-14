@@ -25,6 +25,18 @@ All unpublished internal packages use `workspace:*`, so pnpm links them locally.
 
 The first successful install creates `pnpm-lock.yaml`. Commit that file once dependencies resolve on your machine.
 
+## Run the required quality gates
+
+Run these commands from the repository root:
+
+```bash
+pnpm lint
+pnpm format:check
+pnpm check
+```
+
+Use `pnpm lint:fix` for safe Oxlint fixes and `pnpm format` to apply Oxfmt. `pnpm check` also runs TSDoc validation and all TypeScript checks. See `docs/CODE_QUALITY.md` for the complete policy.
+
 ## Test completed-roll revisions without Wrangler
 
 Run the deterministic SDK/core revision test:
@@ -131,7 +143,7 @@ Open `http://127.0.0.1:5173`. The client is a minimal character sheet rather tha
 - whole-roll and individual-die rerolls
 - formula/name/theme revisions with animated or log-only updates
 
-The built-in mixed examples include `1d20+7+1d4`, `2d6+1d8+3`, and the universal fallback test `1d20+1d2+1dF+1d9+1d100`. Supported d4/d6/d8/d10/d12/d20 dice share one physical simulation; unsupported shapes join that same presentation as synchronized coin, percentile, Fate, spinner, token, or card visuals.
+The built-in mixed examples include `1d20+7+1d4`, `2d6+1d8+3`, and the universal fallback test `1d20+1d2+1dF+1d9+1d100`. Supported d2/d4/d6/d8/d10/d12/d20 dice share one physical simulation; unsupported shapes join that same presentation as synchronized coin, percentile, Fate, spinner, token, or card visuals.
 
 See `docs/CHARACTER_SHEET_TEST_CLIENT.md` for the complete workflow and protocol fields. The character sheet remains a development host and is not part of the Worker service.
 
@@ -325,7 +337,6 @@ Also hard-refresh the browser so it does not reuse an older overlay module.
 ## Wrangler compatibility date
 
 The checked-in `wrangler.jsonc` uses `compatibility_date: "2026-07-29"`. Keep this date until the installed Wrangler release accepts a later compatibility date.
-
 
 ## Protocol-version query parameter
 

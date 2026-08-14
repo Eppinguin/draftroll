@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { runTsc } from './lib/load-typescript.mjs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -31,12 +31,16 @@ class MockWebSocket extends EventTarget {
       this.dispatchEvent(new Event('open'));
       const parsed = new URL(this.url);
       this.serverSend({
-        type: 'session_ready', protocolVersion: 2, roomId: 'resilience',
+        type: 'session_ready',
+        protocolVersion: 2,
+        roomId: 'resilience',
         participant: {
           participantId: parsed.searchParams.get('participantId'),
           sessionId: parsed.searchParams.get('sessionId'),
           name: parsed.searchParams.get('name'),
-          roles: [], permissions: ['roll:create', 'roll:update-own', 'roll:reveal-own'], connectedAt: now,
+          roles: [],
+          permissions: ['roll:create', 'roll:update-own', 'roll:reveal-own'],
+          connectedAt: now,
         },
         latestEventSequence: sequence,
         latestRollSequence: 1,
@@ -49,25 +53,43 @@ class MockWebSocket extends EventTarget {
     const message = JSON.parse(raw);
     if (message.type === 'clock_sync_ping') {
       this.serverSend({
-        type: 'clock_sync_pong', protocolVersion: 2, roomId: 'resilience',
-        clientTimeMs: message.clientTimeMs, serverTimeMs: Date.now(), nonce: message.nonce,
+        type: 'clock_sync_pong',
+        protocolVersion: 2,
+        roomId: 'resilience',
+        clientTimeMs: message.clientTimeMs,
+        serverTimeMs: Date.now(),
+        nonce: message.nonce,
       });
       return;
     }
     if (message.type === 'roll_request') {
       if (message.input?.metadata?.test === 'pending-abort') return;
-      this.serverSend(makeRollStart({ requestId: message.requestId, rollId: message.clientRollId ?? 'successful-roll', eventSequence: ++sequence }));
+      this.serverSend(
+        makeRollStart({
+          requestId: message.requestId,
+          rollId: message.clientRollId ?? 'successful-roll',
+          eventSequence: ++sequence,
+        }),
+      );
       return;
     }
     if (message.type === 'update_roll') {
       this.serverSend({
-        type: 'roll_error', protocolVersion: 2, roomId: 'resilience', requestId: message.requestId,
-        rollId: message.rollId, code: 'revision_conflict', message: 'Expected revision 0 but current revision is 1', currentRevision: 1,
+        type: 'roll_error',
+        protocolVersion: 2,
+        roomId: 'resilience',
+        requestId: message.requestId,
+        rollId: message.rollId,
+        code: 'revision_conflict',
+        message: 'Expected revision 0 but current revision is 1',
+        currentRevision: 1,
       });
     }
   }
 
-  close(code = 1000, reason = '') { this.serverClose(code, reason); }
+  close(code = 1000, reason = '') {
+    this.serverClose(code, reason);
+  }
 
   serverClose(code = 1006, reason = 'network fault') {
     if (this.readyState === MockWebSocket.CLOSED) return;
@@ -83,14 +105,28 @@ class MockWebSocket extends EventTarget {
 }
 
 try {
-  await writeFile(config, JSON.stringify({
-    compilerOptions: {
-      target: 'ES2022', module: 'CommonJS', moduleResolution: 'Node', rootDir: join(root, 'packages'), outDir: out,
-      strict: true, skipLibCheck: true, esModuleInterop: true, lib: ['ES2022', 'DOM', 'DOM.Iterable'],
-    },
-    include: [join(root, 'packages/**/*.ts')],
-  }, null, 2));
-  const compile = spawnSync('tsc', ['-p', config], { cwd: root, encoding: 'utf8' });
+  await writeFile(
+    config,
+    JSON.stringify(
+      {
+        compilerOptions: {
+          target: 'ES2022',
+          module: 'CommonJS',
+          moduleResolution: 'Node',
+          rootDir: join(root, 'packages'),
+          outDir: out,
+          strict: true,
+          skipLibCheck: true,
+          esModuleInterop: true,
+          lib: ['ES2023', 'DOM', 'DOM.Iterable'],
+        },
+        include: [join(root, 'packages/**/*.ts')],
+      },
+      null,
+      2,
+    ),
+  );
+  const compile = runTsc(['-p', config], { cwd: root });
   if (compile.status !== 0) throw new Error(`${compile.stdout}\n${compile.stderr}`);
   await writeFile(join(out, 'package.json'), '{"type":"commonjs"}\n');
 
@@ -105,29 +141,46 @@ try {
   const fetchCalls = [];
   const fetchImpl = async (url, init) => {
     fetchCalls.push({ url: String(url), headers: init?.headers });
-    return new Response(JSON.stringify({ roomId: 'resilience', afterEventSequence: 1, events: durableEvents }), {
-      status: 200, headers: { 'content-type': 'application/json' },
-    });
+    return new Response(
+      JSON.stringify({ roomId: 'resilience', afterEventSequence: 1, events: durableEvents }),
+      {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      },
+    );
   };
 
   const room = await client.DiceRoom.connect({
-    url: 'ws://draftroll.test/rooms/resilience/connect', roomId: 'resilience',
+    url: 'ws://draftroll.test/rooms/resilience/connect',
+    roomId: 'resilience',
     participant: { participantId: 'player-a', sessionId: 'session-a', name: 'Player A' },
-    token: 'test-token', reconnect: true, reconnectDelayMs: 5, reconnectMaximumDelayMs: 10,
-    reconnectBackoffFactor: 1, clockSyncSamples: 1, requestTimeoutMs: 1000,
-    longRangeRecovery: true, fetchImpl, WebSocketImpl: MockWebSocket,
+    token: 'test-token',
+    reconnect: true,
+    reconnectDelayMs: 5,
+    reconnectMaximumDelayMs: 10,
+    reconnectBackoffFactor: 1,
+    clockSyncSamples: 1,
+    requestTimeoutMs: 1000,
+    longRangeRecovery: true,
+    fetchImpl,
+    WebSocketImpl: MockWebSocket,
   });
 
   const states = [];
   const observed = [];
   room.on('connectionState', (state) => states.push(state));
   room.on('rollStart', (event) => observed.push(event.rollId));
-  room.on('rollStart', () => { throw new Error('observer failure'); });
+  room.on('rollStart', () => {
+    throw new Error('observer failure');
+  });
 
   const first = MockWebSocket.instances[0];
   first.serverSend(makeRoomState({ latestEventSequence: 1, recentEvents: [] }));
   await waitFor(() => room.connectionDiagnostics.state === 'open');
-  const successful = await room.roll({ mode: 'evaluate', expression: '1d1' }, { clientRollId: 'successful-roll' });
+  const successful = await room.roll(
+    { mode: 'evaluate', expression: '1d1' },
+    { clientRollId: 'successful-roll' },
+  );
   assert.equal(successful.rollId, 'successful-roll');
 
   first.serverClose(1006, 'simulated disconnect');
@@ -139,14 +192,20 @@ try {
 
   const recoveryStartedAt = performance.now();
   const recoveryHeapBefore = process.memoryUsage().heapUsed;
-  second.serverSend(makeRoomState({
-    latestEventSequence: 4,
-    eventBufferStartSequence: 4,
-    missedEventsTruncated: true,
-    recentEvents: [makeRollStart({ rollId: 'recent-4', eventSequence: 4, replayed: true })],
-  }));
+  second.serverSend(
+    makeRoomState({
+      latestEventSequence: 4,
+      eventBufferStartSequence: 4,
+      missedEventsTruncated: true,
+      recentEvents: [makeRollStart({ rollId: 'recent-4', eventSequence: 4, replayed: true })],
+    }),
+  );
   await waitFor(() => observed.includes('recent-4'));
-  assert.deepEqual(observed.filter((id) => id.startsWith('recovered-')), ['recovered-3'], 'already applied durable events must be de-duplicated');
+  assert.deepEqual(
+    observed.filter((id) => id.startsWith('recovered-')),
+    ['recovered-3'],
+    'already applied durable events must be de-duplicated',
+  );
   assert.equal(fetchCalls.length, 1);
   assert.match(fetchCalls[0].url, /afterEventSequence=2|afterEventSequence=1/);
   const recoveryDurationMs = performance.now() - recoveryStartedAt;
@@ -167,7 +226,10 @@ try {
   assert.equal(fetchCalls[0].headers.Authorization, 'Bearer test-token');
 
   const abortController = new AbortController();
-  const pending = room.roll({ mode: 'evaluate', expression: '1d1', metadata: { test: 'pending-abort' } }, { signal: abortController.signal });
+  const pending = room.roll(
+    { mode: 'evaluate', expression: '1d1', metadata: { test: 'pending-abort' } },
+    { signal: abortController.signal },
+  );
   abortController.abort('test');
   await assert.rejects(pending, (error) => error.code === 'operation_aborted');
 
@@ -189,54 +251,104 @@ try {
   assert.ok(recoveryDurationMs >= 0);
   assert.ok(states.some((state) => state.state === 'reconnecting'));
   assert.equal(room.connectionDiagnostics.state, 'open');
-  if (room.connectionDiagnostics.roundTripMs !== undefined) assert.ok(room.connectionDiagnostics.roundTripMs >= 0);
+  if (room.connectionDiagnostics.roundTripMs !== undefined)
+    assert.ok(room.connectionDiagnostics.roundTripMs >= 0);
   room.close();
 
-  console.log(JSON.stringify({
-    ok: true,
-    metrics,
-    recovery: { durationMs: recoveryDurationMs, heapDeltaBytes: recoveryHeapDeltaBytes },
-    checks: [
-      'abnormal disconnect and capped reconnect',
-      'resume cursor propagation',
-      'truncated replay durable recovery',
-      'event ordering and duplicate suppression',
-      'request cancellation and revision-conflict metrics',
-      'connection diagnostics, hidden-projection metrics, and observer isolation',
-      'reconnect replay duration and heap sampling',
-    ],
-  }, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        ok: true,
+        metrics,
+        recovery: { durationMs: recoveryDurationMs, heapDeltaBytes: recoveryHeapDeltaBytes },
+        checks: [
+          'abnormal disconnect and capped reconnect',
+          'resume cursor propagation',
+          'truncated replay durable recovery',
+          'event ordering and duplicate suppression',
+          'request cancellation and revision-conflict metrics',
+          'connection diagnostics, hidden-projection metrics, and observer isolation',
+          'reconnect replay duration and heap sampling',
+        ],
+      },
+      null,
+      2,
+    ),
+  );
 } finally {
   await rm(temp, { recursive: true, force: true });
 }
 
 function makeRollStart({ requestId, rollId, eventSequence, replayed = false }) {
   const result = {
-    schemaVersion: 1, rollId, sequence: eventSequence, revision: 0, authority: 'server', expression: '1d1', total: 1,
-    dice: [{ id: `${rollId}-die`, type: 'd1', sides: 1, result: 1, kept: true, generatedBy: 'initial' }],
-    operations: [], createdAt: now,
+    schemaVersion: 1,
+    rollId,
+    sequence: eventSequence,
+    revision: 0,
+    authority: 'server',
+    expression: '1d1',
+    total: 1,
+    dice: [
+      { id: `${rollId}-die`, type: 'd1', sides: 1, result: 1, kept: true, generatedBy: 'initial' },
+    ],
+    operations: [],
+    createdAt: now,
   };
   return {
-    type: 'roll_start', protocolVersion: 2, roomId: 'resilience', requestId,
-    eventSequence, rollId, sequence: eventSequence,
+    type: 'roll_start',
+    protocolVersion: 2,
+    roomId: 'resilience',
+    requestId,
+    eventSequence,
+    rollId,
+    sequence: eventSequence,
     actor: { participantId: 'player-a', sessionId: 'session-a', name: 'Player A', roles: [] },
-    visibility: { type: 'public' }, hidden: false, result,
-    summary: { rollId, sequence: eventSequence, revision: 0, actor: { participantId: 'player-a', sessionId: 'session-a', name: 'Player A', roles: [] }, createdAt: now },
-    animationSeed: `seed-${eventSequence}`, serverStartTimeMs: Date.now(), animationDurationMs: 100,
+    visibility: { type: 'public' },
+    hidden: false,
+    result,
+    summary: {
+      rollId,
+      sequence: eventSequence,
+      revision: 0,
+      actor: { participantId: 'player-a', sessionId: 'session-a', name: 'Player A', roles: [] },
+      createdAt: now,
+    },
+    animationSeed: `seed-${eventSequence}`,
+    serverStartTimeMs: Date.now(),
+    animationDurationMs: 100,
     ...(replayed ? { replayed: true } : {}),
   };
 }
 
-function makeRoomState({ latestEventSequence, eventBufferStartSequence = 1, missedEventsTruncated = false, recentEvents }) {
+function makeRoomState({
+  latestEventSequence,
+  eventBufferStartSequence = 1,
+  missedEventsTruncated = false,
+  recentEvents,
+}) {
   return {
-    type: 'room_state', protocolVersion: 2, roomId: 'resilience', sequence: 1, latestRollSequence: 1,
-    latestEventSequence, eventBufferStartSequence, missedEventsTruncated,
-    policy, policyRevision: 0,
-    participants: [{
-      participantId: 'player-a', sessionId: 'session-a', name: 'Player A', roles: [],
-      permissions: ['roll:create', 'roll:update-own', 'roll:reveal-own'], connectedAt: now,
-    }],
-    recentEvents, recentRolls: [],
+    type: 'room_state',
+    protocolVersion: 2,
+    roomId: 'resilience',
+    sequence: 1,
+    latestRollSequence: 1,
+    latestEventSequence,
+    eventBufferStartSequence,
+    missedEventsTruncated,
+    policy,
+    policyRevision: 0,
+    participants: [
+      {
+        participantId: 'player-a',
+        sessionId: 'session-a',
+        name: 'Player A',
+        roles: [],
+        permissions: ['roll:create', 'roll:update-own', 'roll:reveal-own'],
+        connectedAt: now,
+      },
+    ],
+    recentEvents,
+    recentRolls: [],
   };
 }
 
@@ -244,6 +356,6 @@ async function waitFor(predicate, timeoutMs = 1000) {
   const deadline = Date.now() + timeoutMs;
   while (!predicate()) {
     if (Date.now() > deadline) throw new Error('Timed out waiting for test condition');
-    await new Promise((resolve) => setTimeout(resolve, 2));
+    await new Promise((settle) => setTimeout(settle, 2));
   }
 }

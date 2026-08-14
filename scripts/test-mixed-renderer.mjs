@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { runTsc } from './lib/load-typescript.mjs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -11,22 +11,29 @@ const outDir = join(tempRoot, 'build');
 const configPath = join(tempRoot, 'tsconfig.json');
 
 try {
-  await writeFile(configPath, JSON.stringify({
-    compilerOptions: {
-      target: 'ES2022',
-      module: 'CommonJS',
-      moduleResolution: 'Node',
-      rootDir: join(projectRoot, 'packages'),
-      outDir,
-      strict: true,
-      skipLibCheck: true,
-      esModuleInterop: true,
-      lib: ['ES2022', 'DOM', 'DOM.Iterable'],
-    },
-    include: [join(projectRoot, 'packages/**/*.ts')],
-  }, null, 2));
+  await writeFile(
+    configPath,
+    JSON.stringify(
+      {
+        compilerOptions: {
+          target: 'ES2022',
+          module: 'CommonJS',
+          moduleResolution: 'Node',
+          rootDir: join(projectRoot, 'packages'),
+          outDir,
+          strict: true,
+          skipLibCheck: true,
+          esModuleInterop: true,
+          lib: ['ES2023', 'DOM', 'DOM.Iterable'],
+        },
+        include: [join(projectRoot, 'packages/**/*.ts')],
+      },
+      null,
+      2,
+    ),
+  );
 
-  const compile = spawnSync('tsc', ['-p', configPath], { cwd: projectRoot, encoding: 'utf8' });
+  const compile = runTsc(['-p', configPath], { cwd: projectRoot });
   if (compile.status !== 0) {
     process.stderr.write(compile.stdout);
     process.stderr.write(compile.stderr);
@@ -34,14 +41,24 @@ try {
   }
   await writeFile(join(outDir, 'package.json'), '{"type":"commonjs"}\n');
 
-  const { DraftrollRenderer } = await import(pathToFileURL(join(outDir, 'renderer/src/index.js')).href);
+  const { DraftrollRenderer } = await import(
+    pathToFileURL(join(outDir, 'renderer/src/index.js')).href
+  );
   const calls = [];
   const bridge = {
     async roll(request) {
       calls.push(request);
-      const physicalResults = Array.isArray(request.results) ? request.results : request.results === undefined ? [] : [request.results];
+      const physicalResults = Array.isArray(request.results)
+        ? request.results
+        : request.results === undefined
+          ? []
+          : [request.results];
       const fallbackResults = (request.fallbacks ?? []).map((fallback) => fallback.result);
-      return { results: [...physicalResults, ...fallbackResults], total: physicalResults.reduce((sum, value) => sum + value, 0), replay: null };
+      return {
+        results: [...physicalResults, ...fallbackResults],
+        total: physicalResults.reduce((sum, value) => sum + value, 0),
+        replay: null,
+      };
     },
     setDie() {},
     setQuantity() {},
@@ -79,7 +96,6 @@ try {
   assert.deepEqual(calls[0].themes, ['dragon', 'frost', 'ember', 'dragon']);
   assert.equal(calls[0].context.name, 'Mara Voss');
 
-
   const universalResult = {
     authority: 'server',
     name: 'Universal pool',
@@ -88,37 +104,93 @@ try {
     dice: [
       { id: 'standard', type: 'd20', sides: 20, result: 17, kept: true, themeId: 'dragon' },
       { id: 'coin', type: 'd2', sides: 2, result: 2, kept: true, themeId: 'frost' },
+      {
+        id: 'custom-coin',
+        type: 'coin',
+        result: 'heads',
+        numericValue: 1,
+        faceLabel: 'Heads',
+        faceIndex: 0,
+        kept: true,
+        customDiceId: 'coin',
+        themeId: 'dragon',
+      },
       { id: 'fate', type: 'dF', result: -1, numericValue: -1, kept: true, themeId: 'ember' },
       { id: 'odd', type: 'd9', sides: 9, result: 7, kept: true, themeId: 'dragon' },
       { id: 'percentile', type: 'd100', sides: 100, result: 82, kept: true, themeId: 'frost' },
-      { id: 'symbol', type: 'narrative', result: 'success', numericValue: 1, faceLabel: 'Success', kept: true, customDiceId: 'narrative', themeId: 'ember' },
-      { id: 'weighted', type: 'weather', result: 'storm', numericValue: 2, faceLabel: 'Storm', kept: true, customDiceId: 'weather', themeId: 'dragon' },
+      {
+        id: 'symbol',
+        type: 'narrative',
+        result: 'success',
+        numericValue: 1,
+        faceLabel: 'Success',
+        kept: true,
+        customDiceId: 'narrative',
+        themeId: 'ember',
+      },
+      {
+        id: 'weighted',
+        type: 'weather',
+        result: 'storm',
+        numericValue: 2,
+        faceLabel: 'Storm',
+        kept: true,
+        customDiceId: 'weather',
+        themeId: 'dragon',
+      },
     ],
     customDice: [
-      { id: 'narrative', faces: [{ result: 'success', value: 1, label: 'Success' }], renderAs: 'card' },
-      { id: 'weather', faces: [{ result: 'storm', value: 2, weight: 3, label: 'Storm' }], renderAs: 'token' },
+      {
+        id: 'coin',
+        faces: [
+          { result: 'heads', value: 1, label: 'Heads' },
+          { result: 'tails', value: 0, label: 'Tails' },
+        ],
+        renderAs: 'coin',
+      },
+      {
+        id: 'narrative',
+        faces: [{ result: 'success', value: 1, label: 'Success' }],
+        renderAs: 'card',
+      },
+      {
+        id: 'weather',
+        faces: [{ result: 'storm', value: 2, weight: 3, label: 'Storm' }],
+        renderAs: 'token',
+      },
     ],
     operations: [],
     createdAt: new Date(0).toISOString(),
   };
 
-  const universalCompletion = await renderer.playRoll(universalResult, { animationSeed: 'fallback-test' });
+  const universalCompletion = await renderer.playRoll(universalResult, {
+    animationSeed: 'fallback-test',
+  });
   assert.equal(universalCompletion.total, 108);
   assert.equal(calls.length, 2);
-  assert.deepEqual(calls[1].kinds, ['d20']);
-  assert.deepEqual(calls[1].results, [17]);
+  assert.deepEqual(calls[1].kinds, ['d20', 'coin']);
+  assert.deepEqual(calls[1].results, [17, 2]);
   assert.deepEqual(
     calls[1].fallbacks.map((fallback) => fallback.kind),
     ['coin', 'fate', 'spinner', 'percentile', 'card', 'token'],
   );
   assert.deepEqual(
     calls[1].visualOrder.map((entry) => entry.kind),
-    ['physical', 'fallback', 'fallback', 'fallback', 'fallback', 'fallback', 'fallback'],
+    [
+      'physical',
+      'physical',
+      'fallback',
+      'fallback',
+      'fallback',
+      'fallback',
+      'fallback',
+      'fallback',
+    ],
   );
+  assert.equal(calls[1].fallbacks[0].oppositeLabel, 'Tails');
   assert.equal(calls[1].fallbacks[1].label, '−');
   assert.equal(calls[1].fallbacks[4].label, 'Success');
   assert.equal(calls[1].fallbacks[5].label, 'Storm');
-
 
   const totalOnly = {
     authority: 'local',
@@ -136,12 +208,18 @@ try {
   assert.equal(calls[2].fallbacks[0].label, '5');
   assert.equal(calls[2].fallbacks[0].metadata.synthetic, true);
 
-  console.log(JSON.stringify({
-    ok: true,
-    physicalKinds: calls[0].kinds,
-    fallbackKinds: calls[1].fallbacks.map((fallback) => fallback.kind),
-    total: universalCompletion.total,
-  }, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        ok: true,
+        physicalKinds: calls[0].kinds,
+        fallbackKinds: calls[1].fallbacks.map((fallback) => fallback.kind),
+        total: universalCompletion.total,
+      },
+      null,
+      2,
+    ),
+  );
 } finally {
   await rm(tempRoot, { recursive: true, force: true });
 }

@@ -51,7 +51,7 @@ export function resolveRendererViewport(input: RendererViewportInput): RendererV
   const candidates = [input.canvas, input.document, input.window]
     .map(normalizeCandidate)
     .filter((candidate): candidate is { width: number; height: number } => candidate !== null)
-    .sort((left, right) => right.width * right.height - left.width * left.height);
+    .toSorted((left, right) => right.width * right.height - left.width * left.height);
   const selected = candidates[0] ?? { width: 1, height: 1 };
   return {
     width: selected.width,
@@ -85,10 +85,15 @@ function normalizeCandidate(
 ): { width: number; height: number } | null {
   const width = candidate?.width;
   const height = candidate?.height;
-  if (!Number.isFinite(width) || !Number.isFinite(height)) return null;
-  if ((width as number) < 2 || (height as number) < 2) return null;
+  if (!isFiniteNumber(width) || !isFiniteNumber(height)) return null;
+  if (width < 2 || height < 2) return null;
   return {
-    width: Math.max(1, Math.round(width as number)),
-    height: Math.max(1, Math.round(height as number)),
+    width: Math.max(1, Math.round(width)),
+    height: Math.max(1, Math.round(height)),
   };
+}
+
+/** Narrowing counterpart to `Number.isFinite`, which does not narrow on its own. */
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
 }

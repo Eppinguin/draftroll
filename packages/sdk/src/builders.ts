@@ -26,7 +26,8 @@ export type CustomPlannedDieOptions = Omit<PlannedDie, 'id' | 'type' | 'customDi
 export type OperationDiceScope = readonly string[] | undefined;
 
 function numericDie(sides: number, id: string, options: PlannedDieOptions = {}): PlannedDie {
-  if (!Number.isSafeInteger(sides) || sides < 1) throw new Error('Dice sides must be a positive safe integer');
+  if (!Number.isSafeInteger(sides) || sides < 1)
+    throw new Error('Dice sides must be a positive safe integer');
   if (!id) throw new Error('A stable die ID is required');
   return { ...options, id, type: `d${sides}`, sides };
 }
@@ -45,8 +46,17 @@ export const dice = Object.freeze({
   d12: (id: string, options?: PlannedDieOptions) => numericDie(12, id, options),
   d20: (id: string, options?: PlannedDieOptions) => numericDie(20, id, options),
   d100: (id: string, options?: PlannedDieOptions) => numericDie(100, id, options),
-  percentile: (id: string, options: PlannedDieOptions = {}): PlannedDie => ({ ...options, id, type: 'd%', sides: 100 }),
-  fate: (id: string, options: PlannedDieOptions = {}): PlannedDie => ({ ...options, id, type: 'dF' }),
+  percentile: (id: string, options: PlannedDieOptions = {}): PlannedDie => ({
+    ...options,
+    id,
+    type: 'd%',
+    sides: 100,
+  }),
+  fate: (id: string, options: PlannedDieOptions = {}): PlannedDie => ({
+    ...options,
+    id,
+    type: 'dF',
+  }),
   custom: (definitionId: string, id: string, options: CustomPlannedDieOptions = {}): PlannedDie => {
     if (!definitionId) throw new Error('A custom die definition ID is required');
     if (!id) throw new Error('A stable die ID is required');
@@ -70,7 +80,10 @@ export const selectors = Object.freeze({
   lowest: (count = 1): RollSelector => ({ type: 'lowest', target: count }),
 });
 
-function withScope(operation: StructuredRollOperation, scope?: OperationDiceScope): StructuredRollOperation {
+function withScope(
+  operation: StructuredRollOperation,
+  scope?: OperationDiceScope,
+): StructuredRollOperation {
   return scope?.length ? { ...operation, dice: [...scope] } : operation;
 }
 
@@ -80,19 +93,32 @@ function withScope(operation: StructuredRollOperation, scope?: OperationDiceScop
  * @public
  */
 export const operations = Object.freeze({
-  keep: (selector: RollSelector, scope?: OperationDiceScope) => withScope({ type: 'keep', selector }, scope),
-  drop: (selector: RollSelector, scope?: OperationDiceScope) => withScope({ type: 'drop', selector }, scope),
-  keepHighest: (count = 1, scope?: OperationDiceScope) => withScope({ type: 'keep-highest', count }, scope),
-  keepLowest: (count = 1, scope?: OperationDiceScope) => withScope({ type: 'keep-lowest', count }, scope),
-  dropHighest: (count = 1, scope?: OperationDiceScope) => withScope({ type: 'drop-highest', count }, scope),
-  dropLowest: (count = 1, scope?: OperationDiceScope) => withScope({ type: 'drop-lowest', count }, scope),
-  reroll: (selector: RollSelector, scope?: OperationDiceScope) => withScope({ type: 'reroll', selector }, scope),
-  rerollOnce: (selector: RollSelector, scope?: OperationDiceScope) => withScope({ type: 'reroll-once', selector }, scope),
-  rerollAdd: (selector: RollSelector, scope?: OperationDiceScope) => withScope({ type: 'reroll-add', selector }, scope),
-  explode: (selector: RollSelector, scope?: OperationDiceScope) => withScope({ type: 'explode', selector }, scope),
-  minimum: (target: number, scope?: OperationDiceScope) => withScope({ type: 'minimum', target }, scope),
-  maximum: (target: number, scope?: OperationDiceScope) => withScope({ type: 'maximum', target }, scope),
-  countSuccesses: (selector: RollSelector, scope?: OperationDiceScope) => withScope({ type: 'success-count', selector }, scope),
+  keep: (selector: RollSelector, scope?: OperationDiceScope) =>
+    withScope({ type: 'keep', selector }, scope),
+  drop: (selector: RollSelector, scope?: OperationDiceScope) =>
+    withScope({ type: 'drop', selector }, scope),
+  keepHighest: (count = 1, scope?: OperationDiceScope) =>
+    withScope({ type: 'keep-highest', count }, scope),
+  keepLowest: (count = 1, scope?: OperationDiceScope) =>
+    withScope({ type: 'keep-lowest', count }, scope),
+  dropHighest: (count = 1, scope?: OperationDiceScope) =>
+    withScope({ type: 'drop-highest', count }, scope),
+  dropLowest: (count = 1, scope?: OperationDiceScope) =>
+    withScope({ type: 'drop-lowest', count }, scope),
+  reroll: (selector: RollSelector, scope?: OperationDiceScope) =>
+    withScope({ type: 'reroll', selector }, scope),
+  rerollOnce: (selector: RollSelector, scope?: OperationDiceScope) =>
+    withScope({ type: 'reroll-once', selector }, scope),
+  rerollAdd: (selector: RollSelector, scope?: OperationDiceScope) =>
+    withScope({ type: 'reroll-add', selector }, scope),
+  explode: (selector: RollSelector, scope?: OperationDiceScope) =>
+    withScope({ type: 'explode', selector }, scope),
+  minimum: (target: number, scope?: OperationDiceScope) =>
+    withScope({ type: 'minimum', target }, scope),
+  maximum: (target: number, scope?: OperationDiceScope) =>
+    withScope({ type: 'maximum', target }, scope),
+  countSuccesses: (selector: RollSelector, scope?: OperationDiceScope) =>
+    withScope({ type: 'success-count', selector }, scope),
 });
 
 /**
@@ -163,7 +189,8 @@ function normalizeCommonFace(input: CommonDiceFaceInput): CustomDieFace {
     return { result: input, value: input, label: String(input) };
   }
   if (typeof input === 'string') return { result: input, value: 0, label: input };
-  if (!input || typeof input !== 'object') throw new Error('Custom die faces must be numbers, strings, or face objects');
+  if (!input || typeof input !== 'object')
+    throw new Error('Custom die faces must be numbers, strings, or face objects');
   if (typeof input.result !== 'number' && typeof input.result !== 'string') {
     throw new Error('Custom die face results must be numbers or strings');
   }
@@ -200,34 +227,47 @@ function makeCommonDefinition(
 }
 
 function coinDefinition(id = 'coin', options: CoinDiceFactoryOptions = {}): CustomDiceDefinition {
-  return makeCommonDefinition(id, [
-    {
-      result: options.headsResult ?? 'heads',
-      value: options.headsValue ?? 1,
-      label: options.headsLabel ?? 'Heads',
-      weight: options.headsWeight,
-    },
-    {
-      result: options.tailsResult ?? 'tails',
-      value: options.tailsValue ?? 0,
-      label: options.tailsLabel ?? 'Tails',
-      weight: options.tailsWeight,
-    },
-  ], 'coin', options);
+  return makeCommonDefinition(
+    id,
+    [
+      {
+        result: options.headsResult ?? 'heads',
+        value: options.headsValue ?? 1,
+        label: options.headsLabel ?? 'Heads',
+        weight: options.headsWeight,
+      },
+      {
+        result: options.tailsResult ?? 'tails',
+        value: options.tailsValue ?? 0,
+        label: options.tailsLabel ?? 'Tails',
+        weight: options.tailsWeight,
+      },
+    ],
+    'coin',
+    options,
+  );
 }
 
 function fateDefinition(id = 'fate', options: CommonDiceFactoryOptions = {}): CustomDiceDefinition {
-  return makeCommonDefinition(id, [
-    { result: -1, value: -1, label: '−' },
-    { result: -1, value: -1, label: '−' },
-    { result: 0, value: 0, label: '0' },
-    { result: 0, value: 0, label: '0' },
-    { result: 1, value: 1, label: '+' },
-    { result: 1, value: 1, label: '+' },
-  ], 'fate', options);
+  return makeCommonDefinition(
+    id,
+    [
+      { result: -1, value: -1, label: '−' },
+      { result: -1, value: -1, label: '−' },
+      { result: 0, value: 0, label: '0' },
+      { result: 0, value: 0, label: '0' },
+      { result: 1, value: 1, label: '+' },
+      { result: 1, value: 1, label: '+' },
+    ],
+    'fate',
+    options,
+  );
 }
 
-function percentilePairDefinition(id = 'percentile-pair', options: CommonDiceFactoryOptions = {}): CustomDiceDefinition {
+function percentilePairDefinition(
+  id = 'percentile-pair',
+  options: CommonDiceFactoryOptions = {},
+): CustomDiceDefinition {
   const faces: CustomDieFace[] = Array.from({ length: 100 }, (_, index) => {
     const percentile = index + 1;
     const tens = percentile === 100 ? 0 : Math.floor(percentile / 10) * 10;

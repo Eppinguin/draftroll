@@ -1,26 +1,26 @@
 {
   "name": "@draftroll/react",
   "version": "0.1.0",
+  "files": [
+    "dist"
+  ],
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     }
   },
-  "peerDependencies": {
-    "react": ">=18.0.0"
-  },
-  "dependencies": {
-    "@draftroll/sdk": "workspace:*",
-    "@draftroll/errors": "workspace:*"
-  },
-  "files": [
-    "dist"
-  ],
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
   "scripts": {
     "prepack": "node ../../scripts/build-packages.mjs"
+  },
+  "dependencies": {
+    "@draftroll/errors": "workspace:*",
+    "@draftroll/sdk": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": ">=18.0.0"
   }
 }

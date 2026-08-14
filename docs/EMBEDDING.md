@@ -206,18 +206,20 @@ await oneDie.wait();
 // and its replacement is appended as a new physical throw. Repeated rerolls
 // retain the complete visible history until the table is cleared or dismissed.
 
-const revised = oneDie.animateUpdate({
-  expression: '3d6 + 1d8 + 4',
-}, {
-  reroll: true,
-});
+const revised = oneDie.animateUpdate(
+  {
+    expression: '3d6 + 1d8 + 4',
+  },
+  {
+    reroll: true,
+  },
+);
 await revised.wait();
 
 revised.updateLog({
   annotation: 'GM corrected the label',
 });
 ```
-
 
 Individual SDK rerolls preserve the existing table by default. The prior physical die remains visible as discarded history, while the replacement is appended and rolled normally. Repeated rerolls retain every previous replacement, with only the newest logical result kept, and all revisions remain one logical table roll. Additive stages do not invoke bridge quantity/theme setters because browser implementations may rebuild the scene when those setters run. A reroll initiated from the built-in result panel also takes ownership of the presentation synchronously, before deferred click-to-dismiss logic can clear the table. The same options are forwarded through the iframe overlay and realtime room presentation path. Set `renderer.preservePreviousDice` to `false` for legacy replacement behavior. If the table has already been cleared, dismissed, auto-cleared, or cannot accept another visual, the renderer safely falls back to presenting the complete revised result rather than an orphaned replacement die.
 

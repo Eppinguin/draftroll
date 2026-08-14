@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { readFileSync, realpathSync, statSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { readFileSync, statSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { loadTypeScript } from './lib/load-typescript.mjs';
 
 const root = resolve(import.meta.dirname, '..');
 const examples = {
@@ -17,14 +16,20 @@ const examples = {
   'custom-symbolic': ['main.ts'],
 };
 for (const [directory, files] of Object.entries(examples)) {
-  for (const file of files) assert.ok(statSync(join(root, 'examples', directory, file)).isFile(), `missing examples/${directory}/${file}`);
+  for (const file of files)
+    assert.ok(
+      statSync(join(root, 'examples', directory, file)).isFile(),
+      `missing examples/${directory}/${file}`,
+    );
 }
-const sourceFiles = Object.entries(examples).flatMap(([directory, files]) => files.map((file) => join(root, 'examples', directory, file)));
+const sourceFiles = Object.entries(examples).flatMap(([directory, files]) =>
+  files.map((file) => join(root, 'examples', directory, file)),
+);
 const combined = sourceFiles.map((file) => readFileSync(file, 'utf8')).join('\n');
 for (const marker of [
-  "@draftroll/sdk/browser",
-  "@draftroll/sdk/headless",
-  "@draftroll/react",
+  '@draftroll/sdk/browser',
+  '@draftroll/sdk/headless',
+  '@draftroll/react',
   'DraftrollTextRenderer',
   'connectRoom',
   "visibility: { type: 'roller' }",
@@ -32,18 +37,45 @@ for (const marker of [
   'Content-Security-Policy',
   "renderAs: 'd6'",
   "metadata: { source: 'vtt'",
-]) assert.ok(combined.includes(marker), `generic integration examples are missing ${marker}`);
+])
+  assert.ok(combined.includes(marker), `generic integration examples are missing ${marker}`);
 for (const forbidden of ['Draftsheet', '@draftsheet/', 'campaignId:', 'characterId:']) {
-  assert.equal(combined.includes(forbidden), false, `examples contain product-specific assumption: ${forbidden}`);
+  assert.equal(
+    combined.includes(forbidden),
+    false,
+    `examples contain product-specific assumption: ${forbidden}`,
+  );
 }
-const tscExecutable = realpathSync(execFileSync('which', ['tsc'], { encoding: 'utf8' }).trim());
-const ts = await import(pathToFileURL(resolve(dirname(tscExecutable), '../lib/typescript.js')).href);
-for (const file of sourceFiles.filter((file) => /\.(?:ts|tsx)$/.test(file))) {
+const ts = loadTypeScript();
+for (const file of sourceFiles.filter((candidate) => /\.(?:ts|tsx)$/.test(candidate))) {
   const result = ts.transpileModule(readFileSync(file, 'utf8'), {
-    fileName: file, reportDiagnostics: true,
-    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, jsx: ts.JsxEmit.ReactJSX, isolatedModules: true },
+    fileName: file,
+    reportDiagnostics: true,
+    compilerOptions: {
+      target: ts.ScriptTarget.ES2022,
+      module: ts.ModuleKind.ESNext,
+      jsx: ts.JsxEmit.ReactJSX,
+      isolatedModules: true,
+    },
   });
-  const errors = (result.diagnostics ?? []).filter((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error);
-  assert.equal(errors.length, 0, `${file} has TypeScript syntax errors: ${errors.map((error) => ts.flattenDiagnosticMessageText(error.messageText, '\n')).join('; ')}`);
+  const errors = (result.diagnostics ?? []).filter(
+    (diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error,
+  );
+  assert.equal(
+    errors.length,
+    0,
+    `${file} has TypeScript syntax errors: ${errors.map((error) => ts.flattenDiagnosticMessageText(error.messageText, '\n')).join('; ')}`,
+  );
 }
-console.log(JSON.stringify({ ok: true, examples: Object.keys(examples), generic: true, transpiledSources: sourceFiles.filter((file) => /\.(?:ts|tsx)$/.test(file)).length }, null, 2));
+console.log(
+  JSON.stringify(
+    {
+      ok: true,
+      examples: Object.keys(examples),
+      generic: true,
+      transpiledSources: sourceFiles.filter((file) => /\.(?:ts|tsx)$/.test(file)).length,
+    },
+    null,
+    2,
+  ),
+);

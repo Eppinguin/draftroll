@@ -37,21 +37,17 @@ export function resolveRendererPerformanceBudget(
   input: RendererPerformanceBudgetInput,
 ): RendererPerformanceBudget {
   const configuredRatio = finiteRange(input.maximumPixelRatio, 0.65, 2);
-  const profileRatio = input.profile === 'battery'
-    ? 1
-    : input.profile === 'quality'
-      ? 2
-      : input.overlay
-        ? 1.35
-        : 1.5;
+  const profileRatio =
+    input.profile === 'battery' ? 1 : input.profile === 'quality' ? 2 : input.overlay ? 1.35 : 1.5;
   const maximumPixelRatio = Math.min(
     Math.max(0.65, input.devicePixelRatio || 1),
     configuredRatio ?? profileRatio,
   );
 
   const configuredFps = finiteRange(input.activeFramesPerSecond, 15, 60, true);
-  const activeFramesPerSecond = configuredFps
-    ?? (input.profile === 'battery' || input.reducedMotion || input.visualCount > 20 ? 30 : 60);
+  const activeFramesPerSecond =
+    configuredFps ??
+    (input.profile === 'battery' || input.reducedMotion || input.visualCount > 20 ? 30 : 60);
 
   return { maximumPixelRatio, activeFramesPerSecond };
 }
@@ -104,7 +100,11 @@ export class AdaptiveResolutionController {
   /**
    * Observe.
    */
-  observe(frameDurationMs: number, targetFramesPerSecond: number, currentScale: number): number | null {
+  observe(
+    frameDurationMs: number,
+    targetFramesPerSecond: number,
+    currentScale: number,
+  ): number | null {
     if (!Number.isFinite(frameDurationMs) || frameDurationMs <= 0) return null;
     this.frames += 1;
     this.durationMs += frameDurationMs;

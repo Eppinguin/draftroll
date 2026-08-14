@@ -11,8 +11,17 @@ export { DraftrollTextRenderer } from './text';
 export type { DraftrollTextRendererOptions } from './text';
 export { AdaptiveResolutionController, resolveRendererPerformanceBudget } from './performance';
 export { resolveOrthographicViewport, resolveRendererViewport } from './viewport';
-export type { OrthographicViewport, RendererViewport, RendererViewportCandidate, RendererViewportInput } from './viewport';
-export type { AdaptiveResolutionOptions, RendererPerformanceBudget, RendererPerformanceBudgetInput } from './performance';
+export type {
+  OrthographicViewport,
+  RendererViewport,
+  RendererViewportCandidate,
+  RendererViewportInput,
+} from './viewport';
+export type {
+  AdaptiveResolutionOptions,
+  RendererPerformanceBudget,
+  RendererPerformanceBudgetInput,
+} from './performance';
 import type {
   CustomDiceDefinition,
   NormalizedDieResult,
@@ -36,11 +45,11 @@ import {
 } from '../../errors/src/index';
 
 /**
- * Physical polyhedral die kinds supported by the renderer.
+ * Physical die kinds supported by the renderer.
  *
  * @public
  */
-export type DraftrollDieKind = 'd4' | 'd6' | 'd8' | 'd10' | 'd12' | 'd20';
+export type DraftrollDieKind = 'coin' | 'd4' | 'd6' | 'd8' | 'd10' | 'd12' | 'd20';
 /**
  * Non-polyhedral fallback visual kinds supported by the renderer.
  *
@@ -87,6 +96,8 @@ export interface DraftrollFallbackVisual {
   sides?: number;
   title: string;
   label: string;
+  /** Label painted on the reverse side when the fallback is a two-sided coin. */
+  oppositeLabel?: string;
   theme: string;
   outcome: DraftrollEffectOutcome;
   metadata?: Record<string, unknown>;
@@ -179,7 +190,10 @@ export interface RendererPlayOptions {
    * a normal full replacement after clear, dismiss, or auto-clear.
    */
   replaceFallbackResult?: NormalizedRollResult;
-  outcomeResolver?: (die: NormalizedDieResult, result: NormalizedRollResult) => DraftrollEffectOutcome;
+  outcomeResolver?: (
+    die: NormalizedDieResult,
+    result: NormalizedRollResult,
+  ) => DraftrollEffectOutcome;
   /** Cancels theme loading, queued work, and the caller's wait for a long presentation. */
   signal?: AbortSignal;
   /** Automatically dissolve and clear this presentation after the given delay. */
@@ -205,7 +219,7 @@ export interface RendererPlayOptions {
 export interface RendererCompletion {
   results: Array<number | string>;
   total: number;
-  replay: unknown | null;
+  replay: unknown;
   /** How this presentation was committed to the visible table. */
   presentationMode?: 'replace' | 'add';
 }
@@ -305,14 +319,23 @@ export interface RendererResultUpdateOptions {
  */
 export interface DiceRenderer {
   warmup(themeIds?: string[], signal?: AbortSignal): Promise<void>;
-  playRoll(result: NormalizedRollResult, options?: RendererPlayOptions): Promise<RendererCompletion>;
+  playRoll(
+    result: NormalizedRollResult,
+    options?: RendererPlayOptions,
+  ): Promise<RendererCompletion>;
   /** Update the result UI/log without replaying the physical dice. */
-  updateResult?(result: NormalizedRollResult, options?: RendererResultUpdateOptions): void | Promise<void>;
+  updateResult?(
+    result: NormalizedRollResult,
+    options?: RendererResultUpdateOptions,
+  ): void | Promise<void>;
   /** Visually dissolve a completed throw and remove its physical dice. */
   dismiss?(options?: RendererDismissOptions): void | Promise<void>;
   /** Remove physical dice immediately. */
   clear?(): void | Promise<void>;
-  on?<K extends RendererLifecycleEventName>(event: K, handler: (payload: RendererLifecycleEventMap[K]) => void): () => void;
+  on?<K extends RendererLifecycleEventName>(
+    event: K,
+    handler: (payload: RendererLifecycleEventMap[K]) => void,
+  ): () => void;
   pause?(): void | Promise<void>;
   resume?(): void | Promise<void>;
   screenshot?(): Promise<Blob | string>;
@@ -344,44 +367,51 @@ export interface DraftrollThemeManifest {
  * @public
  */
 export interface DraftrollBridge {
-  roll(request?: {
-    /** Results belonging only to physical dice. May be empty for fallback-only rolls. */
-    results?: number[] | number;
-    outcomes?: DraftrollEffectOutcome[] | DraftrollEffectOutcome;
-    themes?: string[] | string;
-    /** Physical die type for each physical result. A single value is repeated. */
-    kinds?: DraftrollDieKind[] | DraftrollDieKind;
-    /** Non-polyhedral or symbolic components animated alongside physical dice. */
-    fallbacks?: DraftrollFallbackVisual[];
-    /** Restores the normalized die order when physical and fallback visuals are mixed. */
-    visualOrder?: DraftrollVisualOrderEntry[];
-    context?: Record<string, unknown>;
-    seed?: string | number;
-    startAtMs?: number;
-    /** Seek into the deterministic replay after planning rather than starting at frame zero. */
-    seekToMs?: number;
-    /** Duration used to translate authoritative elapsed time to local replay progress. */
-    animationDurationMs?: number;
-    /** Present the final settled state immediately. */
-    settleImmediately?: boolean;
-    lateMode?: RendererLateEventMode;
-    settleAfterProgress?: number;
-    /** Add to an active persistent table throw instead of waiting for it to clear. */
-    tableMode?: 'replace' | 'add';
-    signal?: AbortSignal;
-    reducedMotion?: boolean;
-    /** Per-physical-die size, mass, and inertia overrides aligned with results/kinds. */
-    physics?: DicePhysicsProperties[];
-    physicsPreset?: 'standard' | 'compact' | 'heavy' | 'low-gravity';
-  } | number[] | number): Promise<RendererCompletion>;
+  roll(
+    request?:
+      | {
+          /** Results belonging only to physical dice. May be empty for fallback-only rolls. */
+          results?: number[] | number;
+          outcomes?: DraftrollEffectOutcome[] | DraftrollEffectOutcome;
+          themes?: string[] | string;
+          /** Physical die type for each physical result. A single value is repeated. */
+          kinds?: DraftrollDieKind[] | DraftrollDieKind;
+          /** Non-polyhedral or symbolic components animated alongside physical dice. */
+          fallbacks?: DraftrollFallbackVisual[];
+          /** Restores the normalized die order when physical and fallback visuals are mixed. */
+          visualOrder?: DraftrollVisualOrderEntry[];
+          context?: Record<string, unknown>;
+          seed?: string | number;
+          startAtMs?: number;
+          /** Seek into the deterministic replay after planning rather than starting at frame zero. */
+          seekToMs?: number;
+          /** Duration used to translate authoritative elapsed time to local replay progress. */
+          animationDurationMs?: number;
+          /** Present the final settled state immediately. */
+          settleImmediately?: boolean;
+          lateMode?: RendererLateEventMode;
+          settleAfterProgress?: number;
+          /** Add to an active persistent table throw instead of waiting for it to clear. */
+          tableMode?: 'replace' | 'add';
+          signal?: AbortSignal;
+          reducedMotion?: boolean;
+          /** Per-physical-die size, mass, and inertia overrides aligned with results/kinds. */
+          physics?: DicePhysicsProperties[];
+          physicsPreset?: 'standard' | 'compact' | 'heavy' | 'low-gravity';
+        }
+      | number[]
+      | number,
+  ): Promise<RendererCompletion>;
   setDie(kind: DraftrollDieKind): void;
   setQuantity(count: number): void;
   setTheme(theme: string): void;
   getThemes(): DraftrollThemeManifest[];
-  installTheme?(bundle: RuntimeThemeBundle): Promise<DraftrollThemeManifest> | DraftrollThemeManifest;
+  installTheme?(
+    bundle: RuntimeThemeBundle,
+  ): Promise<DraftrollThemeManifest> | DraftrollThemeManifest;
   unloadTheme?(themeId: string): void | Promise<void>;
   dismiss?(options?: RendererDismissOptions): void | Promise<void>;
-  clear?(): void;
+  clear?(): void | Promise<void>;
   configure?(options: RendererPerformanceOptions): void;
   pause?(): void | Promise<void>;
   resume?(): void | Promise<void>;
@@ -428,16 +458,25 @@ export interface ResolvedLateEventPresentation {
  *
  * @public
  */
-export function resolveLateEventPresentation(options: RendererPlayOptions = {}): ResolvedLateEventPresentation {
+export function resolveLateEventPresentation(
+  options: RendererPlayOptions = {},
+): ResolvedLateEventPresentation {
   const elapsedMs = Math.max(0, options.elapsedMs ?? 0);
   const durationMs = Math.max(1, options.animationDurationMs ?? 2_800);
   const requestedMode = options.lateEvent?.mode ?? 'auto';
-  const settleAfterProgress = Math.min(1, Math.max(0, options.lateEvent?.settleAfterProgress ?? 0.78));
+  const settleAfterProgress = Math.min(
+    1,
+    Math.max(0, options.lateEvent?.settleAfterProgress ?? 0.78),
+  );
   if (requestedMode === 'replay') {
     return { seekToMs: 0, settleImmediately: false, mode: 'replay' };
   }
   if (elapsedMs <= 16) {
-    return { seekToMs: 0, settleImmediately: false, mode: requestedMode === 'seek' ? 'seek' : 'auto' };
+    return {
+      seekToMs: 0,
+      settleImmediately: false,
+      mode: requestedMode === 'seek' ? 'seek' : 'auto',
+    };
   }
   if (requestedMode === 'settled') {
     return { seekToMs: durationMs, settleImmediately: true, mode: 'settled' };
@@ -458,7 +497,10 @@ export class UnsupportedRollError extends DraftrollError {
   /**
    * Creates a UnsupportedRollError instance.
    */
-  constructor(message: string, public readonly result: NormalizedRollResult) {
+  constructor(
+    message: string,
+    public readonly result: NormalizedRollResult,
+  ) {
     super(DRAFTROLL_ERROR_CODES.unsupportedRoll, message, {
       package: 'renderer',
       recoverable: true,
@@ -478,6 +520,7 @@ interface PhysicalVisual {
 }
 
 interface PreparedRollPresentation {
+  presentationGeneration: number;
   result: NormalizedRollResult;
   options: RendererPlayOptions;
   physical: PhysicalVisual[];
@@ -486,7 +529,13 @@ interface PreparedRollPresentation {
   renderedDieIds: string[];
   expectedResults: Array<number | string>;
   latePresentation: ResolvedLateEventPresentation;
-  table: Required<Pick<RendererTableOptions, 'mode' | 'batchWindowMs' | 'maximumConcurrentRolls' | 'maximumConcurrentVisuals'>> & RendererTableOptions;
+  table: Required<
+    Pick<
+      RendererTableOptions,
+      'mode' | 'batchWindowMs' | 'maximumConcurrentRolls' | 'maximumConcurrentVisuals'
+    >
+  > &
+    RendererTableOptions;
   seed: string | number;
   enqueuedAt: number;
   tableMode?: 'replace' | 'add';
@@ -556,12 +605,16 @@ export class DraftrollRenderer implements DiceRenderer {
   private readonly strictThemes: boolean;
   private readonly tableDefaults: RendererTableOptions;
   private readonly pendingTablePresentations: PendingTablePresentation[] = [];
-  private readonly lifecycleHandlers = new Map<RendererLifecycleEventName, Set<(payload: never) => void>>();
+  private readonly lifecycleHandlers = new Map<
+    RendererLifecycleEventName,
+    Set<(payload: never) => void>
+  >();
   private tableFlushTimer: ReturnType<typeof setTimeout> | null = null;
   private autoClearTimer: ReturnType<typeof setTimeout> | null = null;
   private participantFilter?: RendererParticipantFilter;
   private readonly activeRollIds = new Set<string>();
   private hasActivePresentation = false;
+  private presentationGeneration = 0;
   private paused = false;
 
   /**
@@ -587,7 +640,13 @@ export class DraftrollRenderer implements DiceRenderer {
     this.maximumThemeTotalBytes = options.maximumThemeTotalBytes ?? 24 * 1024 * 1024;
     this.onThemeLoad = options.onThemeLoad;
     this.strictThemes = options.strictThemes ?? false;
-    this.tableDefaults = { mode: 'queue', batchWindowMs: 140, maximumConcurrentRolls: 6, maximumConcurrentVisuals: this.maximumDice, ...(options.table ?? {}) };
+    this.tableDefaults = {
+      mode: 'queue',
+      batchWindowMs: 140,
+      maximumConcurrentRolls: 6,
+      maximumConcurrentVisuals: this.maximumDice,
+      ...options.table,
+    };
     if (options.performance) this.bridge.configure?.(options.performance);
     this.bridge.getThemes().forEach((theme) => this.installedThemes.add(theme.id));
   }
@@ -600,9 +659,9 @@ export class DraftrollRenderer implements DiceRenderer {
     handler: (payload: RendererLifecycleEventMap[K]) => void,
   ): () => void {
     const handlers = this.lifecycleHandlers.get(event) ?? new Set<(payload: never) => void>();
-    handlers.add(handler as (payload: never) => void);
+    handlers.add(handler);
     this.lifecycleHandlers.set(event, handlers);
-    return () => handlers.delete(handler as (payload: never) => void);
+    return () => handlers.delete(handler);
   }
 
   /**
@@ -651,12 +710,16 @@ export class DraftrollRenderer implements DiceRenderer {
    * @throws {@link DraftrollAbortError} when `options.signal` is aborted.
    * @throws {@link UnsupportedRollError} when the visual count exceeds renderer capacity.
    */
-  async playRoll(result: NormalizedRollResult, options: RendererPlayOptions = {}): Promise<RendererCompletion> {
+  async playRoll(
+    result: NormalizedRollResult,
+    options: RendererPlayOptions = {},
+  ): Promise<RendererCompletion> {
     throwIfAborted(options.signal, 'Renderer presentation');
+    const presentationGeneration = this.presentationGeneration;
     if (
-      options.preservePreviousDice === true
-      && options.replaceFallbackResult
-      && !this.canAppendToActivePresentation(result)
+      options.preservePreviousDice === true &&
+      options.replaceFallbackResult &&
+      !this.canAppendToActivePresentation(result)
     ) {
       return this.playRoll(options.replaceFallbackResult, withoutPersistentTableOptions(options));
     }
@@ -670,12 +733,22 @@ export class DraftrollRenderer implements DiceRenderer {
     this.emitLifecycle('loading', { result, options });
     try {
       const modifierStages = resolveModifierPresentationStages(result, options);
-      const shouldUseModifierSequence = modifierStages.length > 1
-        || (options.preservePreviousDice === true && modifierStages.some((stage) => stage.generatedBy !== 'initial' && stage.generatedBy !== 'external'));
+      const shouldUseModifierSequence =
+        modifierStages.length > 1 ||
+        (options.preservePreviousDice === true &&
+          modifierStages.some(
+            (stage) => stage.generatedBy !== 'initial' && stage.generatedBy !== 'external',
+          ));
       if (shouldUseModifierSequence) {
-        return await this.playModifierSequence(result, options, modifierStages);
+        return await this.playModifierSequence(
+          result,
+          options,
+          modifierStages,
+          presentationGeneration,
+        );
       }
-      const prepared = await this.prepareRoll(result, options);
+      const prepared = await this.prepareRoll(result, options, {}, presentationGeneration);
+      this.assertPresentationGeneration(presentationGeneration);
       if (prepared.table.mode !== 'concurrent') {
         const [completion] = await raceWithAbort(
           this.executePreparedBatch([prepared]),
@@ -691,7 +764,9 @@ export class DraftrollRenderer implements DiceRenderer {
             const index = this.pendingTablePresentations.indexOf(entry);
             if (index >= 0) this.pendingTablePresentations.splice(index, 1);
             entry.cleanupAbort?.();
-            reject(new DraftrollAbortError('Renderer presentation', options.signal?.reason, 'renderer'));
+            reject(
+              new DraftrollAbortError('Renderer presentation', options.signal?.reason, 'renderer'),
+            );
           };
           options.signal.addEventListener('abort', handleAbort, { once: true });
           entry.cleanupAbort = () => options.signal?.removeEventListener('abort', handleAbort);
@@ -700,10 +775,20 @@ export class DraftrollRenderer implements DiceRenderer {
         this.scheduleTableFlush(prepared);
       });
     } catch (caught) {
+      if (presentationGeneration !== this.presentationGeneration) {
+        throw this.presentationClearedError();
+      }
       let error = caught;
-      if (options.preservePreviousDice === true && options.replaceFallbackResult && !options.signal?.aborted) {
+      if (
+        options.preservePreviousDice === true &&
+        options.replaceFallbackResult &&
+        !options.signal?.aborted
+      ) {
         try {
-          return await this.playRoll(options.replaceFallbackResult, withoutPersistentTableOptions(options));
+          return await this.playRoll(
+            options.replaceFallbackResult,
+            withoutPersistentTableOptions(options),
+          );
         } catch (replacementError) {
           error = replacementError;
         }
@@ -718,43 +803,63 @@ export class DraftrollRenderer implements DiceRenderer {
     result: NormalizedRollResult,
     options: RendererPlayOptions,
     stages: readonly ModifierPresentationStage[],
+    presentationGeneration: number,
   ): Promise<RendererCompletion> {
     const visualCount = stages.reduce((sum, stage) => sum + stage.dieIds.length, 0);
     if (visualCount > this.maximumDice) {
-      throw new UnsupportedRollError(`Draftroll supports at most ${this.maximumDice} visual components per staged throw`, result);
+      throw new UnsupportedRollError(
+        `Draftroll supports at most ${this.maximumDice} visual components per staged throw`,
+        result,
+      );
     }
-    const sequenceId = result.rollId ?? `sequence:${result.createdAt}:${String(options.animationSeed ?? result.total)}`;
+    const sequenceId =
+      result.rollId ??
+      `sequence:${result.createdAt}:${String(options.animationSeed ?? result.total)}`;
     const preparedStages: PreparedRollPresentation[] = [];
     for (let stageIndex = 0; stageIndex < stages.length; stageIndex += 1) {
       const stage = stages[stageIndex];
-      const stageOptions: RendererPlayOptions = stageIndex === 0 ? options : {
-        ...options,
-        startTime: undefined,
-        elapsedMs: 0,
-        animationSeed: `${String(options.animationSeed ?? result.rollId ?? `${result.createdAt}:${result.total}`)}:modifier:${stageIndex}`,
-      };
-      preparedStages.push(await this.prepareRoll(result, {
-        ...stageOptions,
-        table: { ...(options.table ?? {}), mode: 'queue' },
-      }, {
-        dieIds: stage.dieIds,
-        tableMode: stageIndex === 0
-          ? (options.preservePreviousDice === true || options.table?.mode === 'concurrent') ? 'add' : 'replace'
-          : 'add',
-        sequence: {
-          id: sequenceId,
-          stageIndex,
-          stageCount: stages.length,
-          pending: stageIndex < stages.length - 1,
-          generatedBy: stages[Math.min(stageIndex + 1, stages.length - 1)].generatedBy,
-        },
-      }));
+      const stageOptions: RendererPlayOptions =
+        stageIndex === 0
+          ? options
+          : {
+              ...options,
+              startTime: undefined,
+              elapsedMs: 0,
+              animationSeed: `${String(options.animationSeed ?? result.rollId ?? `${result.createdAt}:${result.total}`)}:modifier:${stageIndex}`,
+            };
+      preparedStages.push(
+        await this.prepareRoll(
+          result,
+          {
+            ...stageOptions,
+            table: { ...options.table, mode: 'queue' },
+          },
+          {
+            dieIds: stage.dieIds,
+            tableMode:
+              stageIndex === 0
+                ? options.preservePreviousDice === true || options.table?.mode === 'concurrent'
+                  ? 'add'
+                  : 'replace'
+                : 'add',
+            sequence: {
+              id: sequenceId,
+              stageIndex,
+              stageCount: stages.length,
+              pending: stageIndex < stages.length - 1,
+              generatedBy: stages[Math.min(stageIndex + 1, stages.length - 1)].generatedBy,
+            },
+          },
+          presentationGeneration,
+        ),
+      );
     }
 
-    let replay: unknown | null = null;
+    let replay: unknown = null;
     let presentationMode: RendererCompletion['presentationMode'];
     for (let stageIndex = 0; stageIndex < preparedStages.length; stageIndex += 1) {
       throwIfAborted(options.signal, 'Renderer modifier sequence');
+      this.assertPresentationGeneration(presentationGeneration);
       const [completion] = await this.executePreparedBatch([preparedStages[stageIndex]], {
         emitStarted: stageIndex === 0,
         emitCompleted: stageIndex === preparedStages.length - 1,
@@ -779,17 +884,27 @@ export class DraftrollRenderer implements DiceRenderer {
       tableMode?: 'replace' | 'add';
       sequence?: ModifierPresentationSequence;
     } = {},
+    presentationGeneration = this.presentationGeneration,
   ): Promise<PreparedRollPresentation> {
     const requestedIds = internal.dieIds ?? options.dieIds;
     const selectedIds = requestedIds ? new Set(requestedIds) : null;
     const dice = selectedIds ? result.dice.filter((die) => selectedIds.has(die.id)) : result.dice;
     if (selectedIds && dice.length !== selectedIds.size) {
       const missing = [...selectedIds].filter((id) => !result.dice.some((die) => die.id === id));
-      throw new UnsupportedRollError(`Unknown die IDs requested for rendering: ${missing.join(', ')}`, result);
+      throw new UnsupportedRollError(
+        `Unknown die IDs requested for rendering: ${missing.join(', ')}`,
+        result,
+      );
     }
-    if (dice.length > this.maximumDice) throw new UnsupportedRollError(`Draftroll supports at most ${this.maximumDice} visual components per throw`, result);
+    if (dice.length > this.maximumDice)
+      throw new UnsupportedRollError(
+        `Draftroll supports at most ${this.maximumDice} visual components per throw`,
+        result,
+      );
 
-    const definitions = new Map((result.customDice ?? []).map((definition) => [definition.id, definition] as const));
+    const definitions = new Map(
+      (result.customDice ?? []).map((definition) => [definition.id, definition] as const),
+    );
     const physical: PhysicalVisual[] = [];
     const fallbacks: DraftrollFallbackVisual[] = [];
     const visualOrder: DraftrollVisualOrderEntry[] = [];
@@ -802,19 +917,28 @@ export class DraftrollRenderer implements DiceRenderer {
       const definition = definitions.get(die.customDiceId ?? '');
       const physicalFace = resolvePhysicalFace(die, definition);
       const physicalKind = physicalFace?.kind ?? normalizeKind(die.type, die.sides);
-      const numericResult = physicalFace?.value ?? (typeof die.result === 'number' ? die.result : Number(die.result));
-      const isPhysicalValue = options.forceFallback !== true
-        && physicalKind !== null
-        && Number.isInteger(numericResult)
-        && numericResult >= 1
-        && numericResult <= Number(physicalKind.slice(1))
-        && (physicalFace !== null || !isDistinctFallbackType(die.type));
-      const outcome = options.outcomeResolver?.(die, result)
-        ?? defaultOutcomeForDie(die, physicalKind);
+      const numericResult =
+        physicalFace?.value ?? (typeof die.result === 'number' ? die.result : Number(die.result));
+      const isPhysicalValue =
+        options.forceFallback !== true &&
+        physicalKind !== null &&
+        Number.isInteger(numericResult) &&
+        numericResult >= 1 &&
+        numericResult <= maximumPhysicalValue(physicalKind) &&
+        (physicalFace !== null || !isDistinctFallbackType(die.type));
+      const outcome =
+        options.outcomeResolver?.(die, result) ?? defaultOutcomeForDie(die, physicalKind);
 
       if (isPhysicalValue && physicalKind) {
         const index = physical.length;
-        physical.push({ die, kind: physicalKind, value: numericResult, theme, outcome, physics: die.physics });
+        physical.push({
+          die,
+          kind: physicalKind,
+          value: numericResult,
+          theme,
+          outcome,
+          physics: die.physics,
+        });
         visualOrder.push({ kind: 'physical', index, dieId: die.id });
         continue;
       }
@@ -844,18 +968,26 @@ export class DraftrollRenderer implements DiceRenderer {
       visualOrder.push({ kind: 'fallback', index: 0, dieId: fallbacks[0].id });
     }
 
-    const requestedTable = { ...this.tableDefaults, ...(options.table ?? {}) };
+    const requestedTable = { ...this.tableDefaults, ...options.table };
     const table = {
       ...requestedTable,
-      mode: requestedTable.mode === 'concurrent' ? 'concurrent' as const : 'queue' as const,
+      mode: requestedTable.mode === 'concurrent' ? ('concurrent' as const) : ('queue' as const),
       batchWindowMs: clampInteger(requestedTable.batchWindowMs, 0, 500, 140),
       maximumConcurrentRolls: clampInteger(requestedTable.maximumConcurrentRolls, 1, 12, 6),
-      maximumConcurrentVisuals: clampInteger(requestedTable.maximumConcurrentVisuals, 1, this.maximumDice, this.maximumDice),
+      maximumConcurrentVisuals: clampInteger(
+        requestedTable.maximumConcurrentVisuals,
+        1,
+        this.maximumDice,
+        this.maximumDice,
+      ),
     };
-    const expectedResults = visualOrder.map((entry) => entry.kind === 'physical'
-      ? physical[entry.index]?.value ?? 0
-      : fallbacks[entry.index]?.result ?? '');
+    const expectedResults = visualOrder.map((entry) =>
+      entry.kind === 'physical'
+        ? (physical[entry.index]?.value ?? 0)
+        : (fallbacks[entry.index]?.result ?? ''),
+    );
     return {
+      presentationGeneration,
       result,
       options,
       physical,
@@ -878,16 +1010,17 @@ export class DraftrollRenderer implements DiceRenderer {
       0,
     );
     if (
-      this.pendingTablePresentations.length >= prepared.table.maximumConcurrentRolls
-      || totalPendingVisuals >= prepared.table.maximumConcurrentVisuals
+      this.pendingTablePresentations.length >= prepared.table.maximumConcurrentRolls ||
+      totalPendingVisuals >= prepared.table.maximumConcurrentVisuals
     ) {
       this.flushTablePresentations();
       return;
     }
     const startTime = prepared.options.startTime;
-    const untilStart = typeof startTime === 'number' && Number.isFinite(startTime)
-      ? Math.max(0, startTime - Date.now() - 24)
-      : prepared.table.batchWindowMs;
+    const untilStart =
+      typeof startTime === 'number' && Number.isFinite(startTime)
+        ? Math.max(0, startTime - Date.now() - 24)
+        : prepared.table.batchWindowMs;
     const delay = Math.min(prepared.table.batchWindowMs, untilStart);
     if (this.tableFlushTimer !== null) return;
     this.tableFlushTimer = setTimeout(() => {
@@ -914,25 +1047,44 @@ export class DraftrollRenderer implements DiceRenderer {
     }
     for (const batch of batches) {
       void this.executePreparedBatch(batch.map((entry) => entry.prepared)).then(
-        (completions) => batch.forEach((entry, index) => {
-          entry.cleanupAbort?.();
-          entry.resolve(completions[index]);
-        }),
-        (error) => batch.forEach((entry) => {
-          entry.cleanupAbort?.();
-          entry.reject(error instanceof Error ? error : new Error(String(error)));
-        }),
+        (completions) =>
+          batch.forEach((entry, index) => {
+            entry.cleanupAbort?.();
+            entry.resolve(completions[index]);
+          }),
+        (error) =>
+          batch.forEach((entry) => {
+            entry.cleanupAbort?.();
+            entry.reject(error instanceof Error ? error : new Error(String(error)));
+          }),
       );
     }
   }
 
-  private canJoinTableBatch(batch: PendingTablePresentation[], candidate: PendingTablePresentation): boolean {
+  private canJoinTableBatch(
+    batch: PendingTablePresentation[],
+    candidate: PendingTablePresentation,
+  ): boolean {
     const first = batch[0].prepared;
     const currentVisuals = batch.reduce((sum, entry) => sum + entry.prepared.visualOrder.length, 0);
-    const maximumRolls = Math.min(first.table.maximumConcurrentRolls, candidate.prepared.table.maximumConcurrentRolls);
-    const maximumVisuals = Math.min(first.table.maximumConcurrentVisuals, candidate.prepared.table.maximumConcurrentVisuals);
-    if (batch.length >= maximumRolls || currentVisuals + candidate.prepared.visualOrder.length > maximumVisuals) return false;
-    if (first.latePresentation.settleImmediately !== candidate.prepared.latePresentation.settleImmediately) return false;
+    const maximumRolls = Math.min(
+      first.table.maximumConcurrentRolls,
+      candidate.prepared.table.maximumConcurrentRolls,
+    );
+    const maximumVisuals = Math.min(
+      first.table.maximumConcurrentVisuals,
+      candidate.prepared.table.maximumConcurrentVisuals,
+    );
+    if (
+      batch.length >= maximumRolls ||
+      currentVisuals + candidate.prepared.visualOrder.length > maximumVisuals
+    )
+      return false;
+    if (
+      first.latePresentation.settleImmediately !==
+      candidate.prepared.latePresentation.settleImmediately
+    )
+      return false;
     if (first.latePresentation.mode !== candidate.prepared.latePresentation.mode) return false;
     const firstTime = finiteStartTime(first) ?? first.enqueuedAt;
     const candidateTime = finiteStartTime(candidate.prepared) ?? candidate.prepared.enqueuedAt;
@@ -944,6 +1096,18 @@ export class DraftrollRenderer implements DiceRenderer {
     entries: PreparedRollPresentation[],
     execution: ExecutePreparedBatchOptions = {},
   ): Promise<RendererCompletion[]> {
+    const presentationGeneration =
+      entries[0]?.presentationGeneration ?? this.presentationGeneration;
+    if (entries.some((entry) => entry.presentationGeneration !== presentationGeneration)) {
+      throw new DraftrollStateError(
+        'Draftroll cannot batch presentations from different table generations',
+        {
+          package: 'renderer',
+          recoverable: true,
+        },
+      );
+    }
+    this.assertPresentationGeneration(presentationGeneration);
     const numericResults: number[] = [];
     const physicalKinds: DraftrollDieKind[] = [];
     const themes: string[] = [];
@@ -961,14 +1125,19 @@ export class DraftrollRenderer implements DiceRenderer {
         physicalKinds.push(visual.kind);
         themes.push(visual.theme);
         outcomes.push(visual.outcome);
-        physics.push({ ...(visual.physics ?? {}) });
+        physics.push({ ...visual.physics });
       });
       entry.fallbacks.forEach((fallback) => fallbacks.push({ ...fallback }));
-      entry.visualOrder.forEach((visual) => visualOrder.push(visual.kind === 'physical'
-        ? { ...visual, index: visual.index + physicalStart }
-        : { ...visual, index: visual.index + fallbackStart }));
+      entry.visualOrder.forEach((visual) =>
+        visualOrder.push(
+          visual.kind === 'physical'
+            ? { ...visual, index: visual.index + physicalStart }
+            : { ...visual, index: visual.index + fallbackStart },
+        ),
+      );
       tableRolls.push({
-        groupId: entry.table.groupId ?? entry.result.rollId ?? `table-roll-${tableRolls.length + 1}`,
+        groupId:
+          entry.table.groupId ?? entry.result.rollId ?? `table-roll-${tableRolls.length + 1}`,
         rollId: entry.result.rollId,
         actorLabel: entry.table.actorLabel,
         rollLabel: entry.table.rollLabel ?? entry.result.name,
@@ -982,8 +1151,11 @@ export class DraftrollRenderer implements DiceRenderer {
       });
     }
 
-    const presentationMode = entries[0].tableMode
-      ?? (entries[0].options.preservePreviousDice === true || entries[0].table.mode === 'concurrent' ? 'add' : 'replace');
+    const presentationMode =
+      entries[0].tableMode ??
+      (entries[0].options.preservePreviousDice === true || entries[0].table.mode === 'concurrent'
+        ? 'add'
+        : 'replace');
     if (numericResults.length > 0 && presentationMode === 'replace') {
       // These legacy bridge setters rebuild the browser table. They are useful
       // for a replacement cast, but calling them before an additive modifier
@@ -991,44 +1163,55 @@ export class DraftrollRenderer implements DiceRenderer {
       this.bridge.setQuantity(numericResults.length);
       this.bridge.setTheme(themes[0] ?? this.fallbackThemeId);
     }
-    const startTimes = entries.map((entry) => finiteStartTime(entry)).filter((value): value is number => value !== null);
-    const animationDurations = entries.map((entry) => entry.options.animationDurationMs).filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+    const startTimes = entries
+      .map((entry) => finiteStartTime(entry))
+      .filter((value): value is number => value !== null);
+    const animationDurations = entries
+      .map((entry) => entry.options.animationDurationMs)
+      .filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
     const combinedTotal = entries.reduce((sum, entry) => sum + entry.result.total, 0);
-    const renderedDice = entries.flatMap((entry) => resolvePresentationStateDice(entry).map((die) => ({
-      id: die.id,
-      type: die.type,
-      result: die.result,
-      kept: die.kept,
-      generatedBy: die.generatedBy,
-      generatedFromDieId: die.generatedFromDieId,
-    })));
+    const renderedDice = entries.flatMap((entry) =>
+      resolvePresentationStateDice(entry).map((die) => ({
+        id: die.id,
+        type: die.type,
+        result: die.result,
+        kept: die.kept,
+        generatedBy: die.generatedBy,
+        generatedFromDieId: die.generatedFromDieId,
+      })),
+    );
     const persistentTable = entries.some((entry) => entry.table.mode === 'concurrent');
     const modifierSequence = entries.length === 1 ? entries[0].sequence : undefined;
-    const context = entries.length === 1 && (!persistentTable || modifierSequence) ? {
-      authority: entries[0].result.authority,
-      name: entries[0].result.name,
-      rollId: entries[0].result.rollId,
-      sequence: entries[0].result.sequence,
-      expression: entries[0].result.expression,
-      normalizedTotal: modifierSequence?.pending ? undefined : entries[0].result.total,
-      metadata: entries[0].result.metadata,
-      renderedDieIds: entries[0].renderedDieIds,
-      renderedDice,
-      modifierSequenceId: modifierSequence?.id,
-      modifierSequenceStage: modifierSequence ? modifierSequence.stageIndex + 1 : undefined,
-      modifierSequenceStages: modifierSequence?.stageCount,
-      modifierSequencePending: modifierSequence?.pending,
-      modifierSequenceGeneratedBy: modifierSequence?.generatedBy,
-    } : {
-      authority: 'table',
-      name: `${entries.length} table roll${entries.length === 1 ? '' : 's'}`,
-      normalizedTotal: combinedTotal,
-      tableRolls,
-      renderedDieIds: entries.flatMap((entry) => entry.renderedDieIds),
-      renderedDice,
-    };
+    const context =
+      entries.length === 1 && (!persistentTable || modifierSequence)
+        ? {
+            authority: entries[0].result.authority,
+            name: entries[0].result.name,
+            rollId: entries[0].result.rollId,
+            sequence: entries[0].result.sequence,
+            expression: entries[0].result.expression,
+            normalizedTotal: modifierSequence?.pending ? undefined : entries[0].result.total,
+            metadata: entries[0].result.metadata,
+            renderedDieIds: entries[0].renderedDieIds,
+            renderedDice,
+            modifierSequenceId: modifierSequence?.id,
+            modifierSequenceStage: modifierSequence ? modifierSequence.stageIndex + 1 : undefined,
+            modifierSequenceStages: modifierSequence?.stageCount,
+            modifierSequencePending: modifierSequence?.pending,
+            modifierSequenceGeneratedBy: modifierSequence?.generatedBy,
+          }
+        : {
+            authority: 'table',
+            name: `${entries.length} table roll${entries.length === 1 ? '' : 's'}`,
+            normalizedTotal: combinedTotal,
+            tableRolls,
+            renderedDieIds: entries.flatMap((entry) => entry.renderedDieIds),
+            renderedDice,
+          };
     if (execution.emitStarted ?? true) {
-      entries.forEach((entry) => this.emitLifecycle('started', { result: entry.result, options: entry.options }));
+      entries.forEach((entry) =>
+        this.emitLifecycle('started', { result: entry.result, options: entry.options }),
+      );
     }
     const bridgePromise = this.bridge.roll({
       results: numericResults,
@@ -1040,12 +1223,17 @@ export class DraftrollRenderer implements DiceRenderer {
       fallbacks,
       visualOrder,
       context,
-      seed: entries.length === 1 ? entries[0].seed : `table:${entries.map((entry) => String(entry.seed)).join('|')}`,
+      seed:
+        entries.length === 1
+          ? entries[0].seed
+          : `table:${entries.map((entry) => String(entry.seed)).join('|')}`,
       startAtMs: startTimes.length > 0 ? Math.max(...startTimes) : undefined,
       seekToMs: Math.max(...entries.map((entry) => entry.latePresentation.seekToMs)),
-      animationDurationMs: animationDurations.length > 0 ? Math.max(...animationDurations) : undefined,
-      settleImmediately: entries.every((entry) => entry.latePresentation.settleImmediately)
-        || entries.every((entry) => entry.options.reducedMotion === true),
+      animationDurationMs:
+        animationDurations.length > 0 ? Math.max(...animationDurations) : undefined,
+      settleImmediately:
+        entries.every((entry) => entry.latePresentation.settleImmediately) ||
+        entries.every((entry) => entry.options.reducedMotion === true),
       lateMode: entries[0].latePresentation.mode,
       settleAfterProgress: entries[0].options.lateEvent?.settleAfterProgress,
       tableMode: presentationMode,
@@ -1057,6 +1245,7 @@ export class DraftrollRenderer implements DiceRenderer {
       entries.length === 1 ? entries[0].options.signal : undefined,
       'Renderer bridge presentation',
     );
+    this.assertPresentationGeneration(presentationGeneration);
     this.recordActivePresentations(entries);
     const completions = entries.map((entry) => ({
       results: entry.expectedResults.slice(),
@@ -1091,8 +1280,13 @@ export class DraftrollRenderer implements DiceRenderer {
   async dismiss(options: RendererDismissOptions = {}): Promise<void> {
     this.cancelAutoClear();
     this.emitLifecycle('dissolveStarted', { options });
-    if (this.bridge.dismiss) await raceWithAbort(Promise.resolve(this.bridge.dismiss(options)), options.signal, 'Renderer dismissal');
-    else this.bridge.clear?.();
+    if (this.bridge.dismiss)
+      await raceWithAbort(
+        Promise.resolve(this.bridge.dismiss(options)),
+        options.signal,
+        'Renderer dismissal',
+      );
+    else await this.bridge.clear?.();
     this.resetActivePresentations();
     this.emitLifecycle('dissolveFinished', { options });
   }
@@ -1100,15 +1294,21 @@ export class DraftrollRenderer implements DiceRenderer {
   /**
    * Clears all table groups and presentation history.
    */
-  clear(): void {
+  async clear(): Promise<void> {
+    this.presentationGeneration += 1;
     this.cancelAutoClear();
-    this.cancelPendingTablePresentations(new DraftrollStateError('Draftroll table presentations were cleared', {
-      package: 'renderer',
-      recoverable: true,
-    }));
-    this.bridge.clear?.();
+    this.cancelPendingTablePresentations(
+      new DraftrollStateError('Draftroll table presentations were cleared', {
+        package: 'renderer',
+        recoverable: true,
+      }),
+    );
     this.resetActivePresentations();
-    this.emitLifecycle('cleared', {});
+    try {
+      await this.bridge.clear?.();
+    } finally {
+      this.emitLifecycle('cleared', {});
+    }
   }
 
   /**
@@ -1136,10 +1336,14 @@ export class DraftrollRenderer implements DiceRenderer {
    */
   async screenshot(): Promise<Blob | string> {
     if (!this.bridge.screenshot) {
-      throw new DraftrollError('renderer_screenshot_unavailable', 'The active renderer does not support screenshots', {
-        package: 'renderer',
-        recoverable: true,
-      });
+      throw new DraftrollError(
+        'renderer_screenshot_unavailable',
+        'The active renderer does not support screenshots',
+        {
+          package: 'renderer',
+          recoverable: true,
+        },
+      );
     }
     return this.bridge.screenshot();
   }
@@ -1149,10 +1353,14 @@ export class DraftrollRenderer implements DiceRenderer {
    */
   async configureCamera(options: RendererCameraOptions): Promise<void> {
     if (!this.bridge.configureCamera) {
-      throw new DraftrollError('renderer_camera_unavailable', 'The active renderer does not support camera controls', {
-        package: 'renderer',
-        recoverable: true,
-      });
+      throw new DraftrollError(
+        'renderer_camera_unavailable',
+        'The active renderer does not support camera controls',
+        {
+          package: 'renderer',
+          recoverable: true,
+        },
+      );
     }
     await this.bridge.configureCamera(options);
   }
@@ -1162,10 +1370,14 @@ export class DraftrollRenderer implements DiceRenderer {
    */
   async resetCamera(): Promise<void> {
     if (!this.bridge.resetCamera) {
-      throw new DraftrollError('renderer_camera_unavailable', 'The active renderer does not support camera reset', {
-        package: 'renderer',
-        recoverable: true,
-      });
+      throw new DraftrollError(
+        'renderer_camera_unavailable',
+        'The active renderer does not support camera reset',
+        {
+          package: 'renderer',
+          recoverable: true,
+        },
+      );
     }
     await this.bridge.resetCamera();
   }
@@ -1183,16 +1395,18 @@ export class DraftrollRenderer implements DiceRenderer {
       schemaVersion: 1,
       authority: 'external',
       total: typeof value === 'number' ? value : 0,
-      dice: [{
-        id: 'preview-die',
-        type,
-        sides,
-        result: value,
-        numericValue: typeof value === 'number' ? value : 0,
-        kept: true,
-        generatedBy: 'external',
-        themeId: options.themeId,
-      }],
+      dice: [
+        {
+          id: 'preview-die',
+          type,
+          sides,
+          result: value,
+          numericValue: typeof value === 'number' ? value : 0,
+          kept: true,
+          generatedBy: 'external',
+          themeId: options.themeId,
+        },
+      ],
       operations: [],
       createdAt: new Date().toISOString(),
       themeId: options.themeId,
@@ -1213,22 +1427,33 @@ export class DraftrollRenderer implements DiceRenderer {
    */
   async configureInteractions(options: RendererInteractionOptions): Promise<void> {
     if (!this.bridge.configureInteractions) {
-      throw new DraftrollError('renderer_interactions_unavailable', 'The active renderer does not support physical interactions', {
-        package: 'renderer',
-        recoverable: true,
-      });
+      throw new DraftrollError(
+        'renderer_interactions_unavailable',
+        'The active renderer does not support physical interactions',
+        {
+          package: 'renderer',
+          recoverable: true,
+        },
+      );
     }
     await this.bridge.configureInteractions(options);
   }
 
   private canAppendToActivePresentation(result: NormalizedRollResult): boolean {
     if (!this.hasActivePresentation) return false;
-    return result.rollId === undefined || this.activeRollIds.size === 0 || this.activeRollIds.has(result.rollId);
+    return (
+      result.rollId === undefined ||
+      this.activeRollIds.size === 0 ||
+      this.activeRollIds.has(result.rollId)
+    );
   }
 
   private recordActivePresentations(entries: readonly PreparedRollPresentation[]): void {
-    const tableMode = entries[0]?.tableMode
-      ?? (entries[0]?.options.preservePreviousDice === true || entries[0]?.table.mode === 'concurrent' ? 'add' : 'replace');
+    const tableMode =
+      entries[0]?.tableMode ??
+      (entries[0]?.options.preservePreviousDice === true || entries[0]?.table.mode === 'concurrent'
+        ? 'add'
+        : 'replace');
     if (tableMode === 'replace') this.activeRollIds.clear();
     for (const entry of entries) {
       if (entry.result.rollId) this.activeRollIds.add(entry.result.rollId);
@@ -1239,6 +1464,17 @@ export class DraftrollRenderer implements DiceRenderer {
   private resetActivePresentations(): void {
     this.activeRollIds.clear();
     this.hasActivePresentation = false;
+  }
+
+  private presentationClearedError(): DraftrollStateError {
+    return new DraftrollStateError('Draftroll table presentations were cleared', {
+      package: 'renderer',
+      recoverable: true,
+    });
+  }
+
+  private assertPresentationGeneration(generation: number): void {
+    if (generation !== this.presentationGeneration) throw this.presentationClearedError();
   }
 
   private cancelPendingTablePresentations(error: Error): void {
@@ -1254,11 +1490,12 @@ export class DraftrollRenderer implements DiceRenderer {
 
   private shouldPresent(result: NormalizedRollResult): boolean {
     if (!this.participantFilter) return true;
-    const participantId = typeof result.metadata?.participantId === 'string'
-      ? result.metadata.participantId
-      : typeof result.metadata?.actorParticipantId === 'string'
-        ? result.metadata.actorParticipantId
-        : undefined;
+    const participantId =
+      typeof result.metadata?.participantId === 'string'
+        ? result.metadata.participantId
+        : typeof result.metadata?.actorParticipantId === 'string'
+          ? result.metadata.actorParticipantId
+          : undefined;
     if (typeof this.participantFilter !== 'function') {
       return participantId !== undefined && this.participantFilter.includes(participantId);
     }
@@ -1280,9 +1517,16 @@ export class DraftrollRenderer implements DiceRenderer {
     this.autoClearTimer = null;
   }
 
-  private emitLifecycle<K extends RendererLifecycleEventName>(event: K, payload: RendererLifecycleEventMap[K]): void {
+  private emitLifecycle<K extends RendererLifecycleEventName>(
+    event: K,
+    payload: RendererLifecycleEventMap[K],
+  ): void {
     for (const handler of this.lifecycleHandlers.get(event) ?? []) {
       try {
+        // Handlers are stored contravariantly at `never` so one map can hold every event's
+        // handler. `on` only ever files a handler under its own key, so widening back to this
+        // key's payload type restores the signature the caller registered.
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion
         (handler as (value: RendererLifecycleEventMap[K]) => void)(payload);
       } catch {
         // Lifecycle observers are informational and cannot break presentation.
@@ -1320,7 +1564,12 @@ export class DraftrollRenderer implements DiceRenderer {
   }
 }
 
-function clampInteger(value: number | undefined, minimum: number, maximum: number, fallback: number): number {
+function clampInteger(
+  value: number | undefined,
+  minimum: number,
+  maximum: number,
+  fallback: number,
+): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
   return Math.min(maximum, Math.max(minimum, Math.round(value)));
 }
@@ -1338,13 +1587,31 @@ function getWindowBridge(): DraftrollBridge | null {
 
 function normalizeKind(type: string, sides?: number): DraftrollDieKind | null {
   const normalized = type.toLowerCase();
-  if (normalized === 'd4' || normalized === 'd6' || normalized === 'd8' || normalized === 'd10' || normalized === 'd12' || normalized === 'd20') {
+  if (normalized === 'd2') return 'coin';
+  if (
+    normalized === 'd4' ||
+    normalized === 'd6' ||
+    normalized === 'd8' ||
+    normalized === 'd10' ||
+    normalized === 'd12' ||
+    normalized === 'd20'
+  ) {
     return normalized;
   }
   const inferred = sides ? `d${sides}` : '';
-  return inferred === 'd4' || inferred === 'd6' || inferred === 'd8' || inferred === 'd10' || inferred === 'd12' || inferred === 'd20'
+  if (inferred === 'd2') return 'coin';
+  return inferred === 'd4' ||
+    inferred === 'd6' ||
+    inferred === 'd8' ||
+    inferred === 'd10' ||
+    inferred === 'd12' ||
+    inferred === 'd20'
     ? inferred
     : null;
+}
+
+function maximumPhysicalValue(kind: DraftrollDieKind): number {
+  return kind === 'coin' ? 2 : Number(kind.slice(1));
 }
 
 function resolvePhysicalFace(
@@ -1353,12 +1620,17 @@ function resolvePhysicalFace(
 ): { kind: DraftrollDieKind; value: number } | null {
   const kind = normalizeKind(definition?.renderAs ?? '', undefined);
   if (!definition || !kind) return null;
-  const maximum = Number(kind.slice(1));
+  const maximum = maximumPhysicalValue(kind);
   let faceIndex = die.faceIndex;
   if (faceIndex === undefined) {
     const matches = definition.faces
       .map((face, index) => ({ face, index }))
-      .filter(({ face }) => face.result === die.result && (face.value ?? numericFaceValue(face.result)) === (die.numericValue ?? numericFaceValue(die.result)));
+      .filter(
+        ({ face }) =>
+          face.result === die.result &&
+          (face.value ?? numericFaceValue(face.result)) ===
+            (die.numericValue ?? numericFaceValue(die.result)),
+      );
     if (matches.length === 1) faceIndex = matches[0].index;
   }
   if (faceIndex === undefined || !Number.isInteger(faceIndex) || faceIndex < 0) return null;
@@ -1388,7 +1660,9 @@ function resolvePresentationStateDice(entry: PreparedRollPresentation): Normaliz
   ]);
   const queue = [...requested];
   while (queue.length > 0) {
-    const die = byId.get(queue.shift() as string);
+    const next = queue.shift();
+    if (next === undefined) break;
+    const die = byId.get(next);
     const parentId = die?.generatedFromDieId;
     if (!parentId || requested.has(parentId) || !byId.has(parentId)) continue;
     requested.add(parentId);
@@ -1404,24 +1678,30 @@ function resolveModifierPresentationStages(
   const allDice = options.dieIds
     ? result.dice.filter((die) => options.dieIds?.includes(die.id))
     : result.dice;
-  const singleStage = (): ModifierPresentationStage[] => allDice.length > 0 ? [{
-    dieIds: allDice.map((die) => die.id),
-    generatedBy: stageGenerationSource(allDice),
-  }] : [];
+  const singleStage = (): ModifierPresentationStage[] =>
+    allDice.length > 0
+      ? [
+          {
+            dieIds: allDice.map((die) => die.id),
+            generatedBy: stageGenerationSource(allDice),
+          },
+        ]
+      : [];
 
   if (
-    options.modifierSequence === 'simultaneous'
-    || options.reducedMotion === true
-    || resolveLateEventPresentation(options).settleImmediately
+    options.modifierSequence === 'simultaneous' ||
+    options.reducedMotion === true ||
+    resolveLateEventPresentation(options).settleImmediately
   ) {
     return singleStage();
   }
 
-  const generated = allDice.filter((die) => (
-    die.generatedBy === 'reroll'
-    || die.generatedBy === 'reroll-add'
-    || die.generatedBy === 'explosion'
-  ));
+  const generated = allDice.filter(
+    (die) =>
+      die.generatedBy === 'reroll' ||
+      die.generatedBy === 'reroll-add' ||
+      die.generatedBy === 'explosion',
+  );
   if (generated.length === 0) return singleStage();
 
   const byId = new Map(allDice.map((die) => [die.id, die] as const));
@@ -1430,9 +1710,9 @@ function resolveModifierPresentationStages(
     const existing = depthById.get(die.id);
     if (existing !== undefined) return existing;
     if (
-      die.generatedBy === undefined
-      || die.generatedBy === 'initial'
-      || die.generatedBy === 'external'
+      die.generatedBy === undefined ||
+      die.generatedBy === 'initial' ||
+      die.generatedBy === 'external'
     ) {
       depthById.set(die.id, 0);
       return 0;
@@ -1457,23 +1737,30 @@ function resolveModifierPresentationStages(
     grouped.set(depth, group);
   }
   return [...grouped.entries()]
-    .sort(([left], [right]) => left - right)
+    .toSorted(([left], [right]) => left - right)
     .map(([, dice]) => ({
       dieIds: dice.map((die) => die.id),
       generatedBy: stageGenerationSource(dice),
     }));
 }
 
-function stageGenerationSource(dice: readonly NormalizedDieResult[]): ModifierPresentationStage['generatedBy'] {
+function stageGenerationSource(
+  dice: readonly NormalizedDieResult[],
+): ModifierPresentationStage['generatedBy'] {
   const sources = new Set(dice.map((die) => die.generatedBy ?? 'initial'));
-  return sources.size === 1
-    ? [...sources][0] as ModifierPresentationStage['generatedBy']
-    : 'mixed';
+  return sources.size === 1 ? [...sources][0] : 'mixed';
 }
 
 function isDistinctFallbackType(type: string): boolean {
   const normalized = type.toLowerCase();
-  return normalized === 'd10x' || normalized === 'd%' || normalized === 'd100' || normalized === 'df' || normalized === 'fate';
+  return (
+    normalized === 'coin' ||
+    normalized === 'd10x' ||
+    normalized === 'd%' ||
+    normalized === 'd100' ||
+    normalized === 'df' ||
+    normalized === 'fate'
+  );
 }
 
 function createFallbackVisual(
@@ -1496,15 +1783,47 @@ function createFallbackVisual(
     sides: die.sides,
     title,
     label,
+    oppositeLabel: kind === 'coin' ? readOppositeCoinLabel(die, definition) : undefined,
     theme,
     outcome,
     metadata: {
-      ...(definition?.metadata ?? {}),
-      ...(die.metadata ?? {}),
+      ...definition?.metadata,
+      ...die.metadata,
       ...(die.faceMetadata ? { faceMetadata: die.faceMetadata } : {}),
       ...(die.faceIndex !== undefined ? { faceIndex: die.faceIndex } : {}),
     },
   };
+}
+
+function readOppositeCoinLabel(
+  die: NormalizedDieResult,
+  definition: CustomDiceDefinition | undefined,
+): string | undefined {
+  if (definition?.faces.length === 2) {
+    const selectedIndex =
+      die.faceIndex !== undefined
+        ? die.faceIndex
+        : definition.faces.findIndex((face) => face.result === die.result);
+    if (selectedIndex === 0 || selectedIndex === 1) {
+      const opposite = definition.faces[1 - selectedIndex];
+      return opposite.label ?? String(opposite.result);
+    }
+  }
+
+  const normalizedType = die.type.toLowerCase();
+  if (typeof die.result === 'number') {
+    if (normalizedType === 'd2' || (die.sides === 2 && die.result >= 1)) {
+      if (die.result === 1 || die.result === 2) return String(3 - die.result);
+    }
+    if (normalizedType === 'coin' && (die.result === 0 || die.result === 1)) {
+      return String(1 - die.result);
+    }
+  }
+
+  const result = String(die.result).toLowerCase();
+  if (result === 'heads') return 'Tails';
+  if (result === 'tails') return 'Heads';
+  return undefined;
 }
 
 function normalizeFallbackKind(
@@ -1512,11 +1831,24 @@ function normalizeFallbackKind(
   normalizedType: string,
   die: NormalizedDieResult,
 ): DraftrollFallbackKind {
-  if (renderAs === 'coin' || renderAs === 'percentile' || renderAs === 'fate' || renderAs === 'spinner' || renderAs === 'token' || renderAs === 'card') {
+  if (
+    renderAs === 'coin' ||
+    renderAs === 'percentile' ||
+    renderAs === 'fate' ||
+    renderAs === 'spinner' ||
+    renderAs === 'token' ||
+    renderAs === 'card'
+  ) {
     return renderAs;
   }
   if (normalizedType === 'd2' || normalizedType === 'coin' || die.sides === 2) return 'coin';
-  if (normalizedType === 'd10x' || normalizedType === 'd%' || normalizedType === 'd100' || die.sides === 100) return 'percentile';
+  if (
+    normalizedType === 'd10x' ||
+    normalizedType === 'd%' ||
+    normalizedType === 'd100' ||
+    die.sides === 100
+  )
+    return 'percentile';
   if (normalizedType === 'df' || normalizedType === 'fate') return 'fate';
   if (die.customDiceId || typeof die.result === 'string') return 'card';
   if (typeof die.sides === 'number' && Number.isFinite(die.sides)) return 'spinner';
@@ -1529,11 +1861,13 @@ function readDisplayTitle(
   kind: DraftrollFallbackKind,
 ): string {
   const metadataLabel = typeof die.metadata?.label === 'string' ? die.metadata.label : undefined;
-  const definitionLabel = typeof definition?.metadata?.name === 'string' ? definition.metadata.name : undefined;
+  const definitionLabel =
+    typeof definition?.metadata?.name === 'string' ? definition.metadata.name : undefined;
   if (metadataLabel) return metadataLabel;
   if (definitionLabel) return definitionLabel;
   if (kind === 'coin') return 'Coin';
-  if (kind === 'percentile') return die.type.toLowerCase() === 'd10x' ? 'Percentile tens' : 'Percentile';
+  if (kind === 'percentile')
+    return die.type.toLowerCase() === 'd10x' ? 'Percentile tens' : 'Percentile';
   if (kind === 'fate') return 'Fate die';
   if (kind === 'spinner' && die.sides) return `d${die.sides}`;
   return die.customDiceId ?? die.type;
@@ -1547,7 +1881,11 @@ function readDisplayLabel(die: NormalizedDieResult, kind: DraftrollFallbackKind)
     if (numeric === -1) return '−';
     if (numeric === 0) return '0';
   }
-  if (kind === 'percentile' && die.type.toLowerCase() === 'd10x' && typeof die.result === 'number') {
+  if (
+    kind === 'percentile' &&
+    die.type.toLowerCase() === 'd10x' &&
+    typeof die.result === 'number'
+  ) {
     return String(die.result === 10 ? 0 : die.result * 10).padStart(2, '0');
   }
   return String(die.result);
@@ -1558,14 +1896,15 @@ function defaultOutcomeForDie(
   physicalKind: DraftrollDieKind | null,
 ): DraftrollEffectOutcome {
   if (!die.kept) return 'none';
-  const value = die.numericValue ?? (typeof die.result === 'number' ? die.result : Number(die.result));
+  const value =
+    die.numericValue ?? (typeof die.result === 'number' ? die.result : Number(die.result));
   if (Number.isFinite(value)) {
     if (die.type.toLowerCase() === 'df' || die.type.toLowerCase() === 'fate') {
       if (value > 0) return 'positive';
       if (value < 0) return 'negative';
       return 'neutral';
     }
-    const maximum = physicalKind ? Number(physicalKind.slice(1)) : die.sides;
+    const maximum = physicalKind ? maximumPhysicalValue(physicalKind) : die.sides;
     if (maximum !== undefined && value === maximum) return 'positive';
     if (value === 1 && maximum !== 2) return 'negative';
   }

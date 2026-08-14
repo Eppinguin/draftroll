@@ -12,7 +12,15 @@
  *
  * @public
  */
-export type DraftrollPackage = 'core' | 'renderer' | 'overlay' | 'realtime' | 'sdk' | 'themes' | 'protocol' | 'server';
+export type DraftrollPackage =
+  | 'core'
+  | 'renderer'
+  | 'overlay'
+  | 'realtime'
+  | 'sdk'
+  | 'themes'
+  | 'protocol'
+  | 'server';
 
 /**
  * Stable error-code registry shared by every Draftroll package.
@@ -43,7 +51,8 @@ export const DRAFTROLL_ERROR_CODES = {
  *
  * @public
  */
-export type DraftrollKnownErrorCode = typeof DRAFTROLL_ERROR_CODES[keyof typeof DRAFTROLL_ERROR_CODES];
+export type DraftrollKnownErrorCode =
+  (typeof DRAFTROLL_ERROR_CODES)[keyof typeof DRAFTROLL_ERROR_CODES];
 /**
  * Known or application-defined error code carried by a Draftroll error.
  *
@@ -101,7 +110,11 @@ export class DraftrollAbortError extends DraftrollError {
   /**
    * Creates a DraftrollAbortError instance.
    */
-  constructor(operation = 'Draftroll operation', cause?: unknown, packageName: DraftrollPackage = 'sdk') {
+  constructor(
+    operation = 'Draftroll operation',
+    cause?: unknown,
+    packageName: DraftrollPackage = 'sdk',
+  ) {
     super(DRAFTROLL_ERROR_CODES.aborted, `${operation} was aborted`, {
       package: packageName,
       recoverable: true,
@@ -120,7 +133,10 @@ export class DraftrollStateError extends DraftrollError {
   /**
    * Creates a DraftrollStateError instance.
    */
-  constructor(message: string, options: Omit<DraftrollErrorOptions, 'package'> & { package?: DraftrollPackage } = {}) {
+  constructor(
+    message: string,
+    options: Omit<DraftrollErrorOptions, 'package'> & { package?: DraftrollPackage } = {},
+  ) {
     super(DRAFTROLL_ERROR_CODES.invalidState, message, {
       ...options,
       package: options.package ?? 'sdk',
@@ -135,8 +151,7 @@ export class DraftrollStateError extends DraftrollError {
  * @public
  */
 export function isDraftrollError(value: unknown): value is DraftrollError {
-  return value instanceof DraftrollError
-    || (Boolean(value) && typeof value === 'object' && typeof (value as { code?: unknown }).code === 'string');
+  return value instanceof DraftrollError || (isRecord(value) && typeof value.code === 'string');
 }
 
 /**
@@ -145,9 +160,18 @@ export function isDraftrollError(value: unknown): value is DraftrollError {
  * @public
  */
 export function isAbortError(value: unknown): boolean {
-  return value instanceof DraftrollAbortError
-    || (typeof DOMException !== 'undefined' && value instanceof DOMException && value.name === 'AbortError')
-    || (Boolean(value) && typeof value === 'object' && (value as { name?: unknown }).name === 'AbortError');
+  return (
+    value instanceof DraftrollAbortError ||
+    (typeof DOMException !== 'undefined' &&
+      value instanceof DOMException &&
+      value.name === 'AbortError') ||
+    (isRecord(value) && value.name === 'AbortError')
+  );
+}
+
+/** Narrows an unknown value to an indexable object without asserting a shape. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }
 
 /**
@@ -165,11 +189,18 @@ export function throwIfAborted(signal: AbortSignal | undefined, operation?: stri
  *
  * @public
  */
-export function abortPromise(signal: AbortSignal | undefined, operation?: string): Promise<never> | null {
+export function abortPromise(
+  signal: AbortSignal | undefined,
+  operation?: string,
+): Promise<never> | null {
   if (!signal) return null;
   if (signal.aborted) return Promise.reject(new DraftrollAbortError(operation, signal.reason));
   return new Promise<never>((_resolve, reject) => {
-    signal.addEventListener('abort', () => reject(new DraftrollAbortError(operation, signal.reason)), { once: true });
+    signal.addEventListener(
+      'abort',
+      () => reject(new DraftrollAbortError(operation, signal.reason)),
+      { once: true },
+    );
   });
 }
 

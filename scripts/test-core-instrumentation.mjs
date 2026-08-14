@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { runTsc } from './lib/load-typescript.mjs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -11,32 +11,42 @@ const outDir = join(tempRoot, 'build');
 const configPath = join(tempRoot, 'tsconfig.json');
 
 class SequenceRng {
-  constructor(values) { this.values = [...values]; }
+  constructor(values) {
+    this.values = [...values];
+  }
   integer(min, max) {
     const value = this.values.shift();
     if (value === undefined) throw new Error(`Sequence RNG exhausted for ${min}..${max}`);
-    if (value < min || value > max) throw new Error(`Sequence value ${value} outside ${min}..${max}`);
+    if (value < min || value > max)
+      throw new Error(`Sequence value ${value} outside ${min}..${max}`);
     return value;
   }
 }
 
 try {
-  await writeFile(configPath, JSON.stringify({
-    compilerOptions: {
-      target: 'ES2022',
-      module: 'CommonJS',
-      moduleResolution: 'Node',
-      rootDir: join(projectRoot, 'packages'),
-      outDir,
-      strict: true,
-      skipLibCheck: true,
-      esModuleInterop: true,
-      lib: ['ES2022', 'DOM', 'DOM.Iterable'],
-    },
-    include: [join(projectRoot, 'packages/**/*.ts')],
-  }, null, 2));
+  await writeFile(
+    configPath,
+    JSON.stringify(
+      {
+        compilerOptions: {
+          target: 'ES2022',
+          module: 'CommonJS',
+          moduleResolution: 'Node',
+          rootDir: join(projectRoot, 'packages'),
+          outDir,
+          strict: true,
+          skipLibCheck: true,
+          esModuleInterop: true,
+          lib: ['ES2023', 'DOM', 'DOM.Iterable'],
+        },
+        include: [join(projectRoot, 'packages/**/*.ts')],
+      },
+      null,
+      2,
+    ),
+  );
 
-  const compile = spawnSync('tsc', ['-p', configPath], { cwd: projectRoot, encoding: 'utf8' });
+  const compile = runTsc(['-p', configPath], { cwd: projectRoot });
   if (compile.status !== 0) {
     process.stderr.write(compile.stdout);
     process.stderr.write(compile.stderr);
@@ -116,40 +126,46 @@ try {
   assert.equal(directProfiles[0].annotations, 1);
 
   const structuredProfiles = [];
-  const structured = new DiceEngine().evaluate({
-    mode: 'evaluate',
-    dice: [
-      { id: 'a', type: 'd6', result: 1 },
-      { id: 'b', type: 'd6', result: 6 },
-    ],
-    operations: [{ type: 'reroll-once', comparator: '<', target: 3 }],
-  }, {
-    rng: new SequenceRng([4]),
-    instrumentation: { onProfile: (profile) => structuredProfiles.push(profile) },
-  });
+  const structured = new DiceEngine().evaluate(
+    {
+      mode: 'evaluate',
+      dice: [
+        { id: 'a', type: 'd6', result: 1 },
+        { id: 'b', type: 'd6', result: 6 },
+      ],
+      operations: [{ type: 'reroll-once', comparator: '<', target: 3 }],
+    },
+    {
+      rng: new SequenceRng([4]),
+      instrumentation: { onProfile: (profile) => structuredProfiles.push(profile) },
+    },
+  );
   assert.equal(structured.total, 10);
   assert.equal(structuredProfiles.length, 1);
-  assert.deepEqual({
-    kind: structuredProfiles[0].kind,
-    status: structuredProfiles[0].status,
-    mode: structuredProfiles[0].mode,
-    initialDice: structuredProfiles[0].initialDice,
-    generatedDice: structuredProfiles[0].generatedDice,
-    resultDice: structuredProfiles[0].resultDice,
-    evaluationSteps: structuredProfiles[0].evaluationSteps,
-    modifiersApplied: structuredProfiles[0].modifiersApplied,
-    rerolls: structuredProfiles[0].rerolls,
-  }, {
-    kind: 'evaluate',
-    status: 'success',
-    mode: 'structured',
-    initialDice: 2,
-    generatedDice: 1,
-    resultDice: 3,
-    evaluationSteps: 1,
-    modifiersApplied: 1,
-    rerolls: 1,
-  });
+  assert.deepEqual(
+    {
+      kind: structuredProfiles[0].kind,
+      status: structuredProfiles[0].status,
+      mode: structuredProfiles[0].mode,
+      initialDice: structuredProfiles[0].initialDice,
+      generatedDice: structuredProfiles[0].generatedDice,
+      resultDice: structuredProfiles[0].resultDice,
+      evaluationSteps: structuredProfiles[0].evaluationSteps,
+      modifiersApplied: structuredProfiles[0].modifiersApplied,
+      rerolls: structuredProfiles[0].rerolls,
+    },
+    {
+      kind: 'evaluate',
+      status: 'success',
+      mode: 'structured',
+      initialDice: 2,
+      generatedDice: 1,
+      resultDice: 3,
+      evaluationSteps: 1,
+      modifiersApplied: 1,
+      rerolls: 1,
+    },
+  );
 
   const failedProfiles = [];
   const limited = new DiceEngine({
@@ -165,15 +181,25 @@ try {
   assert.equal(failedProfiles[1].evaluationSteps, 2);
 
   const compiledProfiles = [];
-  const compiledEngine = new DiceEngine({ instrumentation: { onProfile: (profile) => compiledProfiles.push(profile) } });
+  const compiledEngine = new DiceEngine({
+    instrumentation: { onProfile: (profile) => compiledProfiles.push(profile) },
+  });
   const compiled = compiledEngine.compile('1d4 + 2');
   compiled.roll({ rng: new SequenceRng([3]) });
-  assert.deepEqual(compiledProfiles.map((profile) => profile.kind), ['parse', 'evaluate']);
+  assert.deepEqual(
+    compiledProfiles.map((profile) => profile.kind),
+    ['parse', 'evaluate'],
+  );
 
   const sdkProfiles = [];
-  const draftroll = new Draftroll({ instrumentation: { onProfile: (profile) => sdkProfiles.push(profile) } });
+  const draftroll = new Draftroll({
+    instrumentation: { onProfile: (profile) => sdkProfiles.push(profile) },
+  });
   draftroll.roll('1d6', { render: false, rng: new SequenceRng([5]) });
-  assert.deepEqual(sdkProfiles.map((profile) => profile.kind), ['parse', 'evaluate']);
+  assert.deepEqual(
+    sdkProfiles.map((profile) => profile.kind),
+    ['parse', 'evaluate'],
+  );
 
   const structuredSdkProfiles = [];
   new Draftroll().rollDice({
@@ -187,8 +213,12 @@ try {
 
   const observerFailureEngine = new DiceEngine({
     instrumentation: {
-      now: () => { throw new Error('clock failed'); },
-      onProfile: () => { throw new Error('observer failed'); },
+      now: () => {
+        throw new Error('clock failed');
+      },
+      onProfile: () => {
+        throw new Error('observer failed');
+      },
     },
   });
   assert.equal(observerFailureEngine.roll('1d6', { rng: new SequenceRng([6]) }).total, 6);

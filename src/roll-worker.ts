@@ -1,5 +1,11 @@
 import * as CANNON from 'cannon-es';
 import { createDiePhysicsShape, type DieKind } from './physics-shapes';
+import {
+  markUnobstructedTableDice,
+  minimumRestingAlignment,
+  readRestingAlignment,
+  releaseUnstableRestPose,
+} from './resting-physics';
 
 const FIXED_STEP = 1 / 120;
 const RECORD_EVERY = 1;
@@ -33,11 +39,13 @@ interface LockedMotion {
 }
 
 interface PlannerCache {
+  kinds: DieKind[];
   kindsKey: string;
   count: number;
   boundsX: number;
   boundsZ: number;
   world: CANNON.World;
+  floorBodyId: number;
   bodies: CANNON.Body[];
   bodyKeys: Map<number, number>;
 }
@@ -55,7 +63,6 @@ interface SimulationResult {
   displacementStableTime: number;
 }
 
-
 const diceMaterial = new CANNON.Material('planner-dice');
 const tableMaterial = new CANNON.Material('planner-table');
 let cache: PlannerCache | null = null;
@@ -66,28 +73,42 @@ let currentActiveFlags: boolean[] = [];
 function configureWorld(world: CANNON.World): void {
   world.allowSleep = true;
   world.broadphase = new CANNON.SAPBroadphase(world);
-  const solver = world.solver as CANNON.GSSolver;
-  solver.iterations = 32;
-  solver.tolerance = 0.00025;
-  world.addContactMaterial(new CANNON.ContactMaterial(diceMaterial, tableMaterial, {
-    friction: 0.28,
-    restitution: 0.24,
-    contactEquationStiffness: 2e7,
-    contactEquationRelaxation: 4,
-    frictionEquationStiffness: 1.5e7,
-  }));
-  world.addContactMaterial(new CANNON.ContactMaterial(diceMaterial, diceMaterial, {
-    friction: 0.19,
-    restitution: 0.14,
-    contactEquationStiffness: 4e7,
-    contactEquationRelaxation: 3,
-    frictionEquationStiffness: 2.2e7,
-    frictionEquationRelaxation: 3,
-  }));
+  const solver = world.solver;
+  if (solver instanceof CANNON.GSSolver) {
+    solver.iterations = 32;
+    solver.tolerance = 0.00025;
+  }
+  world.addContactMaterial(
+    new CANNON.ContactMaterial(diceMaterial, tableMaterial, {
+      friction: 0.28,
+      restitution: 0.24,
+      contactEquationStiffness: 2e7,
+      contactEquationRelaxation: 4,
+      frictionEquationStiffness: 1.5e7,
+    }),
+  );
+  world.addContactMaterial(
+    new CANNON.ContactMaterial(diceMaterial, diceMaterial, {
+      friction: 0.19,
+      restitution: 0.14,
+      contactEquationStiffness: 4e7,
+      contactEquationRelaxation: 3,
+      frictionEquationStiffness: 2.2e7,
+      frictionEquationRelaxation: 3,
+    }),
+  );
 }
 
-function addWall(world: CANNON.World, position: CANNON.Vec3, halfExtents: CANNON.Vec3): CANNON.Body {
-  const body = new CANNON.Body({ mass: 0, material: tableMaterial, shape: new CANNON.Box(halfExtents) });
+function addWall(
+  world: CANNON.World,
+  position: CANNON.Vec3,
+  halfExtents: CANNON.Vec3,
+): CANNON.Body {
+  const body = new CANNON.Body({
+    mass: 0,
+    material: tableMaterial,
+    shape: new CANNON.Box(halfExtents),
+  });
   body.position.copy(position);
   world.addBody(body);
   return body;
@@ -107,21 +128,41 @@ function createPlanner(kinds: readonly DieKind[], boundsX: number, boundsZ: numb
   const wallHalfHeight = 5.5;
   const wallCenterY = wallHalfHeight - 0.05;
   staticBodies.push(
-    addWall(world, new CANNON.Vec3(-boundsX - wallThickness, wallCenterY, 0), new CANNON.Vec3(wallThickness, wallHalfHeight, boundsZ + 1.6)),
-    addWall(world, new CANNON.Vec3(boundsX + wallThickness, wallCenterY, 0), new CANNON.Vec3(wallThickness, wallHalfHeight, boundsZ + 1.6)),
-    addWall(world, new CANNON.Vec3(0, wallCenterY, -boundsZ - wallThickness), new CANNON.Vec3(boundsX + 1.6, wallHalfHeight, wallThickness)),
-    addWall(world, new CANNON.Vec3(0, wallCenterY, boundsZ + wallThickness), new CANNON.Vec3(boundsX + 1.6, wallHalfHeight, wallThickness)),
+    addWall(
+      world,
+      new CANNON.Vec3(-boundsX - wallThickness, wallCenterY, 0),
+      new CANNON.Vec3(wallThickness, wallHalfHeight, boundsZ + 1.6),
+    ),
+    addWall(
+      world,
+      new CANNON.Vec3(boundsX + wallThickness, wallCenterY, 0),
+      new CANNON.Vec3(wallThickness, wallHalfHeight, boundsZ + 1.6),
+    ),
+    addWall(
+      world,
+      new CANNON.Vec3(0, wallCenterY, -boundsZ - wallThickness),
+      new CANNON.Vec3(boundsX + 1.6, wallHalfHeight, wallThickness),
+    ),
+    addWall(
+      world,
+      new CANNON.Vec3(0, wallCenterY, boundsZ + wallThickness),
+      new CANNON.Vec3(boundsX + 1.6, wallHalfHeight, wallThickness),
+    ),
   );
 
   const bodies: CANNON.Body[] = [];
   for (let index = 0; index < count; index += 1) {
-    const body = new CANNON.Body({ mass: BODY_MASS, material: diceMaterial, shape: createDiePhysicsShape(kinds[index]) });
+    const body = new CANNON.Body({
+      mass: BODY_MASS,
+      material: diceMaterial,
+      shape: createDiePhysicsShape(kinds[index]),
+    });
     const crowd = Math.max(0, Math.min(1, (count - 8) / 22));
     body.linearDamping = 0.095 + crowd * 0.025;
     body.angularDamping = 0.085 + crowd * 0.045;
     body.allowSleep = true;
-    body.sleepSpeedLimit = 0.18 + crowd * 0.035;
-    body.sleepTimeLimit = 0.5;
+    body.sleepSpeedLimit = 0.09 + crowd * 0.015;
+    body.sleepTimeLimit = 0.72;
     body.addEventListener('collide', (event: { contact: CANNON.ContactEquation }) => {
       if (!currentActiveFlags[index]) return;
       const strength = Math.abs(event.contact.getImpactVelocityAlongNormal());
@@ -135,18 +176,31 @@ function createPlanner(kinds: readonly DieKind[], boundsX: number, boundsZ: numb
   const bodyKeys = new Map<number, number>();
   bodies.forEach((body, index) => bodyKeys.set(body.id, index));
   staticBodies.forEach((body, index) => bodyKeys.set(body.id, count + index));
-  return { kindsKey: kinds.join(','), count, boundsX, boundsZ, world, bodies, bodyKeys };
+  return {
+    kinds: kinds.slice(),
+    kindsKey: kinds.join(','),
+    count,
+    boundsX,
+    boundsZ,
+    world,
+    floorBodyId: floor.id,
+    bodies,
+    bodyKeys,
+  };
 }
 
 function ensurePlanner(kinds: readonly DieKind[], boundsX: number, boundsZ: number): PlannerCache {
   const kindsKey = kinds.join(',');
-  const valid = cache
-    && cache.kindsKey === kindsKey
-    && cache.count === kinds.length
-    && Math.abs(cache.boundsX - boundsX) < 1e-4
-    && Math.abs(cache.boundsZ - boundsZ) < 1e-4;
-  if (!valid) cache = createPlanner(kinds, boundsX, boundsZ);
-  return cache as PlannerCache;
+  const valid =
+    cache &&
+    cache.kindsKey === kindsKey &&
+    cache.count === kinds.length &&
+    Math.abs(cache.boundsX - boundsX) < 1e-4 &&
+    Math.abs(cache.boundsZ - boundsZ) < 1e-4;
+  if (valid && cache) return cache;
+  const created = createPlanner(kinds, boundsX, boundsZ);
+  cache = created;
+  return created;
 }
 
 function activateBody(body: CANNON.Body, launch: Float32Array, index: number): void {
@@ -203,7 +257,12 @@ function resetPlanner(
   planner.bodies.forEach((body, index) => {
     const offset = index * STATE_STRIDE;
     body.position.set(stateData[offset], stateData[offset + 1], stateData[offset + 2]);
-    body.quaternion.set(stateData[offset + 3], stateData[offset + 4], stateData[offset + 5], stateData[offset + 6]);
+    body.quaternion.set(
+      stateData[offset + 3],
+      stateData[offset + 4],
+      stateData[offset + 5],
+      stateData[offset + 6],
+    );
     body.previousPosition.copy(body.position);
     body.interpolatedPosition.copy(body.position);
     body.previousQuaternion.copy(body.quaternion);
@@ -233,7 +292,13 @@ function resetPlanner(
   return { launchVelocities, activationDelays, maximumDelay };
 }
 
-function enforceBounds(bodies: CANNON.Body[], boundsX: number, boundsZ: number, simulationTime = 0, lockedCount = 0): void {
+function enforceBounds(
+  bodies: CANNON.Body[],
+  boundsX: number,
+  boundsZ: number,
+  simulationTime = 0,
+  lockedCount = 0,
+): void {
   const margin = 0.82;
   const minX = -boundsX + margin;
   const maxX = boundsX - margin;
@@ -290,15 +355,19 @@ function enforceBounds(bodies: CANNON.Body[], boundsX: number, boundsZ: number, 
       if (simulationTime > 4.6 && speed < 0.22 && angularSpeed < 0.46) {
         body.velocity.scale(0.72, body.velocity);
         body.angularVelocity.scale(0.62, body.angularVelocity);
-        if (simulationTime > 5.25 && body.velocity.length() < 0.075 && body.angularVelocity.length() < 0.16) body.sleep();
       }
     }
 
-    body.velocity.y = Math.max(-maximumVerticalSpeed, Math.min(maximumVerticalSpeed, body.velocity.y));
+    body.velocity.y = Math.max(
+      -maximumVerticalSpeed,
+      Math.min(maximumVerticalSpeed, body.velocity.y),
+    );
     const linearSpeed = body.velocity.length();
-    if (linearSpeed > maximumLinearSpeed) body.velocity.scale(maximumLinearSpeed / linearSpeed, body.velocity);
+    if (linearSpeed > maximumLinearSpeed)
+      body.velocity.scale(maximumLinearSpeed / linearSpeed, body.velocity);
     const angularSpeed = body.angularVelocity.length();
-    if (angularSpeed > maximumAngularSpeed) body.angularVelocity.scale(maximumAngularSpeed / angularSpeed, body.angularVelocity);
+    if (angularSpeed > maximumAngularSpeed)
+      body.angularVelocity.scale(maximumAngularSpeed / angularSpeed, body.angularVelocity);
   });
 }
 
@@ -340,8 +409,11 @@ function contactSimilarity(a: number[], b: number[]): number {
   let right = 0;
   let intersection = 0;
   while (left < a.length && right < b.length) {
-    if (a[left] === b[right]) { intersection += 1; left += 1; right += 1; }
-    else if (a[left] < b[right]) left += 1;
+    if (a[left] === b[right]) {
+      intersection += 1;
+      left += 1;
+      right += 1;
+    } else if (a[left] < b[right]) left += 1;
     else right += 1;
   }
   return intersection / Math.max(1, Math.max(a.length, b.length));
@@ -357,7 +429,11 @@ function copyPositions(target: Float32Array, bodies: CANNON.Body[], lockedCount 
   });
 }
 
-function maxDisplacementSquared(reference: Float32Array, bodies: CANNON.Body[], lockedCount = 0): number {
+function maxDisplacementSquared(
+  reference: Float32Array,
+  bodies: CANNON.Body[],
+  lockedCount = 0,
+): number {
   let maximum = 0;
   bodies.forEach((body, index) => {
     if (!currentActiveFlags[index] || index < lockedCount) return;
@@ -443,12 +519,14 @@ function updateLockedBodies(
       lockedDeltaQuaternion.w *= -1;
     }
     const angle = 2 * Math.acos(Math.max(-1, Math.min(1, lockedDeltaQuaternion.w)));
-    const denominator = Math.sqrt(Math.max(1e-10, 1 - lockedDeltaQuaternion.w * lockedDeltaQuaternion.w));
+    const denominator = Math.sqrt(
+      Math.max(1e-10, 1 - lockedDeltaQuaternion.w * lockedDeltaQuaternion.w),
+    );
     if (denominator > 1e-5 && angle > 1e-6) {
       body.angularVelocity.set(
-        lockedDeltaQuaternion.x / denominator * angle / step,
-        lockedDeltaQuaternion.y / denominator * angle / step,
-        lockedDeltaQuaternion.z / denominator * angle / step,
+        ((lockedDeltaQuaternion.x / denominator) * angle) / step,
+        ((lockedDeltaQuaternion.y / denominator) * angle) / step,
+        ((lockedDeltaQuaternion.z / denominator) * angle) / step,
       );
     } else {
       body.angularVelocity.setZero();
@@ -465,7 +543,11 @@ function simulate(
   options: { record: boolean; step: number; maximumSteps: number; lockedMotion?: LockedMotion },
 ): SimulationResult {
   const lockedCount = options.lockedMotion?.count ?? 0;
-  const { launchVelocities, activationDelays, maximumDelay } = resetPlanner(planner, states, lockedCount);
+  const { launchVelocities, activationDelays, maximumDelay } = resetPlanner(
+    planner,
+    states,
+    lockedCount,
+  );
   currentImpacts = [];
   currentStep = 0;
   const recordEvery = options.record ? RECORD_EVERY : Number.POSITIVE_INFINITY;
@@ -476,8 +558,14 @@ function simulate(
   let slowTime = 0;
   let contactStableTime = 0;
   let displacementStableTime = 0;
+  let wellSeatedTime = 0;
   let previousContacts: number[] = [];
   const stablePositions = new Float32Array(planner.bodies.length * 3);
+  const restingAxes = planner.bodies.map(() => new CANNON.Vec3());
+  const restingAlignments = new Float32Array(planner.bodies.length);
+  const unobstructedTableDice = new Uint8Array(planner.bodies.length);
+  const lastUnstableReleaseTimes = new Float32Array(planner.bodies.length);
+  lastUnstableReleaseTimes.fill(Number.NEGATIVE_INFINITY);
   copyPositions(stablePositions, planner.bodies, lockedCount);
   let settleReason = 'timeout';
   let finalAverageLinear = 0;
@@ -489,7 +577,11 @@ function simulate(
     const simulationTime = currentStep * options.step;
     let activatedThisStep = false;
     planner.bodies.forEach((body, index) => {
-      if (index >= lockedCount && !currentActiveFlags[index] && simulationTime + 1e-6 >= activationDelays[index]) {
+      if (
+        index >= lockedCount &&
+        !currentActiveFlags[index] &&
+        simulationTime + 1e-6 >= activationDelays[index]
+      ) {
         activateBody(body, launchVelocities, index);
         activatedThisStep = true;
       }
@@ -497,19 +589,40 @@ function simulate(
     if (activatedThisStep) {
       contactStableTime = 0;
       displacementStableTime = 0;
+      wellSeatedTime = 0;
       previousContacts = [];
       copyPositions(stablePositions, planner.bodies, lockedCount);
     }
 
-    updateLockedBodies(planner, options.lockedMotion, simulationTime - options.step, options.step, false);
+    updateLockedBodies(
+      planner,
+      options.lockedMotion,
+      simulationTime - options.step,
+      options.step,
+      false,
+    );
     planner.world.step(options.step);
-    updateLockedBodies(planner, options.lockedMotion, simulationTime - options.step, options.step, true);
+    updateLockedBodies(
+      planner,
+      options.lockedMotion,
+      simulationTime - options.step,
+      options.step,
+      true,
+    );
     enforceBounds(planner.bodies, planner.boundsX, planner.boundsZ, simulationTime, lockedCount);
+    markUnobstructedTableDice(
+      planner.world.contacts,
+      planner.bodyKeys,
+      planner.bodies.length,
+      planner.floorBodyId,
+      unobstructedTableDice,
+    );
     const allActive = currentActiveFlags.slice(lockedCount).every(Boolean);
     let linearSum = 0;
     let angularSum = 0;
     let activeCount = 0;
     let allSlow = allActive;
+    let allWellSeated = allActive;
     planner.bodies.forEach((body, index) => {
       if (!currentActiveFlags[index] || index < lockedCount) return;
       activeCount += 1;
@@ -517,7 +630,19 @@ function simulate(
       const angularSpeed = body.angularVelocity.length();
       linearSum += speed;
       angularSum += angularSpeed;
-      if (!(body.sleepState === CANNON.Body.SLEEPING || (speed < 0.2 && angularSpeed < 0.28))) allSlow = false;
+      if (!(body.sleepState === CANNON.Body.SLEEPING || (speed < 0.2 && angularSpeed < 0.28)))
+        allSlow = false;
+      if (unobstructedTableDice[index] === 0) {
+        restingAlignments[index] = 1;
+        return;
+      }
+      const alignment = readRestingAlignment(
+        planner.kinds[index],
+        body.quaternion,
+        restingAxes[index],
+      );
+      restingAlignments[index] = alignment;
+      if (alignment < minimumRestingAlignment(planner.kinds[index])) allWellSeated = false;
     });
     activeCount = Math.max(1, activeCount);
     const averageLinear = linearSum / activeCount;
@@ -525,6 +650,7 @@ function simulate(
     finalAverageLinear = averageLinear;
     finalAverageAngular = averageAngular;
     slowTime = allSlow ? slowTime + options.step : 0;
+    wellSeatedTime = allWellSeated ? wellSeatedTime + options.step : 0;
 
     const contacts = contactSignature(planner.world, planner.bodyKeys);
     if (contactSimilarity(contacts, previousContacts) >= 0.82) contactStableTime += options.step;
@@ -533,7 +659,11 @@ function simulate(
       contactStableTime = 0;
     }
 
-    const displacementSquared = maxDisplacementSquared(stablePositions, planner.bodies, lockedCount);
+    const displacementSquared = maxDisplacementSquared(
+      stablePositions,
+      planner.bodies,
+      lockedCount,
+    );
     if (displacementSquared <= 0.009 * 0.009) displacementStableTime += options.step;
     else {
       copyPositions(stablePositions, planner.bodies, lockedCount);
@@ -545,26 +675,52 @@ function simulate(
       frameCount += 1;
     }
 
-    const lockedDuration = options.lockedMotion ? (options.lockedMotion.frameCount - 1) * options.lockedMotion.step : 0;
-    const afterLastActivation = simulationTime >= Math.max(maximumDelay + 0.3, lockedDuration + 0.15);
+    const lockedDuration = options.lockedMotion
+      ? (options.lockedMotion.frameCount - 1) * options.lockedMotion.step
+      : 0;
+    const afterLastActivation =
+      simulationTime >= Math.max(maximumDelay + 0.3, lockedDuration + 0.15);
+    if (afterLastActivation && !allWellSeated) {
+      planner.bodies.forEach((body, index) => {
+        if (!currentActiveFlags[index] || index < lockedCount) return;
+        if (unobstructedTableDice[index] === 0) return;
+        if (restingAlignments[index] >= minimumRestingAlignment(planner.kinds[index])) return;
+        if (simulationTime - lastUnstableReleaseTimes[index] < 0.45) return;
+        if (releaseUnstableRestPose(body, restingAxes[index])) {
+          lastUnstableReleaseTimes[index] = simulationTime;
+        }
+      });
+    }
     const sleepSettled = afterLastActivation && slowTime > 0.5;
-    const contactSettled = afterLastActivation
-      && averageLinear < 0.11
-      && averageAngular < 0.18
-      && contactStableTime > 0.24
-      && displacementStableTime > 0.22;
-    const microMotionSettled = afterLastActivation
-      && averageLinear < 0.035
-      && averageAngular < 0.065
-      && displacementStableTime > 0.2;
-    const mayStop = currentStep >= MIN_STEPS && (sleepSettled || contactSettled || microMotionSettled);
+    const contactSettled =
+      afterLastActivation &&
+      averageLinear < 0.11 &&
+      averageAngular < 0.18 &&
+      contactStableTime > 0.24 &&
+      displacementStableTime > 0.22;
+    const microMotionSettled =
+      afterLastActivation &&
+      averageLinear < 0.035 &&
+      averageAngular < 0.065 &&
+      displacementStableTime > 0.2;
+    const mayStop =
+      currentStep >= MIN_STEPS &&
+      allWellSeated &&
+      wellSeatedTime > 0.18 &&
+      (sleepSettled || contactSettled || microMotionSettled);
     if (mayStop) {
-      settleReason = contactSettled ? 'stable-contact-graph' : microMotionSettled ? 'micro-motion-stable' : 'sleep-threshold';
+      settleReason = contactSettled
+        ? 'stable-contact-graph'
+        : microMotionSettled
+          ? 'micro-motion-stable'
+          : 'sleep-threshold';
       break;
     }
   }
 
-  const usedTransforms = options.record ? transforms.slice(0, frameCount * frameStride) : new Float32Array(0);
+  const usedTransforms = options.record
+    ? transforms.slice(0, frameCount * frameStride)
+    : new Float32Array(0);
   return {
     frameCount: options.record ? frameCount : 0,
     transforms: usedTransforms,
@@ -583,22 +739,31 @@ self.addEventListener('message', (event: MessageEvent<PlanRequest>) => {
   const request = event.data;
   const count = request.kinds?.length ?? request.count ?? 0;
   const fallbackKind = request.kind ?? 'd20';
-  const kinds = request.kinds?.length === count
-    ? request.kinds
-    : Array.from({ length: count }, () => fallbackKind);
+  const kinds =
+    request.kinds?.length === count
+      ? request.kinds
+      : Array.from({ length: count }, () => fallbackKind);
   const planner = ensurePlanner(kinds, request.boundsX, request.boundsZ);
   const baseStates = new Float32Array(request.states);
   const lockedCount = Math.max(0, Math.min(count, request.lockedCount ?? 0));
   const lockedFrameCount = Math.max(0, Math.floor(request.lockedTrajectoryFrameCount ?? 0));
   const lockedStep = Number(request.lockedTrajectoryStep);
-  const lockedTransforms = request.lockedTrajectory ? new Float32Array(request.lockedTrajectory) : null;
-  const lockedMotion = lockedCount > 0
-    && lockedFrameCount >= 2
-    && Number.isFinite(lockedStep)
-    && lockedStep > 0
-    && lockedTransforms
-    && lockedTransforms.length === lockedFrameCount * lockedCount * 7
-      ? { count: lockedCount, step: lockedStep, frameCount: lockedFrameCount, transforms: lockedTransforms }
+  const lockedTransforms = request.lockedTrajectory
+    ? new Float32Array(request.lockedTrajectory)
+    : null;
+  const lockedMotion =
+    lockedCount > 0 &&
+    lockedFrameCount >= 2 &&
+    Number.isFinite(lockedStep) &&
+    lockedStep > 0 &&
+    lockedTransforms &&
+    lockedTransforms.length === lockedFrameCount * lockedCount * 7
+      ? {
+          count: lockedCount,
+          step: lockedStep,
+          frameCount: lockedFrameCount,
+          transforms: lockedTransforms,
+        }
       : undefined;
   const startedAt = performance.now();
   const result = simulate(planner, baseStates, {
@@ -610,30 +775,33 @@ self.addEventListener('message', (event: MessageEvent<PlanRequest>) => {
   const planningMs = performance.now() - startedAt;
   const transforms = result.transforms;
   const impacts = result.impacts;
-  self.postMessage({
-    id: request.id,
-    step: RECORD_STEP,
-    frameCount: result.frameCount,
-    dieCount: count,
-    transforms: transforms.buffer,
-    impacts: impacts.buffer,
-    duration: result.duration,
-    settleReason: result.settleReason,
-    physicsSteps: result.physicsSteps,
-    diagnostics: {
-      finalAverageLinear: result.finalAverageLinear,
-      finalAverageAngular: result.finalAverageAngular,
-      contactStableTime: result.contactStableTime,
-      displacementStableTime: result.displacementStableTime,
-      candidateAttempts: 1,
-      candidateSearchMs: planningMs,
-      naturalTrajectory: true,
-      naturalMatches: count,
-      assistedDice: [],
-      maximumAssistAngle: 0,
-      finalTargetDots: [],
-      targetSuccess: true,
-      lockedKinematicDice: lockedMotion?.count ?? 0,
+  self.postMessage(
+    {
+      id: request.id,
+      step: RECORD_STEP,
+      frameCount: result.frameCount,
+      dieCount: count,
+      transforms: transforms.buffer,
+      impacts: impacts.buffer,
+      duration: result.duration,
+      settleReason: result.settleReason,
+      physicsSteps: result.physicsSteps,
+      diagnostics: {
+        finalAverageLinear: result.finalAverageLinear,
+        finalAverageAngular: result.finalAverageAngular,
+        contactStableTime: result.contactStableTime,
+        displacementStableTime: result.displacementStableTime,
+        candidateAttempts: 1,
+        candidateSearchMs: planningMs,
+        naturalTrajectory: true,
+        naturalMatches: count,
+        assistedDice: [],
+        maximumAssistAngle: 0,
+        finalTargetDots: [],
+        targetSuccess: true,
+        lockedKinematicDice: lockedMotion?.count ?? 0,
+      },
     },
-  }, { transfer: [transforms.buffer, impacts.buffer] });
+    { transfer: [transforms.buffer, impacts.buffer] },
+  );
 });

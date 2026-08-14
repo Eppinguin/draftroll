@@ -4,28 +4,28 @@ Draftroll implements the documented expression language and developer-facing beh
 
 ## Supported syntax
 
-| Area | Syntax | Examples |
-| --- | --- | --- |
-| Integer and decimal literals | `INT`, `DECIMAL` | `1`, `0.5`, `3.14` |
-| Numeric dice | `INT?dINT` | `d20`, `3d6`, `d1`, `0d6`, `2d1000` |
-| Percentile dice | `d%` | `2d%` |
-| Fate/Fudge extension | `dF` | `4dF` |
-| Sets | `(value, ...)` | `()`, `(2,)`, `(1, 3+3, 1d20)` |
-| Keep | `k selector` | `4d6kh3`, `4d6k3`, `(1,2,3)kh1` |
-| Drop | `p selector` | `4d6pl1`, `4d6p<3` |
-| Drop aliases | `dh`, `dl` | `4d6dl1` |
-| Reroll until clear | `rr selector` | `2d6rr<3` |
-| Reroll once | `ro selector` | `2d6ro<3` |
-| Reroll and add | `ra selector` | `2d6ra1` |
-| Explode | `e` or `e selector` | `2d4e`, `2d6e6`, `4d6e>=5` |
-| Minimum / maximum | `mi`, `ma` | `8d6mi2`, `2d20ma10` |
-| Selectors | literal, highest, lowest, comparisons | `3`, `h2`, `l1`, `>4`, `<3` |
-| Unary operations | `+`, `-` | `-1d8`, `+(2d6)` |
-| Arithmetic | `+ - * / // %` | `(1d20+5)*2`, `7//2` |
-| Comparisons | `== = != < <= > >=` | `1d20+5 >= 15` |
-| Inline annotations | `[text]` | `3d6 [fire] + 1d4 [piercing]` |
-| Trailing comments | free-form with `allowComments` | `1d20 attack check` |
-| Advantage / disadvantage | roll option | `{ advantage: "advantage" }` |
+| Area                         | Syntax                                | Examples                            |
+| ---------------------------- | ------------------------------------- | ----------------------------------- |
+| Integer and decimal literals | `INT`, `DECIMAL`                      | `1`, `0.5`, `3.14`                  |
+| Numeric dice                 | `INT?dINT`                            | `d20`, `3d6`, `d1`, `0d6`, `2d1000` |
+| Percentile dice              | `d%`                                  | `2d%`                               |
+| Fate/Fudge extension         | `dF`                                  | `4dF`                               |
+| Sets                         | `(value, ...)`                        | `()`, `(2,)`, `(1, 3+3, 1d20)`      |
+| Keep                         | `k selector`                          | `4d6kh3`, `4d6k3`, `(1,2,3)kh1`     |
+| Drop                         | `p selector`                          | `4d6pl1`, `4d6p<3`                  |
+| Drop aliases                 | `dh`, `dl`                            | `4d6dl1`                            |
+| Reroll until clear           | `rr selector`                         | `2d6rr<3`                           |
+| Reroll once                  | `ro selector`                         | `2d6ro<3`                           |
+| Reroll and add               | `ra selector`                         | `2d6ra1`                            |
+| Explode                      | `e` or `e selector`                   | `2d4e`, `2d6e6`, `4d6e>=5`          |
+| Minimum / maximum            | `mi`, `ma`                            | `8d6mi2`, `2d20ma10`                |
+| Selectors                    | literal, highest, lowest, comparisons | `3`, `h2`, `l1`, `>4`, `<3`         |
+| Unary operations             | `+`, `-`                              | `-1d8`, `+(2d6)`                    |
+| Arithmetic                   | `+ - * / // %`                        | `(1d20+5)*2`, `7//2`                |
+| Comparisons                  | `== = != < <= > >=`                   | `1d20+5 >= 15`                      |
+| Inline annotations           | `[text]`                              | `3d6 [fire] + 1d4 [piercing]`       |
+| Trailing comments            | free-form with `allowComments`        | `1d20 attack check`                 |
+| Advantage / disadvantage     | roll option                           | `{ advantage: "advantage" }`        |
 
 Draftroll also supports comparison selectors with `<=`, `>=`, and `!=`, arbitrary numeric dice, Fate dice, and explicit success counting.
 
@@ -68,7 +68,7 @@ import { DiceEngine } from '@draftroll/core';
 const engine = new DiceEngine();
 const result = engine.roll('4d6kh3 + 2');
 
-console.log(result.total);        // exact number
+console.log(result.total); // exact number
 console.log(result.integerTotal); // truncated-toward-zero d20-compatible total
 console.log(result.dice);
 console.log(result.operations);
@@ -130,7 +130,7 @@ walkRollTree(result.tree!, (node, parent) => {
   console.log(node.kind, node.value, parent?.kind);
 });
 
-const diceNodes = filterRollNodes(result.tree!, node => node.kind === 'dice');
+const diceNodes = filterRollNodes(result.tree!, (node) => node.kind === 'dice');
 ```
 
 The normalized dice array remains the renderer boundary. The evaluated tree is available to rules engines, formatters, audit tools, and game-specific UI.
@@ -143,7 +143,7 @@ import { formatRollResult } from '@draftroll/core';
 formatRollResult(result, { style: 'plain' });
 formatRollResult(result, { style: 'markdown' });
 
-engine.stringify(result, current => {
+engine.stringify(result, (current) => {
   return `${current.expression}: ${current.total}`;
 });
 ```
@@ -154,13 +154,15 @@ Structured rolls can use weighted or symbolic faces while still participating in
 
 ```ts
 const engine = new DiceEngine({
-  customDice: [{
-    id: 'weather',
-    faces: [
-      { result: 'sun', value: 2, weight: 1, label: 'Clear' },
-      { result: 'rain', value: 0, weight: 2, label: 'Rain' },
-    ],
-  }],
+  customDice: [
+    {
+      id: 'weather',
+      faces: [
+        { result: 'sun', value: 2, weight: 1, label: 'Clear' },
+        { result: 'rain', value: 0, weight: 2, label: 'Rain' },
+      ],
+    },
+  ],
 });
 
 const result = engine.evaluate({

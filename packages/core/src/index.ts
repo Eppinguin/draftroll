@@ -32,10 +32,19 @@ import type {
   StructuredRollOperation,
 } from '../../protocol/src/index';
 import { diceDiagnosticFromError, type DiceDiagnostic } from './diagnostics';
-import { formatRollResult, stringifyRoll, type FormatRollOptions, type RollStringifier } from './format';
+import {
+  formatRollResult,
+  stringifyRoll,
+  type FormatRollOptions,
+  type RollStringifier,
+} from './format';
 import { profileParse } from './instrumentation-internal';
 import type { DiceInstrumentation } from './instrumentation';
-import { evaluateParsedExpression, evaluateStructuredInput, type EvaluateOptions } from './evaluator';
+import {
+  evaluateParsedExpression,
+  evaluateStructuredInput,
+  type EvaluateOptions,
+} from './evaluator';
 import { DEFAULT_LIMITS, type DiceExecutionLimits } from './limits';
 import { DiceSyntaxError, parseDiceExpression, type ParseDiceOptions } from './parser';
 import { CryptoRng, type DiceRng } from './rng';
@@ -183,7 +192,6 @@ export class DiceEngine {
     for (const definition of options.customDice ?? []) this.registerDie(definition);
   }
 
-
   /**
    * Registers or replaces a validated custom-die definition.
    *
@@ -243,13 +251,18 @@ export class DiceEngine {
       }
     }
     const parse = () => parseDiceExpression(expression, this.limits, { dialect, allowComments });
-    const parsed = !allowComments && this.cacheSize > 0
-      ? profileParse(instrumentation, { source: expression, dialect, allowComments, cache: 'miss' }, parse)
-      : parseDiceExpression(expression, this.limits, { dialect, allowComments, instrumentation });
+    const parsed =
+      !allowComments && this.cacheSize > 0
+        ? profileParse(
+            instrumentation,
+            { source: expression, dialect, allowComments, cache: 'miss' },
+            parse,
+          )
+        : parseDiceExpression(expression, this.limits, { dialect, allowComments, instrumentation });
     if (!allowComments && this.cacheSize > 0) {
       this.parseCache.set(cacheKey, structuredClone(parsed));
       if (this.parseCache.size > this.cacheSize) {
-        const oldest = this.parseCache.keys().next().value as string | undefined;
+        const oldest = this.parseCache.keys().next().value;
         if (oldest !== undefined) this.parseCache.delete(oldest);
       }
     }
@@ -268,7 +281,11 @@ export class DiceEngine {
       return { valid: true, parsed: this.parse(expression, options), diagnostics: [] };
     } catch (error) {
       const normalized = error instanceof Error ? error : new Error(String(error));
-      return { valid: false, error: normalized, diagnostics: [diceDiagnosticFromError(normalized, expression)] };
+      return {
+        valid: false,
+        error: normalized,
+        diagnostics: [diceDiagnosticFromError(normalized, expression)],
+      };
     }
   }
 
@@ -280,12 +297,17 @@ export class DiceEngine {
     return {
       source: expression,
       parsed,
-      roll: (rollOptions = {}) => evaluateParsedExpression(
-        structuredClone(parsed),
-        rollOptions.rng ?? this.rng,
-        this.limits,
-        { ...rollOptions, instrumentation: rollOptions.instrumentation ?? this.instrumentation, now: this.now },
-      ),
+      roll: (rollOptions = {}) =>
+        evaluateParsedExpression(
+          structuredClone(parsed),
+          rollOptions.rng ?? this.rng,
+          this.limits,
+          {
+            ...rollOptions,
+            instrumentation: rollOptions.instrumentation ?? this.instrumentation,
+            now: this.now,
+          },
+        ),
     };
   }
 
@@ -311,7 +333,6 @@ export class DiceEngine {
     return this.roll(expression, { ...options, dialect: 'd20' });
   }
 
-
   /**
    * Formats a normalized result for human-readable output.
    */
@@ -322,7 +343,10 @@ export class DiceEngine {
   /**
    * Formats a result through a custom roll stringifier.
    */
-  stringify(result: NormalizedRollResult, stringifier?: RollStringifier | ((result: NormalizedRollResult) => string)): string {
+  stringify(
+    result: NormalizedRollResult,
+    stringifier?: RollStringifier | ((result: NormalizedRollResult) => string),
+  ): string {
     return stringifier ? stringifyRoll(result, stringifier) : formatRollResult(result);
   }
 
@@ -333,15 +357,16 @@ export class DiceEngine {
     const decoded = unwrapDecode(decodeRollInput(input));
     if (decoded.mode !== 'evaluate') throw new Error('DiceEngine.evaluate requires evaluate mode');
     input = decoded;
-    if (input.expression) return this.roll(input.expression, {
-      ...options,
-      themeId: input.themeId,
-      name: input.name,
-      metadata: input.metadata,
-      dialect: input.dialect ?? options.dialect,
-      advantage: input.advantage ?? options.advantage,
-      allowComments: input.allowComments ?? options.allowComments,
-    });
+    if (input.expression)
+      return this.roll(input.expression, {
+        ...options,
+        themeId: input.themeId,
+        name: input.name,
+        metadata: input.metadata,
+        dialect: input.dialect ?? options.dialect,
+        advantage: input.advantage ?? options.advantage,
+        allowComments: input.allowComments ?? options.allowComments,
+      });
     return evaluateStructuredInput(input, options.rng ?? this.rng, this.limits, {
       ...options,
       instrumentation: options.instrumentation ?? this.instrumentation,
@@ -355,24 +380,53 @@ export class DiceEngine {
    * Revise an existing roll while keeping its rollId, sequence, and createdAt.
    * The returned result increments revision and records updatedAt.
    */
-  update(result: NormalizedRollResult, update: RollUpdateInput, options: UpdateRollOptions = {}): NormalizedRollResult {
+  update(
+    result: NormalizedRollResult,
+    update: RollUpdateInput,
+    options: UpdateRollOptions = {},
+  ): NormalizedRollResult {
     result = assertNormalizedRollResult(result);
     update = unwrapDecode(decodeRollUpdateInput(update));
     const patches = validateUpdatePatches(update.dice ?? []);
     const removed = new Set(update.removeDice ?? []);
-    const expression = update.expression === null ? undefined : update.expression ?? result.expression;
+    const expression =
+      update.expression === null ? undefined : (update.expression ?? result.expression);
     const rerollAll = options.reroll === true;
     const rerollIds = new Set(Array.isArray(options.reroll) ? options.reroll : []);
 
     if (expression && removed.size > 0) {
-      throw new Error('removeDice cannot be used while an expression is active; change the expression instead');
+      throw new Error(
+        'removeDice cannot be used while an expression is active; change the expression instead',
+      );
     }
 
     const next = expression
-      ? this.updateExpressionResult(result, expression, patches, update, options, rerollAll, rerollIds)
-      : this.updateStructuredResult(result, patches, removed, update, options, rerollAll, rerollIds);
+      ? this.updateExpressionResult(
+          result,
+          expression,
+          patches,
+          update,
+          options,
+          rerollAll,
+          rerollIds,
+        )
+      : this.updateStructuredResult(
+          result,
+          patches,
+          removed,
+          update,
+          options,
+          rerollAll,
+          rerollIds,
+        );
 
-    const finalized = finalizeRevision(result, next, update, options.authority ?? result.authority, this.now);
+    const finalized = finalizeRevision(
+      result,
+      next,
+      update,
+      options.authority ?? result.authority,
+      this.now,
+    );
     if (rerollAll || rerollIds.size > 0) {
       const rerolledDice = rerollAll
         ? result.dice.filter(isRootDie).map((die) => die.id)
@@ -392,7 +446,11 @@ export class DiceEngine {
    * Expression rolls are fully re-evaluated, so arithmetic, keep/drop, success
    * counting, rerolls, and explosions are applied again to the new value.
    */
-  reroll(result: NormalizedRollResult, dieIds: string | readonly string[], options: RerollOptions = {}): NormalizedRollResult {
+  reroll(
+    result: NormalizedRollResult,
+    dieIds: string | readonly string[],
+    options: RerollOptions = {},
+  ): NormalizedRollResult {
     result = assertNormalizedRollResult(result);
     const requested = new Set(typeof dieIds === 'string' ? [dieIds] : dieIds);
     if (requested.size === 0) throw new Error('At least one die ID is required for a reroll');
@@ -402,7 +460,9 @@ export class DiceEngine {
       const die = previousById.get(dieId);
       if (!die) throw new Error(`Cannot reroll unknown die '${dieId}'`);
       if (!isRootDie(die)) {
-        throw new Error(`Die '${dieId}' was generated by ${die.generatedBy ?? 'a modifier'}; reroll its initial source die instead`);
+        throw new Error(
+          `Die '${dieId}' was generated by ${die.generatedBy ?? 'a modifier'}; reroll its initial source die instead`,
+        );
       }
     }
 
@@ -416,7 +476,8 @@ export class DiceEngine {
     if (result.expression && result.authority !== 'external') {
       const resultOverrides: Record<string, number | string> = {};
       for (const die of result.dice) {
-        if (die.generatedBy === 'initial' && !requested.has(die.id)) resultOverrides[die.id] = die.result;
+        if (die.generatedBy === 'initial' && !requested.has(die.id))
+          resultOverrides[die.id] = die.result;
       }
       const next = this.roll(result.expression, {
         ...options,
@@ -495,7 +556,7 @@ export class DiceEngine {
     const next = this.roll(expression, {
       ...options,
       authority: options.authority ?? previous.authority,
-      name: update.name === null ? undefined : update.name ?? previous.name,
+      name: update.name === null ? undefined : (update.name ?? previous.name),
       themeId,
       metadata: { ...previous.metadata, ...update.metadata, ...options.metadata },
       resultOverrides: overrides,
@@ -506,41 +567,52 @@ export class DiceEngine {
     next.comment = previous.comment;
 
     const nextById = new Map(next.dice.map((die) => [die.id, die]));
-    const nextInitialIds = new Set(next.dice
-      .filter((die) => die.generatedBy === 'initial' || die.generatedBy === undefined)
-      .map((die) => die.id));
+    const nextInitialIds = new Set(
+      next.dice
+        .filter((die) => die.generatedBy === 'initial' || die.generatedBy === undefined)
+        .map((die) => die.id),
+    );
     for (const patch of patches.values()) {
       if (patch.type !== undefined || patch.sides !== undefined || patch.kept !== undefined) {
-        throw new Error(`Formula die '${patch.id}' cannot override type, sides, or kept state; change the expression instead`);
+        throw new Error(
+          `Formula die '${patch.id}' cannot override type, sides, or kept state; change the expression instead`,
+        );
       }
       if (patch.result !== undefined) {
         const target = nextById.get(patch.id);
         if (!target) throw new Error(`Formula update does not contain die '${patch.id}'`);
         if (target.generatedBy !== 'initial' && target.generatedBy !== undefined) {
-          throw new Error(`Die '${patch.id}' was generated by ${target.generatedBy}; revise its initial source die or the formula instead`);
+          throw new Error(
+            `Die '${patch.id}' was generated by ${target.generatedBy}; revise its initial source die or the formula instead`,
+          );
         }
       }
     }
     for (const dieId of rerollIds) {
-      if (!nextInitialIds.has(dieId)) throw new Error(`Cannot reroll unknown formula die '${dieId}'`);
+      if (!nextInitialIds.has(dieId))
+        throw new Error(`Cannot reroll unknown formula die '${dieId}'`);
     }
 
     if (!rerollAll && !options.allowGenerateMissing) {
-      const generatedWithoutPermission = next.dice.filter((die) => (
-        (die.generatedBy === 'initial' || die.generatedBy === undefined)
-        && overrides[die.id] === undefined
-        && !rerollIds.has(die.id)
-      ));
+      const generatedWithoutPermission = next.dice.filter(
+        (die) =>
+          (die.generatedBy === 'initial' || die.generatedBy === undefined) &&
+          overrides[die.id] === undefined &&
+          !rerollIds.has(die.id),
+      );
       if (generatedWithoutPermission.length > 0) {
         throw new Error(
-          `Formula update requires values for new dice: ${generatedWithoutPermission.map((die) => die.id).join(', ')}. `
-          + 'Provide explicit die results, include those IDs in reroll, set reroll: true, or set allowGenerateMissing: true.',
+          `Formula update requires values for new dice: ${generatedWithoutPermission.map((die) => die.id).join(', ')}. ` +
+            'Provide explicit die results, include those IDs in reroll, set reroll: true, or set allowGenerateMissing: true.',
         );
       }
     }
 
     next.dice = applyPresentationAndPatches(previous, next.dice, patches, false);
-    if (update.total !== undefined) { next.total = update.total; next.integerTotal = Math.trunc(update.total); }
+    if (update.total !== undefined) {
+      next.total = update.total;
+      next.integerTotal = Math.trunc(update.total);
+    }
     if (update.annotation !== undefined) next.annotation = update.annotation;
     if (update.comment !== undefined) next.comment = update.comment;
     return next;
@@ -562,24 +634,38 @@ export class DiceEngine {
     for (const dieId of removed) {
       const die = previousById.get(dieId);
       if (!die) throw new Error(`Cannot remove unknown die '${dieId}'`);
-      if (!isRootDie(die)) throw new Error(`Cannot remove generated die '${dieId}'; remove its source die or revise the operations instead`);
+      if (!isRootDie(die))
+        throw new Error(
+          `Cannot remove generated die '${dieId}'; remove its source die or revise the operations instead`,
+        );
     }
     for (const patch of patches.values()) {
       const die = previousById.get(patch.id);
       if (die && !isRootDie(die)) {
-        throw new Error(`Cannot patch generated die '${patch.id}'; patch its source die or revise the operations instead`);
+        throw new Error(
+          `Cannot patch generated die '${patch.id}'; patch its source die or revise the operations instead`,
+        );
       }
     }
 
     const planned = rootDice
       .filter((die) => !removed.has(die.id))
-      .map((die) => plannedDieFromUpdate(die, patches.get(die.id), rerollAll || rerollIds.has(die.id)));
+      .map((die) =>
+        plannedDieFromUpdate(die, patches.get(die.id), rerollAll || rerollIds.has(die.id)),
+      );
 
     for (const patch of patches.values()) {
       if (rootIds.has(patch.id) || removed.has(patch.id)) continue;
       if (!patch.type) throw new Error(`New die '${patch.id}' requires type`);
-      if (patch.result === undefined && !rerollAll && !rerollIds.has(patch.id) && !options.allowGenerateMissing) {
-        throw new Error(`New die '${patch.id}' requires result, reroll permission, or allowGenerateMissing: true`);
+      if (
+        patch.result === undefined &&
+        !rerollAll &&
+        !rerollIds.has(patch.id) &&
+        !options.allowGenerateMissing
+      ) {
+        throw new Error(
+          `New die '${patch.id}' requires result, reroll permission, or allowGenerateMissing: true`,
+        );
       }
       planned.push({
         id: patch.id,
@@ -602,11 +688,15 @@ export class DiceEngine {
       if (!plannedIds.has(dieId)) throw new Error(`Cannot reroll unknown die '${dieId}'`);
     }
 
-    const operations = previous.operations.map(toStructuredOperation).map((operation) => ({
-      ...operation,
-      dice: operation.dice?.filter((dieId) => !removed.has(dieId)),
-    }));
-    const modifier = update.modifier === undefined ? previous.modifier : update.modifier ?? undefined;
+    // `toStructuredOperation` already returns a fresh object, so it is safe to
+    // assign the filtered dice in place rather than allocating a second copy.
+    const operations = previous.operations
+      .map(toStructuredOperation)
+      .map((operation) =>
+        Object.assign(operation, { dice: operation.dice?.filter((dieId) => !removed.has(dieId)) }),
+      );
+    const modifier =
+      update.modifier === undefined ? previous.modifier : (update.modifier ?? undefined);
     const themeId = nullableValue(update.themeId, previous.themeId);
     const metadata = { ...previous.metadata, ...update.metadata, ...options.metadata };
     const portableCustomDice = previous.customDice;
@@ -622,37 +712,49 @@ export class DiceEngine {
           kept: patches.get(die.id)?.kept ?? previousById.get(die.id)?.kept ?? true,
         };
       });
-      const calculatedTotal = exactDice
-        .filter((die) => die.kept)
-        .reduce((sum, die) => sum + (die.numericValue ?? (typeof die.result === 'number' ? die.result : Number(die.result) || 0)), 0)
-        + (modifier ?? 0);
-      next = normalizeExternalRoll({
-        dice: exactDice,
-        name: update.name === null ? undefined : update.name ?? previous.name,
-        total: update.total ?? calculatedTotal,
-        expression: undefined,
-        themeId,
-        annotation: update.annotation === undefined ? previous.annotation : update.annotation,
-        comment: update.comment === undefined ? previous.comment : update.comment,
-        customDice: portableCustomDice,
-        metadata,
-      }, { authority: options.authority ?? previous.authority, now: this.now });
+      const calculatedTotal =
+        exactDice
+          .filter((die) => die.kept)
+          .reduce(
+            (sum, die) =>
+              sum +
+              (die.numericValue ??
+                (typeof die.result === 'number' ? die.result : Number(die.result) || 0)),
+            0,
+          ) + (modifier ?? 0);
+      next = normalizeExternalRoll(
+        {
+          dice: exactDice,
+          name: update.name === null ? undefined : (update.name ?? previous.name),
+          total: update.total ?? calculatedTotal,
+          expression: undefined,
+          themeId,
+          annotation: update.annotation === undefined ? previous.annotation : update.annotation,
+          comment: update.comment === undefined ? previous.comment : update.comment,
+          customDice: portableCustomDice,
+          metadata,
+        },
+        { authority: options.authority ?? previous.authority, now: this.now },
+      );
       next.modifier = modifier;
       next.dice = applyPresentationAndPatches(previous, next.dice, patches, true);
     } else {
-      next = this.evaluate({
-        mode: 'evaluate',
-        name: update.name === null ? undefined : update.name ?? previous.name,
-        dice: planned,
-        operations,
-        modifier,
-        themeId,
-        customDice: portableCustomDice,
-        metadata,
-      }, {
-        ...options,
-        authority: options.authority ?? previous.authority,
-      });
+      next = this.evaluate(
+        {
+          mode: 'evaluate',
+          name: update.name === null ? undefined : (update.name ?? previous.name),
+          dice: planned,
+          operations,
+          modifier,
+          themeId,
+          customDice: portableCustomDice,
+          metadata,
+        },
+        {
+          ...options,
+          authority: options.authority ?? previous.authority,
+        },
+      );
       next.annotation = update.annotation === undefined ? previous.annotation : update.annotation;
       next.comment = update.comment === undefined ? previous.comment : update.comment;
       if (update.total !== undefined) {
@@ -670,13 +772,16 @@ export class DiceEngine {
     inlineDefinitions?: readonly CustomDiceDefinition[],
   ): { result: number | string; numericValue: number } {
     const inlineDice = customDiceMap(inlineDefinitions);
-    const customId = die.customDiceId ?? (inlineDice.has(die.type) || this.customDice.has(die.type) ? die.type : undefined);
+    const customId =
+      die.customDiceId ??
+      (inlineDice.has(die.type) || this.customDice.has(die.type) ? die.type : undefined);
     if (customId) {
       const definition = inlineDice.get(customId) ?? this.customDice.get(customId);
       if (!definition) throw new Error(`Unknown custom die '${customId}'`);
       const weights = definition.faces.map((face) => face.weight ?? 1);
       for (const weight of weights) {
-        if (!Number.isSafeInteger(weight) || weight < 1) throw new Error(`Custom die '${customId}' weights must be positive integers`);
+        if (!Number.isSafeInteger(weight) || weight < 1)
+          throw new Error(`Custom die '${customId}' weights must be positive integers`);
       }
       let index: number;
       if (die.faceIndex !== undefined) {
@@ -685,13 +790,21 @@ export class DiceEngine {
           throw new Error(`Face index ${index} is invalid for custom die '${customId}'`);
         }
         if (die.result !== undefined && definition.faces[index].result !== die.result) {
-          throw new Error(`Face index ${index} does not match result '${String(die.result)}' for custom die '${customId}'`);
+          throw new Error(
+            `Face index ${index} does not match result '${String(die.result)}' for custom die '${customId}'`,
+          );
         }
       } else if (die.result !== undefined) {
         index = definition.faces.findIndex((face) => face.result === die.result);
-        if (index < 0) throw new Error(`Result '${String(die.result)}' is not a face of custom die '${customId}'`);
+        if (index < 0)
+          throw new Error(
+            `Result '${String(die.result)}' is not a face of custom die '${customId}'`,
+          );
       } else {
-        const ticket = rng.integer(1, weights.reduce((sum, weight) => sum + weight, 0));
+        const ticket = rng.integer(
+          1,
+          weights.reduce((sum, weight) => sum + weight, 0),
+        );
         let cursor = 0;
         index = weights.findIndex((weight) => (cursor += weight) >= ticket);
       }
@@ -719,7 +832,19 @@ export class DiceEngine {
  * @public
  */
 export function normalizeExternalRoll(
-  input: DisplayRollInput | { dice: ExternalDieResult[]; name?: string; total?: number; expression?: string; themeId?: string; annotation?: string | null; comment?: string | null; customDice?: CustomDiceDefinition[]; metadata?: Record<string, unknown> },
+  input:
+    | DisplayRollInput
+    | {
+        dice: ExternalDieResult[];
+        name?: string;
+        total?: number;
+        expression?: string;
+        themeId?: string;
+        annotation?: string | null;
+        comment?: string | null;
+        customDice?: CustomDiceDefinition[];
+        metadata?: Record<string, unknown>;
+      },
   options: { authority?: RollAuthority; now?: () => Date } = {},
 ): NormalizedRollResult {
   const decoded = unwrapDecode(decodeRollInput({ ...input, mode: 'display' }));
@@ -736,15 +861,24 @@ export function normalizeExternalRoll(
 
     if (definition) {
       if (faceIndex !== undefined) {
-        if (!Number.isSafeInteger(faceIndex) || faceIndex < 0 || faceIndex >= definition.faces.length) {
+        if (
+          !Number.isSafeInteger(faceIndex) ||
+          faceIndex < 0 ||
+          faceIndex >= definition.faces.length
+        ) {
           throw new Error(`Face index ${faceIndex} is invalid for custom die '${definition.id}'`);
         }
         if (definition.faces[faceIndex].result !== die.result) {
-          throw new Error(`Face index ${faceIndex} does not match result '${String(die.result)}' for custom die '${definition.id}'`);
+          throw new Error(
+            `Face index ${faceIndex} does not match result '${String(die.result)}' for custom die '${definition.id}'`,
+          );
         }
       } else {
         faceIndex = definition.faces.findIndex((face) => face.result === die.result);
-        if (faceIndex < 0) throw new Error(`Result '${String(die.result)}' is not a face of custom die '${definition.id}'`);
+        if (faceIndex < 0)
+          throw new Error(
+            `Result '${String(die.result)}' is not a face of custom die '${definition.id}'`,
+          );
       }
       const face = definition.faces[faceIndex];
       faceLabel = face.label;
@@ -755,7 +889,7 @@ export function normalizeExternalRoll(
     return {
       id: die.id || `die_${index + 1}`,
       type: die.type,
-      sides: definition ? undefined : die.sides ?? numericSides(die.type),
+      sides: definition ? undefined : (die.sides ?? numericSides(die.type)),
       result: die.result,
       numericValue,
       faceIndex,
@@ -775,7 +909,13 @@ export function normalizeExternalRoll(
   });
   const calculated = dice
     .filter((die) => die.kept)
-    .reduce((sum, die) => sum + (die.numericValue ?? (typeof die.result === 'number' ? die.result : Number(die.result) || 0)), 0);
+    .reduce(
+      (sum, die) =>
+        sum +
+        (die.numericValue ??
+          (typeof die.result === 'number' ? die.result : Number(die.result) || 0)),
+      0,
+    );
   const total = input.total ?? calculated;
   const tree: RollTreeNode = {
     kind: 'set',
@@ -788,9 +928,12 @@ export function normalizeExternalRoll(
       kind: 'die',
       id: `node_${index + 1}`,
       dieId: die.id,
-      sides: die.customDiceId ?? (die.type.toLowerCase() === 'df' ? 'F' : die.sides ?? numericSides(die.type) ?? 0),
+      sides:
+        die.customDiceId ??
+        (die.type.toLowerCase() === 'df' ? 'F' : (die.sides ?? numericSides(die.type) ?? 0)),
       generatedBy: die.generatedBy ?? 'external',
-      value: die.numericValue ?? (typeof die.result === 'number' ? die.result : Number(die.result) || 0),
+      value:
+        die.numericValue ?? (typeof die.result === 'number' ? die.result : Number(die.result) || 0),
       kept: die.kept,
       annotations: die.annotations ?? [],
       diceIds: [die.id],
@@ -838,22 +981,26 @@ function plannedDieFromUpdate(
     type: patch?.type ?? previous.type,
     sides: patch?.sides ?? previous.sides,
     result: patch?.result !== undefined ? patch.result : reroll ? undefined : previous.result,
-    numericValue: patch?.numericValue !== undefined
-      ? patch.numericValue
-      : reroll || patch?.result !== undefined || patch?.faceIndex !== undefined
-        ? undefined
-        : previous.numericValue,
-    faceIndex: patch?.faceIndex !== undefined
-      ? patch.faceIndex
-      : reroll || patch?.result !== undefined
-        ? undefined
-        : previous.faceIndex,
-    themeId: patch?.themeId === null ? undefined : patch?.themeId ?? previous.themeId,
-    customDiceId: patch?.customDiceId === null ? undefined : patch?.customDiceId ?? previous.customDiceId,
-    appearance: patch?.appearance === null ? undefined : patch?.appearance ?? previous.appearance,
-    physics: patch?.physics === null ? undefined : patch?.physics ?? previous.physics,
-    annotations: patch?.annotations === null ? undefined : patch?.annotations ?? previous.annotations,
-    metadata: patch?.metadata === null ? undefined : patch?.metadata ?? previous.metadata,
+    numericValue:
+      patch?.numericValue !== undefined
+        ? patch.numericValue
+        : reroll || patch?.result !== undefined || patch?.faceIndex !== undefined
+          ? undefined
+          : previous.numericValue,
+    faceIndex:
+      patch?.faceIndex !== undefined
+        ? patch.faceIndex
+        : reroll || patch?.result !== undefined
+          ? undefined
+          : previous.faceIndex,
+    themeId: patch?.themeId === null ? undefined : (patch?.themeId ?? previous.themeId),
+    customDiceId:
+      patch?.customDiceId === null ? undefined : (patch?.customDiceId ?? previous.customDiceId),
+    appearance: patch?.appearance === null ? undefined : (patch?.appearance ?? previous.appearance),
+    physics: patch?.physics === null ? undefined : (patch?.physics ?? previous.physics),
+    annotations:
+      patch?.annotations === null ? undefined : (patch?.annotations ?? previous.annotations),
+    metadata: patch?.metadata === null ? undefined : (patch?.metadata ?? previous.metadata),
   };
 }
 
@@ -864,24 +1011,46 @@ function applyPresentationAndPatches(
   allowKeptPatch: boolean,
 ): NormalizedDieResult[] {
   const previousById = new Map(previous.dice.map((die) => [die.id, die]));
-  const initialBySource = previous.dice.filter((die) => die.generatedBy === 'initial' || die.generatedBy === 'external' || die.generatedBy === undefined);
+  const initialBySource = previous.dice.filter(
+    (die) =>
+      die.generatedBy === 'initial' ||
+      die.generatedBy === 'external' ||
+      die.generatedBy === undefined,
+  );
   return dice.map((die) => {
-    const source = previousById.get(die.id) ?? initialBySource.find((candidate) => (
-      candidate.sourceRollIndex === die.sourceRollIndex && candidate.type === die.type
-    ));
+    const source =
+      previousById.get(die.id) ??
+      initialBySource.find(
+        (candidate) =>
+          candidate.sourceRollIndex === die.sourceRollIndex && candidate.type === die.type,
+      );
     const patch = patches.get(die.id);
     return {
       ...die,
-      themeId: patch?.themeId === null ? undefined : patch?.themeId ?? source?.themeId ?? die.themeId,
-      customDiceId: patch?.customDiceId === null ? undefined : patch?.customDiceId ?? source?.customDiceId ?? die.customDiceId,
-      appearance: patch?.appearance === null ? undefined : patch?.appearance ?? source?.appearance ?? die.appearance,
-      physics: patch?.physics === null ? undefined : patch?.physics ?? source?.physics ?? die.physics,
-      annotations: patch?.annotations === null ? undefined : patch?.annotations ?? source?.annotations ?? die.annotations,
-      metadata: patch?.metadata === null
-        ? undefined
-        : patch?.metadata
-          ?? (isRootDie(die) && source?.result === die.result && source?.faceIndex === die.faceIndex ? source?.metadata : die.metadata),
-      kept: allowKeptPatch ? patch?.kept ?? die.kept : die.kept,
+      themeId:
+        patch?.themeId === null ? undefined : (patch?.themeId ?? source?.themeId ?? die.themeId),
+      customDiceId:
+        patch?.customDiceId === null
+          ? undefined
+          : (patch?.customDiceId ?? source?.customDiceId ?? die.customDiceId),
+      appearance:
+        patch?.appearance === null
+          ? undefined
+          : (patch?.appearance ?? source?.appearance ?? die.appearance),
+      physics:
+        patch?.physics === null ? undefined : (patch?.physics ?? source?.physics ?? die.physics),
+      annotations:
+        patch?.annotations === null
+          ? undefined
+          : (patch?.annotations ?? source?.annotations ?? die.annotations),
+      metadata:
+        patch?.metadata === null
+          ? undefined
+          : (patch?.metadata ??
+            (isRootDie(die) && source?.result === die.result && source?.faceIndex === die.faceIndex
+              ? source?.metadata
+              : die.metadata)),
+      kept: allowKeptPatch ? (patch?.kept ?? die.kept) : die.kept,
     };
   });
 }
@@ -901,14 +1070,14 @@ function finalizeRevision(
     revision: (previous.revision ?? 0) + 1,
     updatedAt,
     authority,
-    name: update.name === null ? undefined : update.name ?? next.name ?? previous.name,
+    name: update.name === null ? undefined : (update.name ?? next.name ?? previous.name),
     createdAt: previous.createdAt,
     expression: update.expression === null ? undefined : next.expression,
     themeId: nullableValue(update.themeId, next.themeId),
     annotation: update.annotation === undefined ? next.annotation : update.annotation,
     comment: update.comment === undefined ? next.comment : update.comment,
     integerTotal: Math.trunc(next.total),
-    modifier: update.modifier === undefined ? next.modifier : update.modifier ?? undefined,
+    modifier: update.modifier === undefined ? next.modifier : (update.modifier ?? undefined),
     metadata: {
       ...previous.metadata,
       ...next.metadata,
@@ -925,15 +1094,23 @@ function inheritPresentation(
   rerolledIds: ReadonlySet<string>,
 ): NormalizedRollResult {
   const previousById = new Map(previous.dice.map((die) => [die.id, die]));
-  const initialBySource = previous.dice.filter((die) => die.generatedBy === 'initial' || die.generatedBy === 'external');
+  const initialBySource = previous.dice.filter(
+    (die) => die.generatedBy === 'initial' || die.generatedBy === 'external',
+  );
 
   next.dice = next.dice.map((die) => {
     const exact = previousById.get(die.id);
-    const source = exact ?? initialBySource.find((candidate) => (
-      candidate.sourceRollIndex === die.sourceRollIndex && candidate.type === die.type
-    ));
-    const preserveMetadata = isRootDie(die) && !rerolledIds.has(die.id)
-      && source?.result === die.result && source?.faceIndex === die.faceIndex;
+    const source =
+      exact ??
+      initialBySource.find(
+        (candidate) =>
+          candidate.sourceRollIndex === die.sourceRollIndex && candidate.type === die.type,
+      );
+    const preserveMetadata =
+      isRootDie(die) &&
+      !rerolledIds.has(die.id) &&
+      source?.result === die.result &&
+      source?.faceIndex === die.faceIndex;
     return {
       ...die,
       themeId: source?.themeId ?? die.themeId,
@@ -941,7 +1118,7 @@ function inheritPresentation(
       appearance: source?.appearance ?? die.appearance,
       physics: source?.physics ?? die.physics,
       annotations: source?.annotations ?? die.annotations,
-      metadata: preserveMetadata ? source?.metadata ?? die.metadata : die.metadata,
+      metadata: preserveMetadata ? (source?.metadata ?? die.metadata) : die.metadata,
       generatedBy: die.generatedBy,
     };
   });
@@ -953,14 +1130,26 @@ function toStructuredOperation(operation: RollOperation): StructuredRollOperatio
   const dice = Array.isArray(configured)
     ? configured.filter((value): value is string => typeof value === 'string')
     : undefined;
-  if (operation.type === 'keep-highest' || operation.type === 'keep-lowest' || operation.type === 'drop-highest' || operation.type === 'drop-lowest') {
-    return { type: operation.type, count: operation.count ?? operation.selector?.target ?? 1, notation: operation.notation, dice };
+  if (
+    operation.type === 'keep-highest' ||
+    operation.type === 'keep-lowest' ||
+    operation.type === 'drop-highest' ||
+    operation.type === 'drop-lowest'
+  ) {
+    return {
+      type: operation.type,
+      count: operation.count ?? operation.selector?.target ?? 1,
+      notation: operation.notation,
+      dice,
+    };
   }
   return { type: operation.type, selector: operation.selector, notation: operation.notation, dice };
 }
 
 function isRootDie(die: NormalizedDieResult): boolean {
-  return die.generatedBy === undefined || die.generatedBy === 'initial' || die.generatedBy === 'external';
+  return (
+    die.generatedBy === undefined || die.generatedBy === 'initial' || die.generatedBy === 'external'
+  );
 }
 
 function validateCustomDieDefinition(definition: CustomDiceDefinition): void {
@@ -968,18 +1157,21 @@ function validateCustomDieDefinition(definition: CustomDiceDefinition): void {
   if (!decoded.success) throw decoded.error;
 }
 
-function customDiceMap(definitions?: readonly CustomDiceDefinition[]): Map<string, CustomDiceDefinition> {
+function customDiceMap(
+  definitions?: readonly CustomDiceDefinition[],
+): Map<string, CustomDiceDefinition> {
   const map = new Map<string, CustomDiceDefinition>();
   for (const definition of definitions ?? []) {
     validateCustomDieDefinition(definition);
-    if (map.has(definition.id)) throw new Error(`Duplicate custom die definition '${definition.id}'`);
+    if (map.has(definition.id))
+      throw new Error(`Duplicate custom die definition '${definition.id}'`);
     map.set(definition.id, definition);
   }
   return map;
 }
 
 function nullableValue<T>(value: T | null | undefined, fallback: T | undefined): T | undefined {
-  return value === null ? undefined : value ?? fallback;
+  return value === null ? undefined : (value ?? fallback);
 }
 
 function numericSides(type: string): number | undefined {

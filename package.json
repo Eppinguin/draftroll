@@ -1,17 +1,23 @@
 {
   "name": "draftroll-monorepo",
-  "private": true,
   "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "type": "module",
-  "packageManager": "pnpm@11.17.0",
-  "engines": {
-    "node": ">=22.12.0"
-  },
   "scripts": {
     "dev": "pnpm dev:playground",
     "dev:playground": "vite --host 0.0.0.0",
     "dev:stack": "concurrently --kill-others --names worker,playground \"pnpm worker:dev\" \"pnpm dev:playground\"",
-    "check": "pnpm check:docs && pnpm check:packages && pnpm check:worker && tsc --noEmit",
+    "fmt": "oxfmt",
+    "fmt:check": "oxfmt --check",
+    "lint": "oxlint .",
+    "lint:fix": "oxlint --fix .",
+    "check:quality": "pnpm lint && pnpm fmt:check",
+    "test:quality-config": "node scripts/test-code-quality-config.mjs",
+    "check": "pnpm check:quality && pnpm test:quality-config && pnpm check:docs && pnpm check:packages && pnpm check:worker && tsc --noEmit",
     "check:packages": "tsc -p tsconfig.packages.json --noEmit",
     "check:worker": "pnpm --filter @draftroll/worker check",
     "build": "pnpm check && vite build --base=./",
@@ -31,8 +37,9 @@
     "test:instrumentation": "node scripts/test-core-instrumentation.mjs",
     "test:diagnostics": "node scripts/test-validation-diagnostics.mjs",
     "test:modifier-sequences": "node scripts/test-modifier-sequencing.mjs",
-    "test:core": "pnpm test:review-fixes && pnpm test:instrumentation && pnpm test:diagnostics && pnpm test:d20 && pnpm test:modifier-sequences && pnpm test:settlement-effects && pnpm test:common-dice && pnpm test:lifecycle && pnpm test:completion && pnpm test:resilience && pnpm test:worker-resilience && pnpm test:accessibility-controls && pnpm test:examples && pnpm test:updates && pnpm test:mixed-renderer && pnpm test:visual-fallbacks && pnpm test:themes && pnpm test:client && pnpm test:room-protocol && pnpm test:validation && pnpm test:hardening && pnpm test:password && pnpm test:tokens && pnpm test:late-events && pnpm test:concurrent-table && pnpm test:natural-targets && pnpm test:large-pools && pnpm test:performance && pnpm test:browser:config && pnpm test:entrypoints",
+    "test:core": "pnpm test:review-fixes && pnpm test:instrumentation && pnpm test:diagnostics && pnpm test:d20 && pnpm test:modifier-sequences && pnpm test:settlement-effects && pnpm test:common-dice && pnpm test:lifecycle && pnpm test:completion && pnpm test:resilience && pnpm test:worker-resilience && pnpm test:accessibility-controls && pnpm test:examples && pnpm test:updates && pnpm test:mixed-renderer && pnpm test:coin-physics && pnpm test:visual-fallbacks && pnpm test:themes && pnpm test:client && pnpm test:room-protocol && pnpm test:validation && pnpm test:hardening && pnpm test:password && pnpm test:tokens && pnpm test:late-events && pnpm test:concurrent-table && pnpm test:natural-targets && pnpm test:large-pools && pnpm test:performance && pnpm test:browser:config && pnpm test:entrypoints",
     "test:mixed-renderer": "node scripts/test-mixed-renderer.mjs",
+    "test:coin-physics": "node scripts/test-coin-physics.mjs",
     "test:client": "node scripts/test-character-client.mjs",
     "test:room-protocol": "node scripts/test-room-protocol.mjs",
     "test:visual-fallbacks": "node scripts/test-visual-fallbacks.mjs",
@@ -73,7 +80,7 @@
     "build:packages": "node scripts/build-packages.mjs",
     "test:distribution": "node scripts/test-package-distribution.mjs",
     "test:review-fixes": "node scripts/test-sdk-review-fixes.mjs",
-    "test:release": "pnpm check:docs && pnpm check:packages && pnpm test:entrypoints && pnpm test:tsdoc:declarations && pnpm test:distribution",
+    "test:release": "pnpm check:quality && pnpm test:quality-config && pnpm check:docs && pnpm check:packages && pnpm test:entrypoints && pnpm test:tsdoc:declarations && pnpm test:distribution",
     "test:settlement-effects": "node scripts/test-settlement-effects.mjs",
     "check:docs": "node scripts/check-tsdoc.mjs",
     "check:docs:structure": "node scripts/check-tsdoc.mjs --structure-only",
@@ -84,17 +91,20 @@
     "three": "^0.178.0"
   },
   "devDependencies": {
-    "@types/three": "^0.178.1",
-    "concurrently": "^9.2.1",
-    "typescript": "^5.8.3",
-    "vite": "^7.0.4",
+    "@microsoft/tsdoc": "^0.16.0",
+    "@microsoft/tsdoc-config": "^0.18.1",
     "@playwright/test": "^1.62.0",
     "@types/node": "^22.0.0",
-    "@microsoft/tsdoc": "^0.16.0",
-    "@microsoft/tsdoc-config": "^0.18.1"
+    "@types/three": "^0.178.1",
+    "concurrently": "^9.2.1",
+    "oxfmt": "0.61.0",
+    "oxlint": "1.76.0",
+    "oxlint-tsgolint": "7.0.2001",
+    "typescript": "^5.8.3",
+    "vite": "^7.0.4"
   },
-  "workspaces": [
-    "packages/*",
-    "apps/*"
-  ]
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "packageManager": "pnpm@11.17.0"
 }

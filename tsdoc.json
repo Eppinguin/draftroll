@@ -19,15 +19,5 @@
     "@throws": true
   },
   "reportUnsupportedHtmlElements": true,
-  "supportedHtmlElements": [
-    "a",
-    "b",
-    "br",
-    "code",
-    "em",
-    "i",
-    "p",
-    "pre",
-    "strong"
-  ]
+  "supportedHtmlElements": ["a", "b", "br", "code", "em", "i", "p", "pre", "strong"]
 }

@@ -5,39 +5,37 @@ Draftroll runtime themes are constrained, versioned manifests. They can change m
 ## Minimal theme
 
 ```ts
-import {
-  BundledThemeProvider,
-  DRAFTROLL_THEME_SCHEMA_VERSION,
-  Draftroll,
-} from '@draftroll/sdk';
+import { BundledThemeProvider, DRAFTROLL_THEME_SCHEMA_VERSION, Draftroll } from '@draftroll/sdk';
 
-const themes = new BundledThemeProvider([{
-  schemaVersion: DRAFTROLL_THEME_SCHEMA_VERSION,
-  id: 'obsidian',
-  name: 'Obsidian',
-  version: '1.0.0',
-  availableDice: ['d4', 'd6', 'd8', 'd10', 'd12', 'd20'],
-  previews: {
-    d20: '/themes/obsidian/preview-d20.webp',
+const themes = new BundledThemeProvider([
+  {
+    schemaVersion: DRAFTROLL_THEME_SCHEMA_VERSION,
+    id: 'obsidian',
+    name: 'Obsidian',
+    version: '1.0.0',
+    availableDice: ['d4', 'd6', 'd8', 'd10', 'd12', 'd20'],
+    previews: {
+      d20: '/themes/obsidian/preview-d20.webp',
+    },
+    material: {
+      color: '#17131f',
+      emissive: '#3d1859',
+      emissiveIntensity: 0.3,
+      roughness: 0.38,
+      metalness: 0.4,
+      clearcoat: 0.45,
+    },
+    labels: {
+      color: '#f8eaff',
+      glowColor: '#c468ff',
+    },
+    effects: {
+      positive: 'major-burst',
+      neutral: 'subtle-pulse',
+      negative: 'void-fracture',
+    },
   },
-  material: {
-    color: '#17131f',
-    emissive: '#3d1859',
-    emissiveIntensity: 0.3,
-    roughness: 0.38,
-    metalness: 0.4,
-    clearcoat: 0.45,
-  },
-  labels: {
-    color: '#f8eaff',
-    glowColor: '#c468ff',
-  },
-  effects: {
-    positive: 'major-burst',
-    neutral: 'subtle-pulse',
-    negative: 'void-fracture',
-  },
-}]);
+]);
 
 const draftroll = await Draftroll.createOverlay({
   overlay: {
@@ -54,45 +52,47 @@ Assets are referenced by manifest paths and supplied by a `ThemeProvider`.
 
 ```ts
 const provider = new BundledThemeProvider(
-  [{
-    schemaVersion: DRAFTROLL_THEME_SCHEMA_VERSION,
-    id: 'marble',
-    name: 'Marble',
-    version: '2.1.0',
-    material: {
-      surfaceTexture: {
-        src: 'marble/surface.webp',
-        mimeType: 'image/webp',
+  [
+    {
+      schemaVersion: DRAFTROLL_THEME_SCHEMA_VERSION,
+      id: 'marble',
+      name: 'Marble',
+      version: '2.1.0',
+      material: {
+        surfaceTexture: {
+          src: 'marble/surface.webp',
+          mimeType: 'image/webp',
+        },
+        normalTexture: {
+          src: 'marble/normal.webp',
+          mimeType: 'image/webp',
+        },
       },
-      normalTexture: {
-        src: 'marble/normal.webp',
-        mimeType: 'image/webp',
+      labels: {
+        atlas: {
+          src: 'marble/labels.png',
+          mimeType: 'image/png',
+        },
+        fontFamily: 'Marble Serif',
+        font: {
+          src: 'marble/font.woff2',
+          mimeType: 'font/woff2',
+        },
+      },
+      audio: {
+        impact: {
+          src: 'marble/impact.ogg',
+          mimeType: 'audio/ogg',
+        },
+        roll: {
+          src: 'marble/roll.ogg',
+          mimeType: 'audio/ogg',
+        },
+        volume: 0.75,
+        playbackRate: [0.96, 1.04],
       },
     },
-    labels: {
-      atlas: {
-        src: 'marble/labels.png',
-        mimeType: 'image/png',
-      },
-      fontFamily: 'Marble Serif',
-      font: {
-        src: 'marble/font.woff2',
-        mimeType: 'font/woff2',
-      },
-    },
-    audio: {
-      impact: {
-        src: 'marble/impact.ogg',
-        mimeType: 'audio/ogg',
-      },
-      roll: {
-        src: 'marble/roll.ogg',
-        mimeType: 'audio/ogg',
-      },
-      volume: 0.75,
-      playbackRate: [0.96, 1.04],
-    },
-  }],
+  ],
   [
     ['marble/surface.webp', surfaceBlob],
     ['marble/normal.webp', normalBlob],

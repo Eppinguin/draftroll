@@ -70,9 +70,9 @@ export class DraftrollTextRenderer implements DiceRenderer {
     handler: (payload: RendererLifecycleEventMap[K]) => void,
   ): () => void {
     const handlers = this.handlers.get(event) ?? new Set<(payload: never) => void>();
-    handlers.add(handler as (payload: never) => void);
+    handlers.add(handler);
     this.handlers.set(event, handlers);
-    return () => handlers.delete(handler as (payload: never) => void);
+    return () => handlers.delete(handler);
   }
 
   /**
@@ -85,7 +85,10 @@ export class DraftrollTextRenderer implements DiceRenderer {
   /**
    * Presents a normalized roll and waits for completion.
    */
-  async playRoll(result: NormalizedRollResult, options: RendererPlayOptions = {}): Promise<RendererCompletion> {
+  async playRoll(
+    result: NormalizedRollResult,
+    options: RendererPlayOptions = {},
+  ): Promise<RendererCompletion> {
     throwIfAborted(options.signal, 'Text renderer presentation');
     if (!this.shouldPresent(result)) return completionFor(result);
     if (this.paused) {
@@ -100,8 +103,14 @@ export class DraftrollTextRenderer implements DiceRenderer {
     const completion = completionFor(result);
     this.emit('settled', { result, completion });
     this.emit('completed', { result, completion });
-    if (typeof options.autoClearMs === 'number' && Number.isFinite(options.autoClearMs) && options.autoClearMs >= 0) {
-      const timer = setTimeout(() => { void this.dismiss({ hideResult: true }); }, options.autoClearMs);
+    if (
+      typeof options.autoClearMs === 'number' &&
+      Number.isFinite(options.autoClearMs) &&
+      options.autoClearMs >= 0
+    ) {
+      const timer = setTimeout(() => {
+        void this.dismiss({ hideResult: true });
+      }, options.autoClearMs);
       options.signal?.addEventListener('abort', () => clearTimeout(timer), { once: true });
     }
     return completion;
@@ -110,7 +119,10 @@ export class DraftrollTextRenderer implements DiceRenderer {
   /**
    * Updates the displayed result without replaying the roll.
    */
-  async updateResult(result: NormalizedRollResult, _options: RendererResultUpdateOptions = {}): Promise<void> {
+  async updateResult(
+    result: NormalizedRollResult,
+    _options: RendererResultUpdateOptions = {},
+  ): Promise<void> {
     await this.render(result);
   }
 
@@ -185,7 +197,8 @@ export class DraftrollTextRenderer implements DiceRenderer {
       if (!this.persistent) this.container.replaceChildren(entry);
       else {
         this.container.append(entry);
-        while (this.container.childElementCount > this.maximumEntries) this.container.firstElementChild?.remove();
+        while (this.container.childElementCount > this.maximumEntries)
+          this.container.firstElementChild?.remove();
       }
     } catch (error) {
       const normalized = error instanceof Error ? error : new Error(String(error));
@@ -196,18 +209,27 @@ export class DraftrollTextRenderer implements DiceRenderer {
 
   private shouldPresent(result: NormalizedRollResult): boolean {
     if (!this.participantFilter) return true;
-    const participantId = typeof result.metadata?.participantId === 'string'
-      ? result.metadata.participantId
-      : typeof result.metadata?.actorParticipantId === 'string'
-        ? result.metadata.actorParticipantId
-        : undefined;
-    if (typeof this.participantFilter === 'function') return this.participantFilter({ participantId, result });
+    const participantId =
+      typeof result.metadata?.participantId === 'string'
+        ? result.metadata.participantId
+        : typeof result.metadata?.actorParticipantId === 'string'
+          ? result.metadata.actorParticipantId
+          : undefined;
+    if (typeof this.participantFilter === 'function')
+      return this.participantFilter({ participantId, result });
     return participantId !== undefined && this.participantFilter.includes(participantId);
   }
 
-  private emit<K extends RendererLifecycleEventName>(event: K, payload: RendererLifecycleEventMap[K]): void {
+  private emit<K extends RendererLifecycleEventName>(
+    event: K,
+    payload: RendererLifecycleEventMap[K],
+  ): void {
     for (const handler of this.handlers.get(event) ?? []) {
       try {
+        // Handlers are stored contravariantly at `never` so one map can hold every event's
+        // handler. `on` only ever files a handler under its own key, so widening back to this
+        // key's payload type restores the signature the caller registered.
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion
         (handler as (value: RendererLifecycleEventMap[K]) => void)(payload);
       } catch {
         // Observer failures cannot alter presentation behavior.
@@ -222,11 +244,18 @@ function completionFor(result: NormalizedRollResult): RendererCompletion {
 
 function describeResult(result: NormalizedRollResult): string {
   const label = result.name ?? result.expression ?? 'Dice result';
-  const dice = result.dice.map((die) => `${die.kept ? '' : 'dropped '}${die.faceLabel ?? die.result}`).join(', ');
+  const dice = result.dice
+    .map((die) => `${die.kept ? '' : 'dropped '}${die.faceLabel ?? die.result}`)
+    .join(', ');
   return `${label}: total ${result.total}${dice ? `. Dice: ${dice}` : ''}`;
 }
 
-function clampInteger(value: number | undefined, minimum: number, maximum: number, fallback: number): number {
+function clampInteger(
+  value: number | undefined,
+  minimum: number,
+  maximum: number,
+  fallback: number,
+): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
   return Math.min(maximum, Math.max(minimum, Math.round(value)));
 }

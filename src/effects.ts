@@ -28,6 +28,18 @@ export type EffectPresetId =
   | 'verdant-bloom'
   | 'firefly-orbit'
   | 'thorn-bind'
+  | 'escapement-lock'
+  | 'gear-tick'
+  | 'mainspring-snap'
+  | 'facet-bloom'
+  | 'vein-glimmer'
+  | 'conchoidal-break'
+  | 'quench-strike'
+  | 'anvil-spark'
+  | 'temper-crack'
+  | 'reliquary-seal'
+  | 'dust-settle'
+  | 'ossuary-crack'
   | 'major-burst'
   | 'subtle-pulse'
   | 'void-fracture'
@@ -51,7 +63,8 @@ export interface EffectQualityConfig {
 }
 
 interface ParticleBurst {
-  points: THREE.Points;
+  /** Parameterized so the position attribute and material need no narrowing. */
+  points: THREE.Points<THREE.BufferGeometry, THREE.PointsMaterial>;
   velocities: Float32Array;
   life: number;
   duration: number;
@@ -59,7 +72,8 @@ interface ParticleBurst {
 }
 
 interface AnimatedMesh {
-  mesh: THREE.Mesh;
+  /** Parameterized so material properties need no narrowing at animation time. */
+  mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
   life: number;
   duration: number;
   startScale: number;
@@ -68,7 +82,9 @@ interface AnimatedMesh {
 }
 
 interface AnimatedLine {
-  line: THREE.Line | THREE.LineSegments;
+  line:
+    | THREE.Line<THREE.BufferGeometry, THREE.LineBasicMaterial>
+    | THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial>;
   life: number;
   duration: number;
 }
@@ -94,8 +110,8 @@ interface DragonAnimation {
   head: THREE.Object3D;
   leftWing: THREE.Object3D;
   rightWing: THREE.Object3D;
-  wingMembraneLeft: THREE.Mesh;
-  wingMembraneRight: THREE.Mesh;
+  wingMembraneLeft: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
+  wingMembraneRight: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
   light: THREE.PointLight;
   fireOrigin: THREE.Object3D;
   fireDirection: THREE.Vector3;
@@ -104,7 +120,6 @@ interface DragonAnimation {
 }
 
 type MotifKind = 'orb' | 'shard' | 'leaf' | 'star' | 'bone';
-
 
 interface ParticleBurstRequest {
   position: THREE.Vector3;
@@ -151,7 +166,7 @@ interface LightningBatchRequest {
 }
 
 interface AnimatedRingBatch {
-  mesh: THREE.InstancedMesh;
+  mesh: THREE.InstancedMesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
   centers: Float32Array;
   life: number;
   duration: number;
@@ -220,7 +235,14 @@ function createRadialTexture(stops: Array<[number, string]>): THREE.CanvasTextur
   canvas.height = size;
   const context = canvas.getContext('2d');
   if (!context) throw new Error('Canvas 2D context unavailable.');
-  const gradient = context.createRadialGradient(size / 2, size / 2, 4, size / 2, size / 2, size * 0.49);
+  const gradient = context.createRadialGradient(
+    size / 2,
+    size / 2,
+    4,
+    size / 2,
+    size / 2,
+    size * 0.49,
+  );
   for (const [offset, color] of stops) gradient.addColorStop(offset, color);
   context.fillStyle = gradient;
   context.fillRect(0, 0, size, size);
@@ -255,7 +277,9 @@ function makeWingMaterial(): THREE.MeshStandardMaterial {
   });
 }
 
-function createDragonModel(color = 0x7d1a0d): Omit<DragonAnimation, 'life' | 'duration' | 'fireTimer' | 'scale'> {
+function createDragonModel(
+  color = 0x7d1a0d,
+): Omit<DragonAnimation, 'life' | 'duration' | 'fireTimer' | 'scale'> {
   const root = new THREE.Group();
   const bodyCurve = new THREE.CatmullRomCurve3([
     new THREE.Vector3(-0.95, 0.12, 0.55),
@@ -266,14 +290,26 @@ function createDragonModel(color = 0x7d1a0d): Omit<DragonAnimation, 'life' | 'du
   ]);
   const body = new THREE.Mesh(
     new THREE.TubeGeometry(bodyCurve, 48, 0.14, 10, false),
-    new THREE.MeshStandardMaterial({ color, emissive: 0x2c0906, emissiveIntensity: 0.58, roughness: 0.72, metalness: 0.04 }),
+    new THREE.MeshStandardMaterial({
+      color,
+      emissive: 0x2c0906,
+      emissiveIntensity: 0.58,
+      roughness: 0.72,
+      metalness: 0.04,
+    }),
   );
   body.castShadow = true;
   root.add(body);
 
   const belly = new THREE.Mesh(
     new THREE.TubeGeometry(bodyCurve, 24, 0.08, 8, false),
-    new THREE.MeshStandardMaterial({ color: 0xb8652e, emissive: 0x65210c, emissiveIntensity: 0.24, roughness: 0.76, metalness: 0.03 }),
+    new THREE.MeshStandardMaterial({
+      color: 0xb8652e,
+      emissive: 0x65210c,
+      emissiveIntensity: 0.24,
+      roughness: 0.76,
+      metalness: 0.03,
+    }),
   );
   belly.scale.set(0.88, 0.86, 0.82);
   belly.position.y = -0.012;
@@ -284,19 +320,46 @@ function createDragonModel(color = 0x7d1a0d): Omit<DragonAnimation, 'life' | 'du
   headPivot.rotation.z = -0.18;
   root.add(headPivot);
 
-  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.095, 0.11, 0.38, 8), new THREE.MeshStandardMaterial({ color, emissive: 0x2c0906, emissiveIntensity: 0.58, roughness: 0.72, metalness: 0.04 }));
+  const neck = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.095, 0.11, 0.38, 8),
+    new THREE.MeshStandardMaterial({
+      color,
+      emissive: 0x2c0906,
+      emissiveIntensity: 0.58,
+      roughness: 0.72,
+      metalness: 0.04,
+    }),
+  );
   neck.rotation.z = Math.PI / 2;
   neck.position.set(-0.12, -0.03, 0);
   headPivot.add(neck);
 
   const head = new THREE.Group();
   headPivot.add(head);
-  const skull = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.56, 5), new THREE.MeshStandardMaterial({ color, emissive: 0x2c0906, emissiveIntensity: 0.75, roughness: 0.68, metalness: 0.05 }));
+  const skull = new THREE.Mesh(
+    new THREE.ConeGeometry(0.22, 0.56, 5),
+    new THREE.MeshStandardMaterial({
+      color,
+      emissive: 0x2c0906,
+      emissiveIntensity: 0.75,
+      roughness: 0.68,
+      metalness: 0.05,
+    }),
+  );
   skull.rotation.z = -Math.PI / 2;
   skull.position.set(0.12, 0.02, 0);
   head.add(skull);
 
-  const jaw = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.34, 4), new THREE.MeshStandardMaterial({ color: 0xd1925c, emissive: 0x6f2f0c, emissiveIntensity: 0.24, roughness: 0.76, metalness: 0.03 }));
+  const jaw = new THREE.Mesh(
+    new THREE.ConeGeometry(0.14, 0.34, 4),
+    new THREE.MeshStandardMaterial({
+      color: 0xd1925c,
+      emissive: 0x6f2f0c,
+      emissiveIntensity: 0.24,
+      roughness: 0.76,
+      metalness: 0.03,
+    }),
+  );
   jaw.rotation.z = -Math.PI / 2;
   jaw.scale.set(1, 0.52, 1);
   jaw.position.set(0.18, -0.055, 0);
@@ -315,28 +378,49 @@ function createDragonModel(color = 0x7d1a0d): Omit<DragonAnimation, 'life' | 'du
   head.add(eyeRight);
 
   for (const side of [-1, 1]) {
-    const horn = new THREE.Mesh(new THREE.ConeGeometry(0.04, 0.22, 6), new THREE.MeshStandardMaterial({ color: 0xdab17b, roughness: 0.5, metalness: 0.08 }));
+    const horn = new THREE.Mesh(
+      new THREE.ConeGeometry(0.04, 0.22, 6),
+      new THREE.MeshStandardMaterial({ color: 0xdab17b, roughness: 0.5, metalness: 0.08 }),
+    );
     horn.position.set(0.02, 0.17, side * 0.12);
     horn.rotation.x = side * 0.28;
     horn.rotation.z = -0.35;
     head.add(horn);
   }
 
-  const spikeMaterial = new THREE.MeshStandardMaterial({ color: 0xd58a36, emissive: 0x6a240b, emissiveIntensity: 0.4, roughness: 0.52, metalness: 0.06 });
+  const spikeMaterial = new THREE.MeshStandardMaterial({
+    color: 0xd58a36,
+    emissive: 0x6a240b,
+    emissiveIntensity: 0.4,
+    roughness: 0.52,
+    metalness: 0.06,
+  });
   for (let i = 0; i < 7; i += 1) {
     const t = i / 6;
     const point = bodyCurve.getPoint(t);
     const tangent = bodyCurve.getTangent(t).normalize();
-    const spike = new THREE.Mesh(new THREE.ConeGeometry(0.04 + t * 0.015, 0.18 + t * 0.06, 5), spikeMaterial);
+    const spike = new THREE.Mesh(
+      new THREE.ConeGeometry(0.04 + t * 0.015, 0.18 + t * 0.06, 5),
+      spikeMaterial,
+    );
     spike.position.copy(point).add(new THREE.Vector3(0, 0.14 + t * 0.04, 0));
-    spike.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tangent.clone().add(new THREE.Vector3(0, 0.9, 0)).normalize());
+    spike.quaternion.setFromUnitVectors(
+      new THREE.Vector3(0, 1, 0),
+      tangent
+        .clone()
+        .add(new THREE.Vector3(0, 0.9, 0))
+        .normalize(),
+    );
     root.add(spike);
   }
 
   const wingPivotLeft = new THREE.Group();
   wingPivotLeft.position.set(0.08, 0.25, 0.19);
   root.add(wingPivotLeft);
-  const wingBoneLeft = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.045, 0.95, 5), new THREE.MeshStandardMaterial({ color: 0x83411f, roughness: 0.8 }));
+  const wingBoneLeft = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.03, 0.045, 0.95, 5),
+    new THREE.MeshStandardMaterial({ color: 0x83411f, roughness: 0.8 }),
+  );
   wingBoneLeft.rotation.z = -Math.PI / 2.55;
   wingBoneLeft.position.set(0.4, 0, 0.06);
   wingPivotLeft.add(wingBoneLeft);
@@ -349,9 +433,23 @@ function createDragonModel(color = 0x7d1a0d): Omit<DragonAnimation, 'life' | 'du
   wingPivotRight.position.z = -0.19;
   wingPivotRight.scale.z = -1;
   root.add(wingPivotRight);
-  const wingMembraneRight = wingPivotRight.children.find((child): child is THREE.Mesh => child instanceof THREE.Mesh && child.geometry instanceof THREE.ShapeGeometry) ?? wingMembraneLeft.clone();
+  const wingMembraneRight =
+    wingPivotRight.children.find(
+      (child): child is THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> =>
+        child instanceof THREE.Mesh &&
+        child.geometry instanceof THREE.ShapeGeometry &&
+        child.material instanceof THREE.MeshStandardMaterial,
+    ) ?? wingMembraneLeft.clone();
 
-  const tailFin = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.28, 4), new THREE.MeshStandardMaterial({ color: 0xd5933d, emissive: 0x73280c, emissiveIntensity: 0.25, roughness: 0.54 }));
+  const tailFin = new THREE.Mesh(
+    new THREE.ConeGeometry(0.08, 0.28, 4),
+    new THREE.MeshStandardMaterial({
+      color: 0xd5933d,
+      emissive: 0x73280c,
+      emissiveIntensity: 0.25,
+      roughness: 0.54,
+    }),
+  );
   tailFin.position.set(-1.02, 0.11, 0.55);
   tailFin.rotation.z = Math.PI * 0.72;
   root.add(tailFin);
@@ -362,12 +460,25 @@ function createDragonModel(color = 0x7d1a0d): Omit<DragonAnimation, 'life' | 'du
   root.scale.setScalar(0.01);
   root.rotation.y = Math.PI * 0.32;
 
-  return { root, head: headPivot, leftWing: wingPivotLeft, rightWing: wingPivotRight, wingMembraneLeft, wingMembraneRight, light, fireOrigin, fireDirection: new THREE.Vector3(1, 0.03, -0.08).normalize() };
+  return {
+    root,
+    head: headPivot,
+    leftWing: wingPivotLeft,
+    rightWing: wingPivotRight,
+    wingMembraneLeft,
+    wingMembraneRight,
+    light,
+    fireOrigin,
+    fireDirection: new THREE.Vector3(1, 0.03, -0.08).normalize(),
+  };
 }
 
 function disposeObject(root: THREE.Object3D): void {
   root.traverse((child) => {
-    if (!(child instanceof THREE.Mesh || child instanceof THREE.Line || child instanceof THREE.Points)) return;
+    if (
+      !(child instanceof THREE.Mesh || child instanceof THREE.Line || child instanceof THREE.Points)
+    )
+      return;
     child.geometry.dispose();
     const materials = Array.isArray(child.material) ? child.material : [child.material];
     materials.forEach((material) => material.dispose());
@@ -376,11 +487,16 @@ function disposeObject(root: THREE.Object3D): void {
 
 function motifGeometry(kind: MotifKind): THREE.BufferGeometry {
   switch (kind) {
-    case 'shard': return new THREE.OctahedronGeometry(0.07, 0);
-    case 'leaf': return new THREE.SphereGeometry(0.055, 7, 5);
-    case 'star': return new THREE.OctahedronGeometry(0.055, 0);
-    case 'bone': return new THREE.CylinderGeometry(0.022, 0.028, 0.14, 5);
-    default: return new THREE.SphereGeometry(0.04, 7, 6);
+    case 'shard':
+      return new THREE.OctahedronGeometry(0.07, 0);
+    case 'leaf':
+      return new THREE.SphereGeometry(0.055, 7, 5);
+    case 'star':
+      return new THREE.OctahedronGeometry(0.055, 0);
+    case 'bone':
+      return new THREE.CylinderGeometry(0.022, 0.028, 0.14, 5);
+    case 'orb':
+      return new THREE.SphereGeometry(0.04, 7, 6);
   }
 }
 
@@ -422,6 +538,14 @@ export class DraftrollEffects {
     tempest: { positive: 'thunder-strike', neutral: 'static-crown', negative: 'storm-fizzle' },
     necrotic: { positive: 'soul-reaper', neutral: 'grave-wisp', negative: 'soul-collapse' },
     wildwood: { positive: 'verdant-bloom', neutral: 'firefly-orbit', negative: 'thorn-bind' },
+    clockwork: {
+      positive: 'escapement-lock',
+      neutral: 'gear-tick',
+      negative: 'mainspring-snap',
+    },
+    obsidian: { positive: 'facet-bloom', neutral: 'vein-glimmer', negative: 'conchoidal-break' },
+    gunmetal: { positive: 'quench-strike', neutral: 'anvil-spark', negative: 'temper-crack' },
+    reliquary: { positive: 'reliquary-seal', neutral: 'dust-settle', negative: 'ossuary-crack' },
   };
   private shakeTime = 0;
   private shakeDuration = 0;
@@ -451,12 +575,15 @@ export class DraftrollEffects {
   }
 
   setQuality(config: EffectQualityConfig): void {
-    if (config.particleScale !== undefined) this.particleScale = THREE.MathUtils.clamp(config.particleScale, 0.2, 1);
-    if (config.motifScale !== undefined) this.motifScale = THREE.MathUtils.clamp(config.motifScale, 0.25, 1);
-    if (config.lightningScale !== undefined) this.lightningScale = THREE.MathUtils.clamp(config.lightningScale, 0.25, 1);
-    if (config.maxDynamicLights !== undefined) this.maxDynamicLights = THREE.MathUtils.clamp(Math.round(config.maxDynamicLights), 0, 12);
+    if (config.particleScale !== undefined)
+      this.particleScale = THREE.MathUtils.clamp(config.particleScale, 0.2, 1);
+    if (config.motifScale !== undefined)
+      this.motifScale = THREE.MathUtils.clamp(config.motifScale, 0.25, 1);
+    if (config.lightningScale !== undefined)
+      this.lightningScale = THREE.MathUtils.clamp(config.lightningScale, 0.25, 1);
+    if (config.maxDynamicLights !== undefined)
+      this.maxDynamicLights = THREE.MathUtils.clamp(Math.round(config.maxDynamicLights), 0, 12);
   }
-
 
   beginBatch(): void {
     this.batching = true;
@@ -478,44 +605,152 @@ export class DraftrollEffects {
 
   impact(position: THREE.Vector3, color: number, strength: number): void {
     if (strength < 3.2) return;
-    this.createParticleBurst(position.clone().setY(0.08), color, Math.min(12, 3 + Math.floor(strength)), 0.35, 1.2, 1.1, 0.045);
+    this.createParticleBurst(
+      position.clone().setY(0.08),
+      color,
+      Math.min(12, 3 + Math.floor(strength)),
+      0.35,
+      1.2,
+      1.1,
+      0.045,
+    );
   }
 
-  playOutcome(theme: ThemeName, outcome: EffectOutcome, position: THREE.Vector3, options: OutcomeEffectOptions): void {
+  playOutcome(
+    theme: ThemeName,
+    outcome: EffectOutcome,
+    position: THREE.Vector3,
+    options: OutcomeEffectOptions,
+  ): void {
     if (outcome === 'none') return;
     const preset = this.themeEffects[theme][outcome];
     const color = THEMES[theme].particle;
     switch (preset) {
-      case 'dragon-awaken': this.dragonAwaken(position, options); break;
-      case 'dragon-embers': this.dragonEmbers(position); break;
-      case 'dragon-cinders': this.dragonCinders(position); break;
-      case 'void-rift': this.voidRift(position, options.hero !== false); break;
-      case 'stardust-orbit': this.stardustOrbit(position); break;
-      case 'void-collapse': this.voidCollapse(position); break;
-      case 'phoenix-flare': this.phoenixFlare(position, options.hero !== false); break;
-      case 'ember-drift': this.emberDrift(position); break;
-      case 'ash-collapse': this.ashCollapse(position); break;
-      case 'ice-crown': this.iceCrown(position, options.hero !== false); break;
-      case 'snow-orbit': this.snowOrbit(position); break;
-      case 'ice-shatter': this.iceShatter(position); break;
-      case 'solar-ascension': this.solarAscension(position, options.hero !== false); break;
-      case 'star-halo': this.starHalo(position); break;
-      case 'eclipse-collapse': this.eclipseCollapse(position); break;
-      case 'thunder-strike': this.thunderStrike(position, options.hero !== false); break;
-      case 'static-crown': this.staticCrown(position); break;
-      case 'storm-fizzle': this.stormFizzle(position); break;
-      case 'soul-reaper': this.soulReaper(position, options.hero !== false); break;
-      case 'grave-wisp': this.graveWisp(position); break;
-      case 'soul-collapse': this.soulCollapse(position); break;
-      case 'verdant-bloom': this.verdantBloom(position, options.hero !== false); break;
-      case 'firefly-orbit': this.fireflyOrbit(position); break;
-      case 'thorn-bind': this.thornBind(position); break;
-      case 'major-burst': this.majorBurst(position, color, options.hero !== false); break;
-      case 'subtle-pulse': this.subtlePulse(position, color); break;
-      case 'frost-fracture': this.failureTinted(position, 0x64cfff, 0x123d6b); break;
-      case 'ember-fracture': this.failureTinted(position, 0xff4b25, 0x5c0a05); break;
-      case 'void-fracture': this.failureTinted(position, 0xbb68ff, 0x1c062e); break;
-      case 'none': break;
+      case 'dragon-awaken':
+        this.dragonAwaken(position, options);
+        break;
+      case 'dragon-embers':
+        this.dragonEmbers(position);
+        break;
+      case 'dragon-cinders':
+        this.dragonCinders(position);
+        break;
+      case 'void-rift':
+        this.voidRift(position, options.hero !== false);
+        break;
+      case 'stardust-orbit':
+        this.stardustOrbit(position);
+        break;
+      case 'void-collapse':
+        this.voidCollapse(position);
+        break;
+      case 'phoenix-flare':
+        this.phoenixFlare(position, options.hero !== false);
+        break;
+      case 'ember-drift':
+        this.emberDrift(position);
+        break;
+      case 'ash-collapse':
+        this.ashCollapse(position);
+        break;
+      case 'ice-crown':
+        this.iceCrown(position, options.hero !== false);
+        break;
+      case 'snow-orbit':
+        this.snowOrbit(position);
+        break;
+      case 'ice-shatter':
+        this.iceShatter(position);
+        break;
+      case 'solar-ascension':
+        this.solarAscension(position, options.hero !== false);
+        break;
+      case 'star-halo':
+        this.starHalo(position);
+        break;
+      case 'eclipse-collapse':
+        this.eclipseCollapse(position);
+        break;
+      case 'thunder-strike':
+        this.thunderStrike(position, options.hero !== false);
+        break;
+      case 'static-crown':
+        this.staticCrown(position);
+        break;
+      case 'storm-fizzle':
+        this.stormFizzle(position);
+        break;
+      case 'soul-reaper':
+        this.soulReaper(position, options.hero !== false);
+        break;
+      case 'grave-wisp':
+        this.graveWisp(position);
+        break;
+      case 'soul-collapse':
+        this.soulCollapse(position);
+        break;
+      case 'verdant-bloom':
+        this.verdantBloom(position, options.hero !== false);
+        break;
+      case 'firefly-orbit':
+        this.fireflyOrbit(position);
+        break;
+      case 'thorn-bind':
+        this.thornBind(position);
+        break;
+      case 'escapement-lock':
+        this.escapementLock(position, options.hero !== false);
+        break;
+      case 'gear-tick':
+        this.gearTick(position);
+        break;
+      case 'mainspring-snap':
+        this.mainspringSnap(position);
+        break;
+      case 'facet-bloom':
+        this.facetBloom(position, options.hero !== false);
+        break;
+      case 'vein-glimmer':
+        this.veinGlimmer(position);
+        break;
+      case 'conchoidal-break':
+        this.conchoidalBreak(position);
+        break;
+      case 'quench-strike':
+        this.quenchStrike(position, options.hero !== false);
+        break;
+      case 'anvil-spark':
+        this.anvilSpark(position);
+        break;
+      case 'temper-crack':
+        this.temperCrack(position);
+        break;
+      case 'reliquary-seal':
+        this.reliquarySeal(position, options.hero !== false);
+        break;
+      case 'dust-settle':
+        this.dustSettle(position);
+        break;
+      case 'ossuary-crack':
+        this.ossuaryCrack(position);
+        break;
+      case 'major-burst':
+        this.majorBurst(position, color, options.hero !== false);
+        break;
+      case 'subtle-pulse':
+        this.subtlePulse(position, color);
+        break;
+      case 'frost-fracture':
+        this.failureTinted(position, 0x64cfff, 0x123d6b);
+        break;
+      case 'ember-fracture':
+        this.failureTinted(position, 0xff4b25, 0x5c0a05);
+        break;
+      case 'void-fracture':
+        this.failureTinted(position, 0xbb68ff, 0x1c062e);
+        break;
+      case 'none':
+        break;
     }
   }
 
@@ -524,7 +759,15 @@ export class DraftrollEffects {
     this.createRune(position, 0xff9e48, 3.9, 1.7, 0.48);
     this.createRing(position, 0xff7b2c, 0.26, 4.8, 1.35, 0.18);
     this.createRing(position, 0xffc36f, 0.55, 3.8, 1.6, -0.1);
-    this.createParticleBurst(position.clone().add(new THREE.Vector3(0, 0.22, 0)), 0xffa34f, 150, 1.8, 5.4, 1.6, 0.075);
+    this.createParticleBurst(
+      position.clone().add(new THREE.Vector3(0, 0.22, 0)),
+      0xffa34f,
+      150,
+      1.8,
+      5.4,
+      1.6,
+      0.075,
+    );
     if (options.kind === 'd20' && options.hero !== false) this.spawnDragon(position.clone());
     else this.createSpikeCrown(position, 0xff9c45, 12, 1.45, 0.75, 1.15);
     this.createLight(position, 0xff7a2d, 7, 1.4);
@@ -534,7 +777,15 @@ export class DraftrollEffects {
 
   private dragonEmbers(position: THREE.Vector3): void {
     this.createOrbitingMotifs(position, 0xff9a45, 14, 0.88, 'orb', 0.6, 1.25, 1.8);
-    this.createParticleBurst(position.clone().add(new THREE.Vector3(0, 0.12, 0)), 0xff8b36, 22, 0.82, 1.45, 0.7, 0.045);
+    this.createParticleBurst(
+      position.clone().add(new THREE.Vector3(0, 0.12, 0)),
+      0xff8b36,
+      22,
+      0.82,
+      1.45,
+      0.7,
+      0.045,
+    );
     this.createRing(position, 0xffad58, 0.3, 1.5, 0.72);
   }
 
@@ -552,8 +803,25 @@ export class DraftrollEffects {
     this.createDarkDisk(position, 0x05020b, 1.7, hero ? 1.65 : 1.15, false);
     this.createRing(position, 0xd8b6ff, 0.22, hero ? 4.6 : 3.2, 1.35, 1.4);
     this.createRing(position, 0x5dc6ff, 0.5, hero ? 3.5 : 2.5, 1.55, -1.2);
-    this.createOrbitingMotifs(position, 0xe5c8ff, hero ? 38 : 24, 1.75, 'star', 0.7, hero ? 2.5 : 1.8, 4.6);
-    this.createParticleBurst(position.clone().setY(0.25), 0xb066ff, hero ? 112 : 68, 1.55, 4.2, 0.2, 0.058);
+    this.createOrbitingMotifs(
+      position,
+      0xe5c8ff,
+      hero ? 38 : 24,
+      1.75,
+      'star',
+      0.7,
+      hero ? 2.5 : 1.8,
+      4.6,
+    );
+    this.createParticleBurst(
+      position.clone().setY(0.25),
+      0xb066ff,
+      hero ? 112 : 68,
+      1.55,
+      4.2,
+      0.2,
+      0.058,
+    );
     this.createLight(position, 0x7f39ff, 5.5, 1.25);
     this.shake(0.72, 0.13);
     this.bloomKick = Math.max(this.bloomKick, 0.52);
@@ -580,8 +848,24 @@ export class DraftrollEffects {
     this.createRune(position, 0xffbd62, hero ? 3.4 : 2.5, 1.4, 0.35);
     this.createRing(position, 0xff7a28, 0.28, hero ? 4.3 : 3.0, 1.1);
     this.createFlameWings(position, hero ? 1.8 : 1.25);
-    this.createParticleBurst(position.clone().setY(0.2), 0xffa23e, hero ? 145 : 82, 1.55, 5.6, 1.1, 0.075);
-    this.createParticleBurst(position.clone().setY(0.25), 0xffe08c, hero ? 70 : 36, 1.1, 4.3, 0.4, 0.055);
+    this.createParticleBurst(
+      position.clone().setY(0.2),
+      0xffa23e,
+      hero ? 145 : 82,
+      1.55,
+      5.6,
+      1.1,
+      0.075,
+    );
+    this.createParticleBurst(
+      position.clone().setY(0.25),
+      0xffe08c,
+      hero ? 70 : 36,
+      1.1,
+      4.3,
+      0.4,
+      0.055,
+    );
     this.createLight(position, 0xff6a1e, 6.8, 1.15);
     this.shake(0.72, 0.15);
     this.bloomKick = Math.max(this.bloomKick, 0.58);
@@ -605,9 +889,33 @@ export class DraftrollEffects {
   private iceCrown(position: THREE.Vector3, hero: boolean): void {
     this.triggerFlash('success');
     this.createRing(position, 0xb9f7ff, 0.24, hero ? 4.2 : 3.0, 1.25, 0.18);
-    this.createSpikeCrown(position, 0x9beaff, hero ? 18 : 12, 1.65, hero ? 1.18 : 0.82, hero ? 1.8 : 1.3);
-    this.createOrbitingMotifs(position, 0xe6fdff, hero ? 34 : 20, 1.55, 'shard', 0.6, hero ? 2.0 : 1.5, 2.4);
-    this.createParticleBurst(position.clone().setY(0.18), 0x9defff, hero ? 92 : 56, 1.4, 3.8, 2.8, 0.055);
+    this.createSpikeCrown(
+      position,
+      0x9beaff,
+      hero ? 18 : 12,
+      1.65,
+      hero ? 1.18 : 0.82,
+      hero ? 1.8 : 1.3,
+    );
+    this.createOrbitingMotifs(
+      position,
+      0xe6fdff,
+      hero ? 34 : 20,
+      1.55,
+      'shard',
+      0.6,
+      hero ? 2.0 : 1.5,
+      2.4,
+    );
+    this.createParticleBurst(
+      position.clone().setY(0.18),
+      0x9defff,
+      hero ? 92 : 56,
+      1.4,
+      3.8,
+      2.8,
+      0.055,
+    );
     this.createLight(position, 0x77ddff, 5.5, 1.1);
     this.shake(0.62, 0.12);
     this.bloomKick = Math.max(this.bloomKick, 0.46);
@@ -633,7 +941,16 @@ export class DraftrollEffects {
     this.triggerFlash('success');
     this.createRune(position, 0xffd978, hero ? 3.7 : 2.7, 1.55, 0.28);
     this.createHaloBeams(position, 0xffe39a, hero ? 18 : 12, 1.5, hero ? 2.4 : 1.7);
-    this.createOrbitingMotifs(position, 0xfff1bd, hero ? 28 : 18, 1.5, 'star', 0.65, hero ? 2.1 : 1.55, 2.2);
+    this.createOrbitingMotifs(
+      position,
+      0xfff1bd,
+      hero ? 28 : 18,
+      1.5,
+      'star',
+      0.65,
+      hero ? 2.1 : 1.55,
+      2.2,
+    );
     this.createRing(position, 0xffd15b, 0.35, hero ? 4.5 : 3.2, 1.28, 0.42);
     this.createLight(position, 0xffc74e, 7.5, 1.25);
     this.shake(0.55, 0.09);
@@ -661,7 +978,15 @@ export class DraftrollEffects {
     this.createStormStrike(position, hero ? 14 : 9, hero ? 1.35 : 0.95);
     this.createRing(position, 0xaeeeff, 0.18, hero ? 5.0 : 3.4, 0.92, 0.1);
     this.createRing(position, 0x4cc8ff, 0.4, hero ? 3.7 : 2.6, 1.2, -0.2);
-    this.createParticleBurst(position.clone().setY(0.18), 0x7edcff, hero ? 120 : 72, 1.12, 5.2, 3.4, 0.058);
+    this.createParticleBurst(
+      position.clone().setY(0.18),
+      0x7edcff,
+      hero ? 120 : 72,
+      1.12,
+      5.2,
+      3.4,
+      0.058,
+    );
     this.createLight(position, 0x72d8ff, 9.5, 0.72);
     this.shake(0.82, 0.22);
     this.bloomKick = Math.max(this.bloomKick, 0.68);
@@ -686,8 +1011,25 @@ export class DraftrollEffects {
     this.triggerFlash('success');
     this.createRune(position, 0x98ec65, hero ? 3.5 : 2.6, 1.55, -0.42);
     this.createWraith(position, hero ? 1.55 : 1.1);
-    this.createOrbitingMotifs(position, 0xb1ff7b, hero ? 28 : 18, 1.65, 'bone', 0.55, hero ? 2.0 : 1.45, 3.0);
-    this.createParticleBurst(position.clone().setY(0.22), 0x8ee85c, hero ? 100 : 62, 1.45, 3.6, 0.8, 0.055);
+    this.createOrbitingMotifs(
+      position,
+      0xb1ff7b,
+      hero ? 28 : 18,
+      1.65,
+      'bone',
+      0.55,
+      hero ? 2.0 : 1.45,
+      3.0,
+    );
+    this.createParticleBurst(
+      position.clone().setY(0.22),
+      0x8ee85c,
+      hero ? 100 : 62,
+      1.45,
+      3.6,
+      0.8,
+      0.055,
+    );
     this.createRing(position, 0x6fc844, 0.3, hero ? 4.1 : 3.0, 1.24, -0.7);
     this.createLight(position, 0x72d94a, 5.5, 1.1);
     this.shake(0.7, 0.13);
@@ -714,9 +1056,26 @@ export class DraftrollEffects {
     this.triggerFlash('success');
     this.createRune(position, 0xb7f57c, hero ? 3.5 : 2.6, 1.55, 0.22);
     this.createLeafBloom(position, hero ? 32 : 20, hero ? 1.65 : 1.2);
-    this.createOrbitingMotifs(position, 0xd5ff9c, hero ? 24 : 16, 1.5, 'leaf', 0.45, hero ? 2.0 : 1.45, 1.8);
+    this.createOrbitingMotifs(
+      position,
+      0xd5ff9c,
+      hero ? 24 : 16,
+      1.5,
+      'leaf',
+      0.45,
+      hero ? 2.0 : 1.45,
+      1.8,
+    );
     this.createRing(position, 0x99d968, 0.25, hero ? 4.0 : 2.9, 1.2, 0.4);
-    this.createParticleBurst(position.clone().setY(0.14), 0xb7f57c, hero ? 76 : 48, 1.3, 3.0, 1.4, 0.048);
+    this.createParticleBurst(
+      position.clone().setY(0.14),
+      0xb7f57c,
+      hero ? 76 : 48,
+      1.3,
+      3.0,
+      1.4,
+      0.048,
+    );
     this.createLight(position, 0x8cd557, 4.5, 1.0);
     this.shake(0.52, 0.08);
     this.bloomKick = Math.max(this.bloomKick, 0.36);
@@ -737,11 +1096,172 @@ export class DraftrollEffects {
     this.shake(0.48, 0.09);
   }
 
+  // The material themes below intentionally run tighter than the arcane presets:
+  // sparks obey gravity, rings stay close to the die, and neutral rolls never shake
+  // the camera or kick bloom. The die stays the subject instead of the explosion.
+
+  private escapementLock(position: THREE.Vector3, hero: boolean): void {
+    this.triggerFlash('success');
+    // Concentric rings snap outward in stepped beats, like an escapement releasing.
+    this.createRing(position, 0xf0c674, 0.3, hero ? 2.9 : 2.2, 0.5, 0.9);
+    this.createRing(position, 0xffe6ad, 0.22, hero ? 2.0 : 1.55, 0.72, -1.6);
+    this.createOrbitingMotifs(position, 0xf3cd82, hero ? 16 : 10, 0.85, 'shard', 0.85, 1.3, 2.6);
+    this.createParticleBurst(
+      position.clone().setY(0.16),
+      0xffd98f,
+      hero ? 46 : 28,
+      0.6,
+      2.4,
+      6.4,
+      0.038,
+    );
+    this.createLight(position, 0xffc061, hero ? 3.4 : 2.2, 0.42);
+    if (hero) this.shake(0.22, 0.05);
+    this.bloomKick = Math.max(this.bloomKick, hero ? 0.2 : 0.12);
+  }
+
+  private gearTick(position: THREE.Vector3): void {
+    this.createRing(position, 0xd9ab5e, 0.28, 1.15, 0.4, 1.9);
+    this.createOrbitingMotifs(position, 0xe8b455, 7, 0.6, 'shard', 0.7, 0.92, 2.2);
+    this.createParticleBurst(position.clone().setY(0.1), 0xf0c674, 10, 0.42, 1.1, 7.0, 0.03);
+  }
+
+  private mainspringSnap(position: THREE.Vector3): void {
+    this.triggerFlash('failure');
+    // A spring letting go: one hard outward ring, then debris that drops fast.
+    this.createRing(position, 0x8a5a22, 0.24, 2.6, 0.5, -3.4);
+    this.createOrbitingMotifs(position, 0x6b4519, 14, 0.72, 'shard', 0.5, 1.5, -5.4);
+    this.createParticleBurst(position.clone().setY(0.12), 0xb9822f, 40, 0.66, 2.7, 8.2, 0.036);
+    this.createLight(position, 0xb07a2c, 2.0, 0.3);
+    this.shake(0.26, 0.06);
+  }
+
+  private facetBloom(position: THREE.Vector3, hero: boolean): void {
+    this.triggerFlash('success');
+    // Light catching along fracture planes rather than a burst of energy.
+    this.createSpikeCrown(position, 0x7ff0dc, hero ? 10 : 7, 0.9, hero ? 0.72 : 0.52, 0.92);
+    this.createRing(position, 0x7ff0dc, 0.26, hero ? 2.8 : 2.1, 0.62, 0.5);
+    this.createOrbitingMotifs(position, 0xbafff2, hero ? 18 : 11, 1.0, 'shard', 0.6, 1.35, 1.7);
+    this.createParticleBurst(
+      position.clone().setY(0.14),
+      0x6fe6cf,
+      hero ? 40 : 24,
+      0.8,
+      2.1,
+      3.4,
+      0.036,
+    );
+    this.createLight(position, 0x4fd8c0, hero ? 3.2 : 2.0, 0.5);
+    this.bloomKick = Math.max(this.bloomKick, hero ? 0.22 : 0.12);
+  }
+
+  private veinGlimmer(position: THREE.Vector3): void {
+    this.createOrbitingMotifs(position, 0x7ff0dc, 9, 0.78, 'shard', 0.62, 0.95, 1.4);
+    this.createRing(position, 0x4fd8c0, 0.2, 1.2, 0.5, 0.6);
+    this.createParticleBurst(position.clone().setY(0.1), 0xbafff2, 12, 0.5, 0.9, 2.2, 0.028);
+  }
+
+  private conchoidalBreak(position: THREE.Vector3): void {
+    this.triggerFlash('failure');
+    // Glassy stone shears into flat plates that scatter low and land hard.
+    this.createOrbitingMotifs(position, 0x2b2740, 16, 0.66, 'shard', 0.42, 1.6, -3.0);
+    this.createRing(position, 0x1d3b39, 0.22, 2.3, 0.46, -1.1);
+    this.createParticleBurst(position.clone().setY(0.11), 0x4a4668, 44, 0.6, 2.6, 9.0, 0.034);
+    this.createLight(position, 0x2f8c7e, 1.8, 0.26);
+    this.shake(0.24, 0.06);
+  }
+
+  private quenchStrike(position: THREE.Vector3, hero: boolean): void {
+    this.triggerFlash('success');
+    // Hot steel hitting the quench: a flat shock ring and a sheet of sparks.
+    this.createRing(position, 0xc3ccd6, 0.2, hero ? 3.4 : 2.5, 0.42, 0.2);
+    this.createRing(position, 0xffd9a8, 0.3, hero ? 2.2 : 1.7, 0.6, -0.5);
+    this.createParticleBurst(
+      position.clone().setY(0.15),
+      0xffc98a,
+      hero ? 64 : 38,
+      0.72,
+      3.4,
+      9.5,
+      0.034,
+    );
+    this.createParticleBurst(
+      position.clone().setY(0.2),
+      0xdfeaf6,
+      hero ? 26 : 16,
+      0.9,
+      1.8,
+      2.2,
+      0.03,
+    );
+    this.createLight(position, 0xd8e4f0, hero ? 3.6 : 2.4, 0.4);
+    if (hero) this.shake(0.24, 0.06);
+    this.bloomKick = Math.max(this.bloomKick, hero ? 0.24 : 0.12);
+  }
+
+  private anvilSpark(position: THREE.Vector3): void {
+    this.createParticleBurst(position.clone().setY(0.12), 0xffc98a, 14, 0.44, 1.7, 9.0, 0.03);
+    this.createRing(position, 0xb8c6d4, 0.22, 1.1, 0.38, 0.4);
+    this.createOrbitingMotifs(position, 0xc3ccd6, 6, 0.54, 'shard', 0.62, 0.86, 1.6);
+  }
+
+  private temperCrack(position: THREE.Vector3): void {
+    this.triggerFlash('failure');
+    // A brittle temper failure: one dull ring, grey scale flaking off, no glow.
+    this.createRing(position, 0x5c646e, 1.8, 0.26, 0.52, -1.0);
+    this.createOrbitingMotifs(position, 0x3a4048, 15, 0.7, 'shard', 0.48, 1.45, -4.2);
+    this.createParticleBurst(position.clone().setY(0.1), 0x6b737d, 38, 0.62, 2.2, 8.6, 0.032);
+    this.createLight(position, 0x8592a0, 1.5, 0.26);
+    this.shake(0.22, 0.05);
+  }
+
+  private reliquarySeal(position: THREE.Vector3, hero: boolean): void {
+    this.triggerFlash('success');
+    // A slow, ceremonial seal: warm rune, steady halo, almost no scatter.
+    this.createRune(position, 0xc9a86e, hero ? 2.6 : 2.0, 1.15, 0.22);
+    this.createRing(position, 0xd8cbab, 0.3, hero ? 2.7 : 2.0, 0.85, 0.3);
+    this.createHaloBeams(position, 0xe4d6b4, hero ? 12 : 8, 1.05, hero ? 1.5 : 1.1);
+    this.createParticleBurst(
+      position.clone().setY(0.14),
+      0xe4d6b4,
+      hero ? 32 : 20,
+      1.0,
+      1.5,
+      1.6,
+      0.034,
+    );
+    this.createLight(position, 0xd0b57e, hero ? 2.8 : 1.9, 0.6);
+    this.bloomKick = Math.max(this.bloomKick, hero ? 0.18 : 0.1);
+  }
+
+  private dustSettle(position: THREE.Vector3): void {
+    this.createParticleBurst(position.clone().setY(0.12), 0xd8cbab, 16, 0.95, 0.8, 1.1, 0.03);
+    this.createRing(position, 0x8c6a3f, 0.24, 1.1, 0.55, 0.3);
+    this.createOrbitingMotifs(position, 0xc9a86e, 7, 0.8, 'bone', 0.6, 0.9, 1.0);
+  }
+
+  private ossuaryCrack(position: THREE.Vector3): void {
+    this.triggerFlash('failure');
+    // Bone splintering: dry fragments, a settling dust cloud, no light bloom.
+    this.createOrbitingMotifs(position, 0x8c6a3f, 14, 0.78, 'bone', 0.45, 1.4, -2.6);
+    this.createRing(position, 0x6d5330, 1.7, 0.24, 0.6, -0.9);
+    this.createParticleBurst(position.clone().setY(0.11), 0xb8a781, 36, 0.85, 1.9, 6.2, 0.034);
+    this.shake(0.2, 0.05);
+  }
+
   private majorBurst(position: THREE.Vector3, color: number, major: boolean): void {
     this.triggerFlash('success');
     this.createRune(position, color, major ? 3.2 : 2.2, major ? 1.45 : 1.0);
     this.createRing(position, color, 0.25, major ? 4.4 : 2.9, major ? 1.1 : 0.8);
-    this.createParticleBurst(position.clone().add(new THREE.Vector3(0, 0.32, 0)), color, major ? 110 : 58, major ? 1.45 : 1.0, major ? 4.8 : 3.2, 2.1, major ? 0.06 : 0.05);
+    this.createParticleBurst(
+      position.clone().add(new THREE.Vector3(0, 0.32, 0)),
+      color,
+      major ? 110 : 58,
+      major ? 1.45 : 1.0,
+      major ? 4.8 : 3.2,
+      2.1,
+      major ? 0.06 : 0.05,
+    );
     this.createLight(position, color, major ? 7 : 3.8, major ? 1.0 : 0.7);
     this.shake(major ? 0.62 : 0.32, major ? 0.14 : 0.07);
     this.bloomKick = Math.max(this.bloomKick, major ? 0.55 : 0.28);
@@ -749,7 +1269,15 @@ export class DraftrollEffects {
 
   private subtlePulse(position: THREE.Vector3, color: number): void {
     this.createRing(position, color, 0.22, 1.8, 0.72);
-    this.createParticleBurst(position.clone().add(new THREE.Vector3(0, 0.16, 0)), color, 24, 0.7, 1.65, 1.6, 0.042);
+    this.createParticleBurst(
+      position.clone().add(new THREE.Vector3(0, 0.16, 0)),
+      color,
+      24,
+      0.7,
+      1.65,
+      1.6,
+      0.042,
+    );
     this.createLight(position, color, 1.5, 0.42);
     this.bloomKick = Math.max(this.bloomKick, 0.08);
   }
@@ -759,7 +1287,15 @@ export class DraftrollEffects {
     this.createRune(position, primary, 2.45, 1.08, -0.8);
     this.createRing(position, primary, 0.18, 3.2, 0.9);
     this.createRing(position, secondary, 0.4, 4.0, 1.15, -0.1);
-    this.createParticleBurst(position.clone().add(new THREE.Vector3(0, 0.18, 0)), primary, 68, 1.05, 3.4, 3.8, 0.052);
+    this.createParticleBurst(
+      position.clone().add(new THREE.Vector3(0, 0.18, 0)),
+      primary,
+      68,
+      1.05,
+      3.4,
+      3.8,
+      0.052,
+    );
     this.createLight(position, primary, 4.2, 0.78);
     this.shake(0.52, 0.12);
   }
@@ -793,7 +1329,11 @@ export class DraftrollEffects {
     }
     const envelope = this.shakeTime / this.shakeDuration;
     const power = this.shakePower * envelope * envelope;
-    this.cameraOffset.position.set((Math.random() - 0.5) * power, (Math.random() - 0.5) * power * 0.65, (Math.random() - 0.5) * power);
+    this.cameraOffset.position.set(
+      (Math.random() - 0.5) * power,
+      (Math.random() - 0.5) * power * 0.65,
+      (Math.random() - 0.5) * power,
+    );
     this.cameraOffset.roll = (Math.random() - 0.5) * power * 0.06;
     return this.cameraOffset;
   }
@@ -803,7 +1343,8 @@ export class DraftrollEffects {
     for (const request of this.pendingParticles) {
       const key = `${request.color}:${request.duration}:${request.speed}:${request.gravity}:${request.size}`;
       const group = groups.get(key);
-      if (group) group.push(request); else groups.set(key, [request]);
+      if (group) group.push(request);
+      else groups.set(key, [request]);
     }
     this.pendingParticles.length = 0;
     groups.forEach((requests) => this.spawnParticleBurstBatch(requests));
@@ -814,7 +1355,8 @@ export class DraftrollEffects {
     for (const request of this.pendingRings) {
       const key = `${request.color}:${request.startScale}:${request.endScale}:${request.duration}:${request.spin}`;
       const group = groups.get(key);
-      if (group) group.push(request); else groups.set(key, [request]);
+      if (group) group.push(request);
+      else groups.set(key, [request]);
     }
     this.pendingRings.length = 0;
     groups.forEach((requests) => this.spawnRingBatch(requests));
@@ -825,7 +1367,8 @@ export class DraftrollEffects {
     for (const request of this.pendingMotifs) {
       const key = `${request.color}:${request.count}:${request.duration}:${request.motif}:${request.radiusStart}:${request.radiusEnd}:${request.speed}`;
       const group = groups.get(key);
-      if (group) group.push(request); else groups.set(key, [request]);
+      if (group) group.push(request);
+      else groups.set(key, [request]);
     }
     this.pendingMotifs.length = 0;
     groups.forEach((requests) => this.spawnOrbitingMotifBatch(requests));
@@ -836,16 +1379,24 @@ export class DraftrollEffects {
     for (const request of this.pendingLights) {
       const key = `${request.color}:${request.peak}:${request.duration}`;
       const group = groups.get(key);
-      if (group) group.push(request); else groups.set(key, [request]);
+      if (group) group.push(request);
+      else groups.set(key, [request]);
     }
     this.pendingLights.length = 0;
     groups.forEach((requests) => {
       const chunkSize = 5;
       for (let start = 0; start < requests.length; start += chunkSize) {
         const chunk = requests.slice(start, start + chunkSize);
-        const position = chunk.reduce((sum, request) => sum.add(request.position), new THREE.Vector3()).multiplyScalar(1 / chunk.length);
+        const position = chunk
+          .reduce((sum, request) => sum.add(request.position), new THREE.Vector3())
+          .multiplyScalar(1 / chunk.length);
         const first = chunk[0];
-        this.spawnLight(position, first.color, first.peak * Math.min(1.85, Math.sqrt(chunk.length)), first.duration);
+        this.spawnLight(
+          position,
+          first.color,
+          first.peak * Math.min(1.85, Math.sqrt(chunk.length)),
+          first.duration,
+        );
       }
     });
   }
@@ -855,15 +1406,32 @@ export class DraftrollEffects {
     for (const request of this.pendingLightning) {
       const key = `${request.color}:${request.duration}`;
       const group = groups.get(key);
-      if (group) group.push(request); else groups.set(key, [request]);
+      if (group) group.push(request);
+      else groups.set(key, [request]);
     }
     this.pendingLightning.length = 0;
     groups.forEach((requests) => this.spawnLightningBatch(requests));
   }
 
-  private createParticleBurst(position: THREE.Vector3, color: number, count: number, duration: number, speed: number, gravity: number, size: number): void {
+  private createParticleBurst(
+    position: THREE.Vector3,
+    color: number,
+    count: number,
+    duration: number,
+    speed: number,
+    gravity: number,
+    size: number,
+  ): void {
     const scaledCount = Math.max(count >= 20 ? 4 : 1, Math.round(count * this.particleScale));
-    const request: ParticleBurstRequest = { position: position.clone(), color, count: scaledCount, duration, speed, gravity, size };
+    const request: ParticleBurstRequest = {
+      position: position.clone(),
+      color,
+      count: scaledCount,
+      duration,
+      speed,
+      gravity,
+      size,
+    };
     if (this.batching) {
       this.pendingParticles.push(request);
       return;
@@ -894,14 +1462,38 @@ export class DraftrollEffects {
     }
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    const material = new THREE.PointsMaterial({ color: first.color, size: first.size, sizeAttenuation: true, transparent: true, opacity: 0.95, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false, map: this.softTexture, alphaTest: 0.01 });
+    const material = new THREE.PointsMaterial({
+      color: first.color,
+      size: first.size,
+      sizeAttenuation: true,
+      transparent: true,
+      opacity: 0.95,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      toneMapped: false,
+      map: this.softTexture,
+      alphaTest: 0.01,
+    });
     const points = new THREE.Points(geometry, material);
     points.renderOrder = 10;
     this.scene.add(points);
-    this.bursts.push({ points, velocities, life: first.duration, duration: first.duration, gravity: first.gravity });
+    this.bursts.push({
+      points,
+      velocities,
+      life: first.duration,
+      duration: first.duration,
+      gravity: first.gravity,
+    });
   }
 
-  private createDirectionalBurst(position: THREE.Vector3, direction: THREE.Vector3, color: number, count: number, duration: number, speed: number): void {
+  private createDirectionalBurst(
+    position: THREE.Vector3,
+    direction: THREE.Vector3,
+    color: number,
+    count: number,
+    duration: number,
+    speed: number,
+  ): void {
     count = Math.max(4, Math.round(count * this.particleScale));
     const positions = new Float32Array(count * 3);
     const velocities = new Float32Array(count * 3);
@@ -911,7 +1503,10 @@ export class DraftrollEffects {
       const index = i * 3;
       const spreadA = (Math.random() - 0.5) * 0.28;
       const spreadB = (Math.random() - 0.5) * 0.2;
-      const spawn = position.clone().addScaledVector(side, spreadA * 0.35).add(new THREE.Vector3(0, spreadB * 0.2, 0));
+      const spawn = position
+        .clone()
+        .addScaledVector(side, spreadA * 0.35)
+        .add(new THREE.Vector3(0, spreadB * 0.2, 0));
       positions[index] = spawn.x;
       positions[index + 1] = spawn.y;
       positions[index + 2] = spawn.z;
@@ -924,21 +1519,54 @@ export class DraftrollEffects {
     }
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    const material = new THREE.PointsMaterial({ color, size: 0.11, sizeAttenuation: true, transparent: true, opacity: 0.95, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false, map: this.fireTexture, alphaTest: 0.01 });
+    const material = new THREE.PointsMaterial({
+      color,
+      size: 0.11,
+      sizeAttenuation: true,
+      transparent: true,
+      opacity: 0.95,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      toneMapped: false,
+      map: this.fireTexture,
+      alphaTest: 0.01,
+    });
     const points = new THREE.Points(geometry, material);
     points.renderOrder = 11;
     this.scene.add(points);
     this.bursts.push({ points, velocities, life: duration, duration, gravity: 1.4 });
   }
 
-  private createRing(position: THREE.Vector3, color: number, startScale: number, endScale: number, duration: number, spin = 0.1): void {
-    const request: RingBatchRequest = { position: position.clone().setY(0.035), color, startScale, endScale, duration, spin };
+  private createRing(
+    position: THREE.Vector3,
+    color: number,
+    startScale: number,
+    endScale: number,
+    duration: number,
+    spin = 0.1,
+  ): void {
+    const request: RingBatchRequest = {
+      position: position.clone().setY(0.035),
+      color,
+      startScale,
+      endScale,
+      duration,
+      spin,
+    };
     if (this.batching) {
       this.pendingRings.push(request);
       return;
     }
     const geometry = new THREE.RingGeometry(0.78, 0.84, 72);
-    const material = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.7, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, toneMapped: false });
+    const material = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.7,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      toneMapped: false,
+    });
     const mesh = new THREE.Mesh(geometry, material);
     mesh.rotation.x = -Math.PI / 2;
     mesh.position.copy(request.position);
@@ -952,7 +1580,15 @@ export class DraftrollEffects {
     if (requests.length === 0) return;
     const first = requests[0];
     const geometry = new THREE.RingGeometry(0.78, 0.84, 72);
-    const material = new THREE.MeshBasicMaterial({ color: first.color, transparent: true, opacity: 0.7, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, toneMapped: false });
+    const material = new THREE.MeshBasicMaterial({
+      color: first.color,
+      transparent: true,
+      opacity: 0.7,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      toneMapped: false,
+    });
     const mesh = new THREE.InstancedMesh(geometry, material, requests.length);
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     mesh.renderOrder = 8;
@@ -963,12 +1599,35 @@ export class DraftrollEffects {
       centers[index * 3 + 2] = request.position.z;
     });
     this.scene.add(mesh);
-    this.ringBatches.push({ mesh, centers, life: first.duration, duration: first.duration, startScale: first.startScale, endScale: first.endScale, spin: first.spin, rotation: 0 });
+    this.ringBatches.push({
+      mesh,
+      centers,
+      life: first.duration,
+      duration: first.duration,
+      startScale: first.startScale,
+      endScale: first.endScale,
+      spin: first.spin,
+      rotation: 0,
+    });
   }
 
-  private createRune(position: THREE.Vector3, color: number, endScale: number, duration: number, spin = 0.65): void {
+  private createRune(
+    position: THREE.Vector3,
+    color: number,
+    endScale: number,
+    duration: number,
+    spin = 0.65,
+  ): void {
     const texture = createRuneTexture(`#${color.toString(16).padStart(6, '0')}`);
-    const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, opacity: 0.85, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, toneMapped: false });
+    const material = new THREE.MeshBasicMaterial({
+      map: texture,
+      transparent: true,
+      opacity: 0.85,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      toneMapped: false,
+    });
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material);
     mesh.position.copy(position).setY(0.045);
     mesh.rotation.x = -Math.PI / 2;
@@ -978,9 +1637,19 @@ export class DraftrollEffects {
     this.meshes.push({ mesh, life: duration, duration, startScale: 0.2, endScale, spin });
   }
 
-  private createLightning(position: THREE.Vector3, color: number, count: number, duration: number): void {
+  private createLightning(
+    position: THREE.Vector3,
+    color: number,
+    count: number,
+    duration: number,
+  ): void {
     const scaledCount = Math.max(1, Math.round(count * this.lightningScale));
-    const request: LightningBatchRequest = { position: position.clone(), color, count: scaledCount, duration };
+    const request: LightningBatchRequest = {
+      position: position.clone(),
+      color,
+      count: scaledCount,
+      duration,
+    };
     if (this.batching) {
       this.pendingLightning.push(request);
       return;
@@ -1013,15 +1682,31 @@ export class DraftrollEffects {
     }
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    const material = new THREE.LineBasicMaterial({ color: first.color, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, toneMapped: false });
+    const material = new THREE.LineBasicMaterial({
+      color: first.color,
+      transparent: true,
+      opacity: 0.8,
+      blending: THREE.AdditiveBlending,
+      toneMapped: false,
+    });
     const line = new THREE.LineSegments(geometry, material);
     line.renderOrder = 9;
     this.scene.add(line);
     this.lines.push({ line, life: first.duration, duration: first.duration });
   }
 
-  private createLight(position: THREE.Vector3, color: number, peak: number, duration: number): void {
-    const request: LightBatchRequest = { position: position.clone().setY(0.45), color, peak, duration };
+  private createLight(
+    position: THREE.Vector3,
+    color: number,
+    peak: number,
+    duration: number,
+  ): void {
+    const request: LightBatchRequest = {
+      position: position.clone().setY(0.45),
+      color,
+      peak,
+      duration,
+    };
     if (this.batching) {
       this.pendingLights.push(request);
       return;
@@ -1042,9 +1727,27 @@ export class DraftrollEffects {
     this.scripts.push({ root, life: duration, duration, update });
   }
 
-  private createOrbitingMotifs(position: THREE.Vector3, color: number, count: number, duration: number, motif: MotifKind, radiusStart: number, radiusEnd: number, speed: number): void {
+  private createOrbitingMotifs(
+    position: THREE.Vector3,
+    color: number,
+    count: number,
+    duration: number,
+    motif: MotifKind,
+    radiusStart: number,
+    radiusEnd: number,
+    speed: number,
+  ): void {
     const scaledCount = Math.max(3, Math.round(count * this.motifScale));
-    const request: MotifBatchRequest = { position: position.clone().setY(0.08), color, count: scaledCount, duration, motif, radiusStart, radiusEnd, speed };
+    const request: MotifBatchRequest = {
+      position: position.clone().setY(0.08),
+      color,
+      count: scaledCount,
+      duration,
+      motif,
+      radiusStart,
+      radiusEnd,
+      speed,
+    };
     if (this.batching) {
       this.pendingMotifs.push(request);
       return;
@@ -1058,7 +1761,14 @@ export class DraftrollEffects {
     const root = new THREE.Group();
     const geometry = motifGeometry(first.motif);
     const additive = first.motif !== 'leaf' && first.motif !== 'bone';
-    const material = new THREE.MeshBasicMaterial({ color: first.color, transparent: true, opacity: 0.9, depthWrite: false, blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending, toneMapped: !additive });
+    const material = new THREE.MeshBasicMaterial({
+      color: first.color,
+      transparent: true,
+      opacity: 0.9,
+      depthWrite: false,
+      blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
+      toneMapped: !additive,
+    });
     const totalCount = requests.reduce((sum, request) => sum + request.count, 0);
     const mesh = new THREE.InstancedMesh(geometry, material, totalCount);
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -1085,7 +1795,11 @@ export class DraftrollEffects {
 
     const dummy = new THREE.Object3D();
     this.addScript(root, first.duration, (progress) => {
-      const radius = THREE.MathUtils.lerp(first.radiusStart, first.radiusEnd, 1 - Math.pow(1 - progress, 2));
+      const radius = THREE.MathUtils.lerp(
+        first.radiusStart,
+        first.radiusEnd,
+        1 - Math.pow(1 - progress, 2),
+      );
       const envelope = Math.sin(Math.PI * Math.min(1, progress));
       material.opacity = Math.max(0, envelope * 0.92);
       for (let index = 0; index < totalCount; index += 1) {
@@ -1093,7 +1807,10 @@ export class DraftrollEffects {
         const r = radius * radiusNoise[index];
         dummy.position.set(
           centers[index * 3] + Math.cos(angle) * r,
-          centers[index * 3 + 1] + 0.04 + Math.sin(phase[index] + progress * 8) * 0.12 + progress * 0.3,
+          centers[index * 3 + 1] +
+            0.04 +
+            Math.sin(phase[index] + progress * 8) * 0.12 +
+            progress * 0.3,
           centers[index * 3 + 2] + Math.sin(angle) * r,
         );
         dummy.rotation.set(progress * 5 + phase[index], angle, progress * 7);
@@ -1108,11 +1825,29 @@ export class DraftrollEffects {
     });
   }
 
-  private createSpikeCrown(position: THREE.Vector3, color: number, count: number, duration: number, height: number, radius: number, invert = false): void {
+  private createSpikeCrown(
+    position: THREE.Vector3,
+    color: number,
+    count: number,
+    duration: number,
+    height: number,
+    radius: number,
+    invert = false,
+  ): void {
     const root = new THREE.Group();
     root.position.copy(position).setY(0.03);
     const geometry = new THREE.ConeGeometry(0.08, 1, 6);
-    const material = new THREE.MeshPhysicalMaterial({ color, emissive: color, emissiveIntensity: 0.2, roughness: 0.3, metalness: 0.05, transparent: true, opacity: 0.9, clearcoat: 0.25, clearcoatRoughness: 0.3 });
+    const material = new THREE.MeshPhysicalMaterial({
+      color,
+      emissive: color,
+      emissiveIntensity: 0.2,
+      roughness: 0.3,
+      metalness: 0.05,
+      transparent: true,
+      opacity: 0.9,
+      clearcoat: 0.25,
+      clearcoatRoughness: 0.3,
+    });
     const mesh = new THREE.InstancedMesh(geometry, material, count);
     root.add(mesh);
     const dummy = new THREE.Object3D();
@@ -1134,11 +1869,24 @@ export class DraftrollEffects {
     });
   }
 
-  private createHaloBeams(position: THREE.Vector3, color: number, count: number, duration: number, radius: number): void {
+  private createHaloBeams(
+    position: THREE.Vector3,
+    color: number,
+    count: number,
+    duration: number,
+    radius: number,
+  ): void {
     const root = new THREE.Group();
     root.position.copy(position).setY(0.05);
     const geometry = new THREE.BoxGeometry(0.035, 0.025, 1);
-    const material = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false });
+    const material = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.8,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      toneMapped: false,
+    });
     const mesh = new THREE.InstancedMesh(geometry, material, count);
     root.add(mesh);
     const dummy = new THREE.Object3D();
@@ -1159,10 +1907,22 @@ export class DraftrollEffects {
     });
   }
 
-  private createDarkDisk(position: THREE.Vector3, color: number, endScale: number, duration: number, collapse: boolean): void {
+  private createDarkDisk(
+    position: THREE.Vector3,
+    color: number,
+    endScale: number,
+    duration: number,
+    collapse: boolean,
+  ): void {
     const root = new THREE.Group();
     root.position.copy(position).setY(0.025);
-    const material = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.78, depthWrite: false, side: THREE.DoubleSide });
+    const material = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.78,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
     const disk = new THREE.Mesh(new THREE.CircleGeometry(0.72, 72), material);
     disk.rotation.x = -Math.PI / 2;
     root.add(disk);
@@ -1178,7 +1938,14 @@ export class DraftrollEffects {
     this.createLightning(position, 0xc9f6ff, count, duration);
     const root = new THREE.Group();
     root.position.copy(position).setY(0.04);
-    const material = new THREE.MeshBasicMaterial({ color: 0xe9fdff, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false });
+    const material = new THREE.MeshBasicMaterial({
+      color: 0xe9fdff,
+      transparent: true,
+      opacity: 0.9,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      toneMapped: false,
+    });
     const column = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.16, 4.5, 8), material);
     column.position.y = 2.1;
     root.add(column);
@@ -1191,7 +1958,15 @@ export class DraftrollEffects {
   private createFlameWings(position: THREE.Vector3, duration: number): void {
     const root = new THREE.Group();
     root.position.copy(position).setY(0.09);
-    const material = new THREE.MeshBasicMaterial({ color: 0xff8d31, transparent: true, opacity: 0.85, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, toneMapped: false });
+    const material = new THREE.MeshBasicMaterial({
+      color: 0xff8d31,
+      transparent: true,
+      opacity: 0.85,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      toneMapped: false,
+    });
     const left = new THREE.Mesh(makeWingGeometry(), material);
     left.rotation.x = -Math.PI / 2;
     left.position.set(-0.18, 0, 0);
@@ -1216,11 +1991,29 @@ export class DraftrollEffects {
   private createWraith(position: THREE.Vector3, duration: number): void {
     const root = new THREE.Group();
     root.position.copy(position).setY(0.08);
-    const spectral = new THREE.MeshStandardMaterial({ color: 0x6dba43, emissive: 0x58c839, emissiveIntensity: 1.2, transparent: true, opacity: 0.68, roughness: 0.6, depthWrite: false });
+    const spectral = new THREE.MeshStandardMaterial({
+      color: 0x6dba43,
+      emissive: 0x58c839,
+      emissiveIntensity: 1.2,
+      transparent: true,
+      opacity: 0.68,
+      roughness: 0.6,
+      depthWrite: false,
+    });
     const hood = new THREE.Mesh(new THREE.ConeGeometry(0.3, 0.7, 8, 1, true), spectral);
     hood.position.y = 0.45;
     root.add(hood);
-    const skull = new THREE.Mesh(new THREE.SphereGeometry(0.14, 12, 8), new THREE.MeshStandardMaterial({ color: 0xcde7aa, emissive: 0x6acb42, emissiveIntensity: 0.5, roughness: 0.8, transparent: true, opacity: 0.85 }));
+    const skull = new THREE.Mesh(
+      new THREE.SphereGeometry(0.14, 12, 8),
+      new THREE.MeshStandardMaterial({
+        color: 0xcde7aa,
+        emissive: 0x6acb42,
+        emissiveIntensity: 0.5,
+        roughness: 0.8,
+        transparent: true,
+        opacity: 0.85,
+      }),
+    );
     skull.position.y = 0.54;
     skull.scale.z = 0.75;
     root.add(skull);
@@ -1243,7 +2036,14 @@ export class DraftrollEffects {
     const root = new THREE.Group();
     root.position.copy(position).setY(0.05);
     const geometry = new THREE.SphereGeometry(0.075, 7, 5);
-    const material = new THREE.MeshStandardMaterial({ color: 0xa9df6c, emissive: 0x355c26, emissiveIntensity: 0.25, roughness: 0.75, transparent: true, opacity: 0.9 });
+    const material = new THREE.MeshStandardMaterial({
+      color: 0xa9df6c,
+      emissive: 0x355c26,
+      emissiveIntensity: 0.25,
+      roughness: 0.75,
+      transparent: true,
+      opacity: 0.9,
+    });
     const mesh = new THREE.InstancedMesh(geometry, material, count);
     root.add(mesh);
     const dummy = new THREE.Object3D();
@@ -1254,7 +2054,11 @@ export class DraftrollEffects {
       for (let i = 0; i < count; i += 1) {
         const angle = (i / count) * Math.PI * 2 + (i % 3) * 0.18;
         const radius = (0.45 + (i % 5) * 0.12) * bloom * 1.9;
-        dummy.position.set(Math.cos(angle) * radius, Math.sin(progress * Math.PI) * 0.12 + (i % 4) * 0.015, Math.sin(angle) * radius);
+        dummy.position.set(
+          Math.cos(angle) * radius,
+          Math.sin(progress * Math.PI) * 0.12 + (i % 4) * 0.015,
+          Math.sin(angle) * radius,
+        );
         dummy.rotation.set(0.2 + Math.sin(angle) * 0.2, -angle, progress * 2 + i);
         const s = (0.3 + bloom * 0.9) * (0.8 + (i % 3) * 0.12);
         dummy.scale.set(1.9 * s, 0.34 * s, 0.82 * s);
@@ -1268,7 +2072,14 @@ export class DraftrollEffects {
   private createThornCage(position: THREE.Vector3, count: number, duration: number): void {
     const root = new THREE.Group();
     root.position.copy(position).setY(0.03);
-    const material = new THREE.MeshStandardMaterial({ color: 0x49682f, emissive: 0x19301c, emissiveIntensity: 0.2, roughness: 0.9, transparent: true, opacity: 0.95 });
+    const material = new THREE.MeshStandardMaterial({
+      color: 0x49682f,
+      emissive: 0x19301c,
+      emissiveIntensity: 0.2,
+      roughness: 0.9,
+      transparent: true,
+      opacity: 0.95,
+    });
     const mesh = new THREE.InstancedMesh(new THREE.ConeGeometry(0.055, 0.8, 5), material, count);
     root.add(mesh);
     const dummy = new THREE.Object3D();
@@ -1296,16 +2107,18 @@ export class DraftrollEffects {
   }
 
   hasActiveAnimations(): boolean {
-    return this.shakeTime > 0.001
-      || this.shakePower > 0.001
-      || this.bloomKick > 0.001
-      || this.bursts.length > 0
-      || this.meshes.length > 0
-      || this.ringBatches.length > 0
-      || this.lines.length > 0
-      || this.lights.length > 0
-      || this.scripts.length > 0
-      || this.dragons.length > 0;
+    return (
+      this.shakeTime > 0.001 ||
+      this.shakePower > 0.001 ||
+      this.bloomKick > 0.001 ||
+      this.bursts.length > 0 ||
+      this.meshes.length > 0 ||
+      this.ringBatches.length > 0 ||
+      this.lines.length > 0 ||
+      this.lights.length > 0 ||
+      this.scripts.length > 0 ||
+      this.dragons.length > 0
+    );
   }
 
   update(dt: number): void {
@@ -1317,7 +2130,7 @@ export class DraftrollEffects {
     for (let i = this.bursts.length - 1; i >= 0; i -= 1) {
       const burst = this.bursts[i];
       burst.life -= dt;
-      const positions = burst.points.geometry.getAttribute('position') as THREE.BufferAttribute;
+      const positions = burst.points.geometry.getAttribute('position');
       for (let j = 0; j < positions.count; j += 1) {
         const index = j * 3;
         burst.velocities[index + 1] -= burst.gravity * dt;
@@ -1326,12 +2139,11 @@ export class DraftrollEffects {
         positions.array[index + 2] += burst.velocities[index + 2] * dt;
       }
       positions.needsUpdate = true;
-      const material = burst.points.material as THREE.PointsMaterial;
-      material.opacity = Math.max(0, burst.life / burst.duration);
+      burst.points.material.opacity = Math.max(0, burst.life / burst.duration);
       if (burst.life <= 0) {
         this.scene.remove(burst.points);
         burst.points.geometry.dispose();
-        material.dispose();
+        burst.points.material.dispose();
         this.bursts.splice(i, 1);
       }
     }
@@ -1344,12 +2156,12 @@ export class DraftrollEffects {
       const scale = THREE.MathUtils.lerp(animation.startScale, animation.endScale, eased);
       animation.mesh.scale.setScalar(scale);
       animation.mesh.rotation.z += animation.spin * dt;
-      const material = animation.mesh.material as THREE.MeshBasicMaterial;
-      material.opacity = Math.sin(Math.min(1, progress) * Math.PI) * (1 - progress * 0.35);
+      animation.mesh.material.opacity =
+        Math.sin(Math.min(1, progress) * Math.PI) * (1 - progress * 0.35);
       if (animation.life <= 0) {
         this.scene.remove(animation.mesh);
         animation.mesh.geometry.dispose();
-        material.dispose();
+        animation.mesh.material.dispose();
         this.meshes.splice(i, 1);
       }
     }
@@ -1361,10 +2173,14 @@ export class DraftrollEffects {
       const progress = THREE.MathUtils.clamp(1 - animation.life / animation.duration, 0, 1);
       const eased = 1 - Math.pow(1 - progress, 3);
       const scale = THREE.MathUtils.lerp(animation.startScale, animation.endScale, eased);
-      const material = animation.mesh.material as THREE.MeshBasicMaterial;
-      material.opacity = Math.sin(Math.min(1, progress) * Math.PI) * (1 - progress * 0.35);
+      animation.mesh.material.opacity =
+        Math.sin(Math.min(1, progress) * Math.PI) * (1 - progress * 0.35);
       for (let instance = 0; instance < animation.mesh.count; instance += 1) {
-        this.batchDummy.position.set(animation.centers[instance * 3], animation.centers[instance * 3 + 1], animation.centers[instance * 3 + 2]);
+        this.batchDummy.position.set(
+          animation.centers[instance * 3],
+          animation.centers[instance * 3 + 1],
+          animation.centers[instance * 3 + 2],
+        );
         this.batchDummy.rotation.set(-Math.PI / 2, animation.rotation, 0);
         this.batchDummy.scale.setScalar(scale);
         this.batchDummy.updateMatrix();
@@ -1374,7 +2190,7 @@ export class DraftrollEffects {
       if (animation.life <= 0) {
         this.scene.remove(animation.mesh);
         animation.mesh.geometry.dispose();
-        material.dispose();
+        animation.mesh.material.dispose();
         this.ringBatches.splice(i, 1);
       }
     }
@@ -1382,12 +2198,12 @@ export class DraftrollEffects {
     for (let i = this.lines.length - 1; i >= 0; i -= 1) {
       const animation = this.lines[i];
       animation.life -= dt;
-      const material = animation.line.material as THREE.LineBasicMaterial;
-      material.opacity = Math.max(0, animation.life / animation.duration) * (Math.random() > 0.25 ? 1 : 0.18);
+      animation.line.material.opacity =
+        Math.max(0, animation.life / animation.duration) * (Math.random() > 0.25 ? 1 : 0.18);
       if (animation.life <= 0) {
         this.scene.remove(animation.line);
         animation.line.geometry.dispose();
-        material.dispose();
+        animation.line.material.dispose();
         this.lines.splice(i, 1);
       }
     }
@@ -1425,7 +2241,7 @@ export class DraftrollEffects {
       const easedAppear = THREE.MathUtils.clamp(appear, 0, 1);
       const scale = dragon.scale * (0.2 + 0.8 * easedAppear);
       dragon.root.scale.setScalar(scale);
-      dragon.root.position.y = 0.05 + Math.sin(Math.min(progress, 0.65) / 0.65 * Math.PI) * 0.32;
+      dragon.root.position.y = 0.05 + Math.sin((Math.min(progress, 0.65) / 0.65) * Math.PI) * 0.32;
       dragon.root.rotation.y += dt * 0.35;
       dragon.root.rotation.z = Math.sin(progress * Math.PI * 2.2) * 0.08;
       dragon.head.rotation.y = Math.sin(progress * Math.PI * 2.3) * 0.16;
@@ -1435,17 +2251,30 @@ export class DraftrollEffects {
       dragon.leftWing.rotation.y = 0.22 + flap * 0.08;
       dragon.rightWing.rotation.z = 0.35 + flap * 0.35;
       dragon.rightWing.rotation.y = -0.22 - flap * 0.08;
-      (dragon.wingMembraneLeft.material as THREE.MeshStandardMaterial).opacity = 0.82 + Math.abs(flap) * 0.1;
-      (dragon.wingMembraneRight.material as THREE.MeshStandardMaterial).opacity = 0.82 + Math.abs(flap) * 0.1;
+      dragon.wingMembraneLeft.material.opacity = 0.82 + Math.abs(flap) * 0.1;
+      dragon.wingMembraneRight.material.opacity = 0.82 + Math.abs(flap) * 0.1;
       dragon.light.intensity = easedAppear * (progress > 0.35 && progress < 0.75 ? 3.8 : 1.6);
 
       if (progress > 0.24 && progress < 0.78 && dragon.fireTimer > 0.06) {
         dragon.fireTimer = 0;
         const mouth = new THREE.Vector3();
         dragon.fireOrigin.getWorldPosition(mouth);
-        const dir = dragon.fireDirection.clone().applyQuaternion(dragon.root.quaternion).normalize();
+        const dir = dragon.fireDirection
+          .clone()
+          .applyQuaternion(dragon.root.quaternion)
+          .normalize();
         this.createDirectionalBurst(mouth, dir, 0xff8f30, 22, 0.6, 4.3);
-        this.createDirectionalBurst(mouth, dir.clone().add(new THREE.Vector3(0.05, 0, -0.05)).normalize(), 0xffd56a, 10, 0.45, 3.2);
+        this.createDirectionalBurst(
+          mouth,
+          dir
+            .clone()
+            .add(new THREE.Vector3(0.05, 0, -0.05))
+            .normalize(),
+          0xffd56a,
+          10,
+          0.45,
+          3.2,
+        );
       }
 
       if (progress > 0.32 && Math.random() > 0.72) {

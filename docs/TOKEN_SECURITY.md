@@ -4,7 +4,6 @@ Draftroll room capability tokens are account-independent, room-scoped credential
 
 Package and protocol versions remain unchanged during pre-release implementation. No deployment is performed by this project snapshot.
 
-
 ## Secure credential transport
 
 Browser clients do not place capability tokens in WebSocket or HTTP URLs.
@@ -14,9 +13,7 @@ For WebSockets, the client opens a `wss:` connection without the token. A non-se
 For HTTP room requests, `DiceRoom.authorizeHttpRequest()` sends the token through `Authorization: Bearer` and keeps the URL free of credentials:
 
 ```ts
-const request = room.authorizeHttpRequest(
-  'https://dice.example.com/rooms/table-42/history',
-);
+const request = room.authorizeHttpRequest('https://dice.example.com/rooms/table-42/history');
 const response = await fetch(request);
 ```
 
@@ -44,25 +41,26 @@ Newly created tokens receive `iat` and `jti` automatically. Production issuers s
 Use a named signing key:
 
 ```ts
-import {
-  createGameMasterPermissions,
-  createRoomCapabilityToken,
-} from '@draftroll/server';
+import { createGameMasterPermissions, createRoomCapabilityToken } from '@draftroll/server';
 
-const token = await createRoomCapabilityToken({
-  roomId: 'table-42',
-  participantId: user.id,
-  name: 'Game Master',
-  roles: ['gm'],
-  permissions: createGameMasterPermissions(),
-}, {
-  id: '2026-07',
-  secret: process.env.DRAFTROLL_ROOM_SIGNING_KEY!,
-}, {
-  expiresInSeconds: 60 * 60,
-  issuer: 'https://app.example.com',
-  audience: 'draftroll-room',
-});
+const token = await createRoomCapabilityToken(
+  {
+    roomId: 'table-42',
+    participantId: user.id,
+    name: 'Game Master',
+    roles: ['gm'],
+    permissions: createGameMasterPermissions(),
+  },
+  {
+    id: '2026-07',
+    secret: process.env.DRAFTROLL_ROOM_SIGNING_KEY!,
+  },
+  {
+    expiresInSeconds: 60 * 60,
+    issuer: 'https://app.example.com',
+    audience: 'draftroll-room',
+  },
+);
 ```
 
 The token header contains the key ID. The Worker accepts a verification ring through `ROOM_TOKEN_KEYS`:
@@ -120,25 +118,31 @@ Failures distinguish malformed tokens, unknown key IDs, bad signatures, expiry, 
 Room managers can revoke one token ID:
 
 ```ts
-await room.revokeToken({
-  type: 'token',
-  tokenId: compromisedTokenId,
-  expiresAt: compromisedTokenExpiry,
-}, {
-  reason: 'Compromised browser session',
-});
+await room.revokeToken(
+  {
+    type: 'token',
+    tokenId: compromisedTokenId,
+    expiresAt: compromisedTokenExpiry,
+  },
+  {
+    reason: 'Compromised browser session',
+  },
+);
 ```
 
 Or revoke all tokens for one participant issued at or before a cutoff:
 
 ```ts
-await room.revokeToken({
-  type: 'participant',
-  participantId: removedParticipantId,
-  issuedAtOrBefore: Math.floor(Date.now() / 1000),
-}, {
-  reason: 'Removed from table',
-});
+await room.revokeToken(
+  {
+    type: 'participant',
+    participantId: removedParticipantId,
+    issuedAtOrBefore: Math.floor(Date.now() / 1000),
+  },
+  {
+    reason: 'Removed from table',
+  },
+);
 ```
 
 Participant cutoffs allow newly issued tokens to reconnect because their `iat` is later than the cutoff.

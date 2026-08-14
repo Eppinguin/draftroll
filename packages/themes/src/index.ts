@@ -19,7 +19,18 @@ export const DRAFTROLL_THEME_SCHEMA_VERSION = 1 as const;
  *
  * @public
  */
-export type ThemeDieType = 'd2' | 'd4' | 'd6' | 'd8' | 'd10' | 'd10x' | 'd12' | 'd20' | 'd100' | 'dF' | string;
+export type ThemeDieType =
+  | 'd2'
+  | 'd4'
+  | 'd6'
+  | 'd8'
+  | 'd10'
+  | 'd10x'
+  | 'd12'
+  | 'd20'
+  | 'd100'
+  | 'dF'
+  | (string & {});
 /**
  * Semantic outcome slots available to a theme.
  *
@@ -147,7 +158,7 @@ export interface DiceTheme {
   id: string;
   name: string;
   version: string;
-  renderer?: 'draftroll' | string;
+  renderer?: 'draftroll' | (string & {});
   description?: string;
   author?: string;
   previews?: Partial<Record<ThemeDieType | 'default', string>>;
@@ -159,7 +170,9 @@ export interface DiceTheme {
   meshes?: Partial<Record<ThemeDieType, ThemeMeshDefinition>>;
   audio?: ThemeAudioDefinition;
   effects?: Partial<Record<ThemeEffectOutcome, ThemeEffectPreset>>;
-  physics?: ThemePhysicsDefinition & { dice?: Partial<Record<ThemeDieType, ThemePhysicsDefinition>> };
+  physics?: ThemePhysicsDefinition & {
+    dice?: Partial<Record<ThemeDieType, ThemePhysicsDefinition>>;
+  };
   metadata?: Record<string, unknown>;
 }
 
@@ -242,7 +255,10 @@ export class InvalidThemeError extends Error {
   /**
    * Creates a InvalidThemeError instance.
    */
-  constructor(message: string, public readonly path?: string) {
+  constructor(
+    message: string,
+    public readonly path?: string,
+  ) {
     super(path ? `${message} (${path})` : message);
     this.name = 'InvalidThemeError';
   }
@@ -257,7 +273,10 @@ export class ThemeAssetLimitError extends Error {
   /**
    * Creates a ThemeAssetLimitError instance.
    */
-  constructor(message: string, public readonly reference: string) {
+  constructor(
+    message: string,
+    public readonly reference: string,
+  ) {
     super(message);
     this.name = 'ThemeAssetLimitError';
   }
@@ -271,11 +290,17 @@ export class ThemeAssetLimitError extends Error {
 export function decodeDiceTheme(value: unknown): DiceTheme {
   if (!isRecord(value)) throw new InvalidThemeError('Theme manifest must be an object');
   if (value.schemaVersion !== DRAFTROLL_THEME_SCHEMA_VERSION) {
-    throw new InvalidThemeError(`Unsupported theme schema version: ${String(value.schemaVersion)}`, 'schemaVersion');
+    throw new InvalidThemeError(
+      `Unsupported theme schema version: ${String(value.schemaVersion)}`,
+      'schemaVersion',
+    );
   }
   const id = readIdentifier(value.id, 'id');
   const name = readText(value.name, 'name', 120);
   const version = readText(value.version, 'version', 64);
+  // Trusted narrowing point: the field checks above and the per-section validation
+  // below establish the manifest shape before it is returned to callers.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion
   const theme = structuredClone(value) as unknown as DiceTheme;
   theme.id = id;
   theme.name = name;
@@ -283,12 +308,18 @@ export function decodeDiceTheme(value: unknown): DiceTheme {
 
   if (theme.availableDice) {
     if (!Array.isArray(theme.availableDice) || theme.availableDice.length > 128) {
-      throw new InvalidThemeError('availableDice must be an array with at most 128 entries', 'availableDice');
+      throw new InvalidThemeError(
+        'availableDice must be an array with at most 128 entries',
+        'availableDice',
+      );
     }
-    theme.availableDice = theme.availableDice.map((entry, index) => readIdentifier(entry, `availableDice.${index}`));
+    theme.availableDice = theme.availableDice.map((entry, index) =>
+      readIdentifier(entry, `availableDice.${index}`),
+    );
   }
   validateMaterial(theme.material, 'material');
-  for (const [die, material] of Object.entries(theme.materials ?? {})) validateMaterial(material, `materials.${die}`);
+  for (const [die, material] of Object.entries(theme.materials ?? {}))
+    validateMaterial(material, `materials.${die}`);
   validateLabels(theme.labels);
   validateAsset(theme.audio?.impact, 'audio.impact');
   validateAsset(theme.audio?.roll, 'audio.roll');
@@ -299,7 +330,8 @@ export function decodeDiceTheme(value: unknown): DiceTheme {
     validateRange(mesh.maxVertices, 3, 250_000, `meshes.${die}.maxVertices`);
   }
   validatePhysics(theme.physics, 'physics');
-  for (const [die, physics] of Object.entries(theme.physics?.dice ?? {})) validatePhysics(physics, `physics.dice.${die}`);
+  for (const [die, physics] of Object.entries(theme.physics?.dice ?? {}))
+    validatePhysics(physics, `physics.dice.${die}`);
   return theme;
 }
 
@@ -311,7 +343,8 @@ export function decodeDiceTheme(value: unknown): DiceTheme {
 export function listThemeAssetReferences(theme: DiceTheme): ThemeAssetReference[] {
   const references: ThemeAssetReference[] = [];
   const add = (reference?: ThemeAssetReference) => {
-    if (reference && !references.some((candidate) => candidate.src === reference.src)) references.push(reference);
+    if (reference && !references.some((candidate) => candidate.src === reference.src))
+      references.push(reference);
   };
   add(theme.material?.surfaceTexture);
   add(theme.material?.normalTexture);
@@ -353,7 +386,8 @@ export async function prepareRuntimeTheme(
   const manifest = decodeDiceTheme(await provider.getTheme(themeId, { signal: options.signal }));
   options.onEvent?.({ type: 'manifest', themeId });
   const references = listThemeAssetReferences(manifest);
-  if (references.length > 128) throw new InvalidThemeError('A theme may reference at most 128 assets');
+  if (references.length > 128)
+    throw new InvalidThemeError('A theme may reference at most 128 assets');
   const assets: Record<string, ThemeResourceAsset> = {};
   const maxAsset = options.maximumAssetBytes ?? 8 * 1024 * 1024;
   const maxTotal = options.maximumTotalBytes ?? 24 * 1024 * 1024;
@@ -362,26 +396,52 @@ export async function prepareRuntimeTheme(
   for (let index = 0; index < references.length; index += 1) {
     const reference = references[index];
     throwIfAborted(options.signal);
-    options.onEvent?.({ type: 'asset-start', themeId, reference: reference.src, loaded: index, total: references.length });
+    options.onEvent?.({
+      type: 'asset-start',
+      themeId,
+      reference: reference.src,
+      loaded: index,
+      total: references.length,
+    });
     try {
       const resource = await provider.getAsset(reference.src, { signal: options.signal });
       const data = resource instanceof Blob ? await resource.arrayBuffer() : resource.slice(0);
-      if (data.byteLength > maxAsset) throw new ThemeAssetLimitError(`Theme asset exceeds ${maxAsset} bytes`, reference.src);
+      if (data.byteLength > maxAsset)
+        throw new ThemeAssetLimitError(`Theme asset exceeds ${maxAsset} bytes`, reference.src);
       if (reference.integrity) await verifyAssetIntegrity(data, reference.integrity, reference.src);
       loaded += data.byteLength;
-      if (loaded > maxTotal) throw new ThemeAssetLimitError(`Theme assets exceed ${maxTotal} total bytes`, reference.src);
+      if (loaded > maxTotal)
+        throw new ThemeAssetLimitError(
+          `Theme assets exceed ${maxTotal} total bytes`,
+          reference.src,
+        );
       assets[reference.src] = {
-        mimeType: reference.mimeType ?? (resource instanceof Blob && resource.type ? resource.type : inferMimeType(reference.src)),
+        mimeType:
+          reference.mimeType ??
+          (resource instanceof Blob && resource.type
+            ? resource.type
+            : inferMimeType(reference.src)),
         data,
       };
-      options.onEvent?.({ type: 'asset-complete', themeId, reference: reference.src, loaded: index + 1, total: references.length });
+      options.onEvent?.({
+        type: 'asset-complete',
+        themeId,
+        reference: reference.src,
+        loaded: index + 1,
+        total: references.length,
+      });
     } catch (error) {
       const normalized = error instanceof Error ? error : new Error(String(error));
       options.onEvent?.({ type: 'error', themeId, reference: reference.src, error: normalized });
       throw normalized;
     }
   }
-  options.onEvent?.({ type: 'complete', themeId, loaded: references.length, total: references.length });
+  options.onEvent?.({
+    type: 'complete',
+    themeId,
+    loaded: references.length,
+    total: references.length,
+  });
   return { manifest, assets };
 }
 
@@ -397,11 +457,16 @@ export class BundledThemeProvider implements ThemeProvider {
   /**
    * Creates a provider from in-memory themes and assets.
    */
-  constructor(themes: Iterable<DiceTheme>, assets: Iterable<readonly [string, ArrayBuffer | Blob]> = []) {
-    this.themes = new Map(Array.from(themes, (theme) => {
-      const decoded = decodeDiceTheme(theme);
-      return [decoded.id, decoded] as const;
-    }));
+  constructor(
+    themes: Iterable<DiceTheme>,
+    assets: Iterable<readonly [string, ArrayBuffer | Blob]> = [],
+  ) {
+    this.themes = new Map(
+      Array.from(themes, (theme) => {
+        const decoded = decodeDiceTheme(theme);
+        return [decoded.id, decoded] as const;
+      }),
+    );
     this.assets = new Map(assets);
   }
 
@@ -426,7 +491,10 @@ export class BundledThemeProvider implements ThemeProvider {
   /**
    * Loads a theme asset by reference.
    */
-  async getAsset(reference: string, options: { signal?: AbortSignal } = {}): Promise<ArrayBuffer | Blob> {
+  async getAsset(
+    reference: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<ArrayBuffer | Blob> {
     throwIfAborted(options.signal);
     const asset = this.assets.get(reference);
     if (!asset) throw new Error(`Theme asset not found: ${reference}`);
@@ -452,11 +520,17 @@ export class HttpThemeProvider implements ThemeProvider {
    * Loads a theme manifest by ID.
    */
   async getTheme(id: string, options: { signal?: AbortSignal } = {}): Promise<DiceTheme> {
-    const response = await this.fetcher(this.resolve(`themes/${encodeURIComponent(id)}.json`), { signal: options.signal });
+    const response = await this.fetcher(this.resolve(`themes/${encodeURIComponent(id)}.json`), {
+      signal: options.signal,
+    });
     if (response.status === 404) throw new ThemeNotFoundError(id);
     if (!response.ok) throw new Error(`Theme request failed (${response.status})`);
     const value = decodeDiceTheme(await response.json());
-    if (value.id !== id) throw new InvalidThemeError(`Theme ID '${value.id}' does not match requested ID '${id}'`, 'id');
+    if (value.id !== id)
+      throw new InvalidThemeError(
+        `Theme ID '${value.id}' does not match requested ID '${id}'`,
+        'id',
+      );
     return value;
   }
 
@@ -464,7 +538,9 @@ export class HttpThemeProvider implements ThemeProvider {
    * Lists theme manifests available from this provider.
    */
   async listThemes(options: { signal?: AbortSignal } = {}): Promise<DiceTheme[]> {
-    const response = await this.fetcher(this.resolve('themes/index.json'), { signal: options.signal });
+    const response = await this.fetcher(this.resolve('themes/index.json'), {
+      signal: options.signal,
+    });
     if (!response.ok) throw new Error(`Theme index request failed (${response.status})`);
     const value: unknown = await response.json();
     if (!Array.isArray(value)) throw new InvalidThemeError('Theme index must be an array');
@@ -481,7 +557,10 @@ export class HttpThemeProvider implements ThemeProvider {
   }
 
   private resolve(path: string): string {
-    return new URL(path.replace(/^\//, ''), this.baseUrl.endsWith('/') ? this.baseUrl : `${this.baseUrl}/`).toString();
+    return new URL(
+      path.replace(/^\//, ''),
+      this.baseUrl.endsWith('/') ? this.baseUrl : `${this.baseUrl}/`,
+    ).toString();
   }
 }
 
@@ -495,7 +574,8 @@ export class CompositeThemeProvider implements ThemeProvider {
    * Creates a provider that queries sources in order.
    */
   constructor(private readonly providers: readonly ThemeProvider[]) {
-    if (providers.length === 0) throw new Error('CompositeThemeProvider requires at least one provider');
+    if (providers.length === 0)
+      throw new Error('CompositeThemeProvider requires at least one provider');
   }
 
   /**
@@ -521,7 +601,8 @@ export class CompositeThemeProvider implements ThemeProvider {
     for (const provider of this.providers) {
       if (!provider.listThemes) continue;
       try {
-        for (const theme of await provider.listThemes(options)) if (!byId.has(theme.id)) byId.set(theme.id, theme);
+        for (const theme of await provider.listThemes(options))
+          if (!byId.has(theme.id)) byId.set(theme.id, theme);
       } catch {
         // A composite index is best effort. Individual getTheme calls still expose failures.
       }
@@ -532,7 +613,10 @@ export class CompositeThemeProvider implements ThemeProvider {
   /**
    * Loads a theme asset by reference.
    */
-  async getAsset(reference: string, options: { signal?: AbortSignal } = {}): Promise<ArrayBuffer | Blob> {
+  async getAsset(
+    reference: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<ArrayBuffer | Blob> {
     const errors: unknown[] = [];
     for (const provider of this.providers) {
       try {
@@ -576,7 +660,8 @@ export class CachedThemeProvider implements ThemeProvider {
    */
   async listThemes(options: { signal?: AbortSignal } = {}): Promise<DiceTheme[]> {
     throwIfAborted(options.signal);
-    if (!this.upstream.listThemes) return [...this.themes.values()].map((theme) => structuredClone(theme));
+    if (!this.upstream.listThemes)
+      return [...this.themes.values()].map((theme) => structuredClone(theme));
     const themes = await this.upstream.listThemes(options);
     for (const theme of themes) this.themes.set(theme.id, structuredClone(theme));
     return themes;
@@ -585,7 +670,10 @@ export class CachedThemeProvider implements ThemeProvider {
   /**
    * Loads a theme asset by reference.
    */
-  async getAsset(reference: string, options: { signal?: AbortSignal } = {}): Promise<ArrayBuffer | Blob> {
+  async getAsset(
+    reference: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<ArrayBuffer | Blob> {
     throwIfAborted(options.signal);
     const cached = this.assets.get(reference);
     if (cached) return cached instanceof ArrayBuffer ? cached.slice(0) : cached;
@@ -612,16 +700,24 @@ export class CachedThemeProvider implements ThemeProvider {
   }
 }
 
-
-async function verifyAssetIntegrity(data: ArrayBuffer, integrity: string, reference: string): Promise<void> {
+async function verifyAssetIntegrity(
+  data: ArrayBuffer,
+  integrity: string,
+  reference: string,
+): Promise<void> {
   const match = integrity.match(/^sha256-([A-Za-z0-9+/=]+)$/);
-  if (!match) throw new InvalidThemeError('Only sha256 Subresource Integrity values are supported', `asset:${reference}.integrity`);
+  if (!match)
+    throw new InvalidThemeError(
+      'Only sha256 Subresource Integrity values are supported',
+      `asset:${reference}.integrity`,
+    );
   const digest = await crypto.subtle.digest('SHA-256', data);
   const bytes = new Uint8Array(digest);
   let binary = '';
   for (const byte of bytes) binary += String.fromCharCode(byte);
   const actual = btoa(binary);
-  if (actual !== match[1]) throw new InvalidThemeError('Theme asset integrity check failed', `asset:${reference}`);
+  if (actual !== match[1])
+    throw new InvalidThemeError('Theme asset integrity check failed', `asset:${reference}`);
 }
 
 function validateMaterial(material: ThemeMaterialDefinition | undefined, path: string): void {
@@ -642,7 +738,8 @@ function validateLabels(labels: ThemeLabelDefinition | undefined): void {
   if (labels.fontFamily !== undefined) readText(labels.fontFamily, 'labels.fontFamily', 128);
   validateAsset(labels.font, 'labels.font');
   validateAsset(labels.atlas, 'labels.atlas');
-  for (const [die, atlas] of Object.entries(labels.atlases ?? {})) validateAsset(atlas, `labels.atlases.${die}`);
+  for (const [die, atlas] of Object.entries(labels.atlases ?? {}))
+    validateAsset(atlas, `labels.atlases.${die}`);
 }
 
 function validatePhysics(physics: ThemePhysicsDefinition | undefined, path: string): void {
@@ -656,12 +753,18 @@ function validateAsset(reference: ThemeAssetReference | undefined, path: string)
   if (!reference) return;
   if (!isRecord(reference)) throw new InvalidThemeError('Asset reference must be an object', path);
   const src = readText(reference.src, `${path}.src`, 2048);
-  if (/^(?:javascript|data):/i.test(src)) throw new InvalidThemeError('Unsafe asset URL scheme', `${path}.src`);
+  if (/^(?:javascript|data):/i.test(src))
+    throw new InvalidThemeError('Unsafe asset URL scheme', `${path}.src`);
   if (reference.mimeType !== undefined) readText(reference.mimeType, `${path}.mimeType`, 128);
   if (reference.integrity !== undefined) readText(reference.integrity, `${path}.integrity`, 256);
 }
 
-function validateRange(value: number | undefined, minimum: number, maximum: number, path: string): void {
+function validateRange(
+  value: number | undefined,
+  minimum: number,
+  maximum: number,
+  path: string,
+): void {
   if (value === undefined) return;
   if (!Number.isFinite(value) || value < minimum || value > maximum) {
     throw new InvalidThemeError(`Expected a number between ${minimum} and ${maximum}`, path);
@@ -670,7 +773,8 @@ function validateRange(value: number | undefined, minimum: number, maximum: numb
 
 function readIdentifier(value: unknown, path: string): string {
   const text = readText(value, path, 128);
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9._:-]*$/.test(text)) throw new InvalidThemeError('Invalid identifier', path);
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._:-]*$/.test(text))
+    throw new InvalidThemeError('Invalid identifier', path);
   return text;
 }
 
@@ -697,7 +801,10 @@ function inferMimeType(reference: string): string {
 }
 
 function throwIfAborted(signal?: AbortSignal): void {
-  if (signal?.aborted) throw signal.reason instanceof Error ? signal.reason : new DOMException('Operation aborted', 'AbortError');
+  if (signal?.aborted)
+    throw signal.reason instanceof Error
+      ? signal.reason
+      : new DOMException('Operation aborted', 'AbortError');
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

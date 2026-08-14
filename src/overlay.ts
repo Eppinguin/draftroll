@@ -149,17 +149,42 @@ async function handleCommand(message: DraftrollHostMessage, event: MessageEvent)
       return;
     }
 
-    if (message.type !== 'play') throw new Error(`Unsupported overlay message type: ${message.type}`);
+    // `message.type` narrows to `never` here; stringify defensively for the runtime case
+    // where a host posts a message type this build does not know about.
+    if (message.type !== 'play')
+      throw new Error(`Unsupported overlay message type: ${String(message.type)}`);
 
     const outcomeById = new Map<string, DraftrollEffectOutcome>();
     message.result.dice.forEach((die, index) => {
       const outcome = message.outcomes?.[index];
       if (outcome) outcomeById.set(die.id, outcome);
     });
-    const completion = await overlayRenderer.playRoll(message.result, {
-      ...message.options,
-      outcomeResolver: message.outcomes ? (die) => outcomeById.get(die.id) ?? 'neutral' : undefined,
-    });
+    let frameReady = false;
+    const signalFrameReady = () => {
+      if (frameReady) return;
+      frameReady = true;
+      respond(event, {
+        source: DRAFTROLL_OVERLAY_SOURCE,
+        version: DRAFTROLL_OVERLAY_PROTOCOL_VERSION,
+        type: 'frame-ready',
+        requestId: message.requestId,
+      });
+    };
+    window.addEventListener('draftroll:frame-ready', signalFrameReady, { once: true });
+    let completion;
+    try {
+      completion = await overlayRenderer.playRoll(message.result, {
+        ...message.options,
+        outcomeResolver: message.outcomes
+          ? (die) => outcomeById.get(die.id) ?? 'neutral'
+          : undefined,
+      });
+      // A custom bridge may complete without the browser engine event. Reveal
+      // its completed frame instead of leaving the host permanently hidden.
+      signalFrameReady();
+    } finally {
+      window.removeEventListener('draftroll:frame-ready', signalFrameReady);
+    }
     respond(event, {
       source: DRAFTROLL_OVERLAY_SOURCE,
       version: DRAFTROLL_OVERLAY_PROTOCOL_VERSION,
@@ -181,10 +206,25 @@ async function handleCommand(message: DraftrollHostMessage, event: MessageEvent)
 function isHostMessage(value: unknown): value is DraftrollHostMessage {
   if (!value || typeof value !== 'object') return false;
   const candidate = value as Partial<DraftrollHostMessage>;
-  return candidate.source === DRAFTROLL_HOST_SOURCE
-    && candidate.version === DRAFTROLL_OVERLAY_PROTOCOL_VERSION
-    && (candidate.type === 'warmup' || candidate.type === 'install-theme' || candidate.type === 'unload-theme' || candidate.type === 'configure' || candidate.type === 'play' || candidate.type === 'dismiss' || candidate.type === 'clear' || candidate.type === 'pause' || candidate.type === 'resume' || candidate.type === 'configure-camera' || candidate.type === 'reset-camera' || candidate.type === 'configure-interactions' || candidate.type === 'screenshot' || candidate.type === 'preview')
-    && typeof candidate.requestId === 'string';
+  return (
+    candidate.source === DRAFTROLL_HOST_SOURCE &&
+    candidate.version === DRAFTROLL_OVERLAY_PROTOCOL_VERSION &&
+    (candidate.type === 'warmup' ||
+      candidate.type === 'install-theme' ||
+      candidate.type === 'unload-theme' ||
+      candidate.type === 'configure' ||
+      candidate.type === 'play' ||
+      candidate.type === 'dismiss' ||
+      candidate.type === 'clear' ||
+      candidate.type === 'pause' ||
+      candidate.type === 'resume' ||
+      candidate.type === 'configure-camera' ||
+      candidate.type === 'reset-camera' ||
+      candidate.type === 'configure-interactions' ||
+      candidate.type === 'screenshot' ||
+      candidate.type === 'preview') &&
+    typeof candidate.requestId === 'string'
+  );
 }
 
 function complete(requestId: string): Extract<DraftrollOverlayMessage, { type: 'complete' }> {
@@ -199,8 +239,13 @@ function complete(requestId: string): Extract<DraftrollOverlayMessage, { type: '
 
 function respond(event: MessageEvent, message: DraftrollOverlayMessage): void {
   const target = event.source;
-  if (!target || typeof (target as Window).postMessage !== 'function') return;
-  (target as Window).postMessage(message, event.origin === 'null' ? '*' : event.origin);
+  // `MessageEventSource` also covers MessagePort and ServiceWorker, whose postMessage
+  // signatures differ; only a Window accepts a target origin. `instanceof Window` cannot
+  // be used here: a cross-origin parent arrives as a WindowProxy from another realm, so
+  // the check is false for exactly the embedded case this overlay exists to serve.
+  // Windows are distinguishable from ports/workers by carrying a `window` self-reference.
+  if (!target || !('window' in target) || target.window !== target) return;
+  target.postMessage(message, event.origin === 'null' ? '*' : event.origin);
 }
 
 function postToParent(message: DraftrollOverlayMessage): void {

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { runTsc } from './lib/load-typescript.mjs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -11,22 +11,29 @@ const outDir = join(tempRoot, 'build');
 const configPath = join(tempRoot, 'tsconfig.json');
 
 try {
-  await writeFile(configPath, JSON.stringify({
-    compilerOptions: {
-      target: 'ES2022',
-      module: 'CommonJS',
-      moduleResolution: 'Node',
-      rootDir: join(projectRoot, 'packages'),
-      outDir,
-      strict: true,
-      skipLibCheck: true,
-      esModuleInterop: true,
-      lib: ['ES2022', 'DOM', 'DOM.Iterable'],
-    },
-    include: [join(projectRoot, 'packages/**/*.ts')],
-  }, null, 2));
+  await writeFile(
+    configPath,
+    JSON.stringify(
+      {
+        compilerOptions: {
+          target: 'ES2022',
+          module: 'CommonJS',
+          moduleResolution: 'Node',
+          rootDir: join(projectRoot, 'packages'),
+          outDir,
+          strict: true,
+          skipLibCheck: true,
+          esModuleInterop: true,
+          lib: ['ES2023', 'DOM', 'DOM.Iterable'],
+        },
+        include: [join(projectRoot, 'packages/**/*.ts')],
+      },
+      null,
+      2,
+    ),
+  );
 
-  const compile = spawnSync('tsc', ['-p', configPath], { cwd: projectRoot, encoding: 'utf8' });
+  const compile = runTsc(['-p', configPath], { cwd: projectRoot });
   if (compile.status !== 0) {
     process.stderr.write(compile.stdout);
     process.stderr.write(compile.stderr);
@@ -67,18 +74,25 @@ try {
     effects: { positive: 'major-burst', neutral: 'subtle-pulse', negative: 'void-fracture' },
     metadata: { rendererThemeId: 'test-obsidian' },
   };
-  const provider = new CachedThemeProvider(new BundledThemeProvider(
-    [manifest],
-    [
-      ['assets/obsidian.webp', new Uint8Array([1, 2, 3, 4]).buffer],
-      ['assets/labels.png', new Uint8Array([5, 6, 7]).buffer],
-    ],
-  ));
+  const provider = new CachedThemeProvider(
+    new BundledThemeProvider(
+      [manifest],
+      [
+        ['assets/obsidian.webp', new Uint8Array([1, 2, 3, 4]).buffer],
+        ['assets/labels.png', new Uint8Array([5, 6, 7]).buffer],
+      ],
+    ),
+  );
 
   const events = [];
-  const bundle = await prepareRuntimeTheme(provider, manifest.id, { onEvent: (event) => events.push(event) });
+  const bundle = await prepareRuntimeTheme(provider, manifest.id, {
+    onEvent: (event) => events.push(event),
+  });
   assert.equal(bundle.manifest.id, manifest.id);
-  assert.deepEqual(Object.keys(bundle.assets).sort(), ['assets/labels.png', 'assets/obsidian.webp']);
+  assert.deepEqual(
+    Object.keys(bundle.assets).toSorted((left, right) => left.localeCompare(right)),
+    ['assets/labels.png', 'assets/obsidian.webp'],
+  );
   assert.equal(events.at(-1).type, 'complete');
   assert.equal(events.filter((event) => event.type === 'asset-complete').length, 2);
 
@@ -91,8 +105,12 @@ try {
     },
     setDie() {},
     setQuantity() {},
-    setTheme(themeId) { bridgeCalls.push(['setTheme', themeId]); },
-    getThemes() { return [...bridgeThemes.values()]; },
+    setTheme(themeId) {
+      bridgeCalls.push(['setTheme', themeId]);
+    },
+    getThemes() {
+      return [...bridgeThemes.values()];
+    },
     installTheme(runtimeBundle) {
       bridgeCalls.push(['installTheme', runtimeBundle.manifest.id]);
       const installed = {
@@ -108,9 +126,16 @@ try {
   };
 
   const rendererEvents = [];
-  const renderer = new DraftrollRenderer({ bridge, themeProvider: provider, onThemeLoad: (event) => rendererEvents.push(event) });
+  const renderer = new DraftrollRenderer({
+    bridge,
+    themeProvider: provider,
+    onThemeLoad: (event) => rendererEvents.push(event),
+  });
   await renderer.warmup([manifest.id]);
-  assert.deepEqual(bridgeCalls.slice(0, 2), [['installTheme', manifest.id], ['setTheme', manifest.id]]);
+  assert.deepEqual(bridgeCalls.slice(0, 2), [
+    ['installTheme', manifest.id],
+    ['setTheme', manifest.id],
+  ]);
   assert.equal(rendererEvents.at(-1).type, 'complete');
 
   await renderer.playRoll({
@@ -121,7 +146,11 @@ try {
     operations: [],
     createdAt: new Date(0).toISOString(),
   });
-  assert.equal(bridgeCalls.filter(([name]) => name === 'installTheme').length, 1, 'theme should only install once');
+  assert.equal(
+    bridgeCalls.filter(([name]) => name === 'installTheme').length,
+    1,
+    'theme should only install once',
+  );
   assert.deepEqual(bridgeCalls.find(([name]) => name === 'roll')[1].themes, [manifest.id]);
 
   assert.throws(() => decodeDiceTheme({ ...manifest, schemaVersion: 99 }), InvalidThemeError);
@@ -130,13 +159,19 @@ try {
     ThemeAssetLimitError,
   );
 
-  console.log(JSON.stringify({
-    ok: true,
-    themeId: manifest.id,
-    assets: Object.keys(bundle.assets),
-    progressEvents: events.length,
-    installs: bridgeCalls.filter(([name]) => name === 'installTheme').length,
-  }, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        ok: true,
+        themeId: manifest.id,
+        assets: Object.keys(bundle.assets),
+        progressEvents: events.length,
+        installs: bridgeCalls.filter(([name]) => name === 'installTheme').length,
+      },
+      null,
+      2,
+    ),
+  );
 } finally {
   await rm(tempRoot, { recursive: true, force: true });
 }

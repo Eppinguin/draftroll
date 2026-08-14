@@ -5,8 +5,14 @@ export class DraftrollAudio {
   private master: GainNode | null = null;
   private impactCooldown = 0;
   private impactNoise: AudioBuffer | null = null;
-  private readonly themeAudio = new Map<string, { impact?: ArrayBuffer; roll?: ArrayBuffer; volume: number; playbackRate: [number, number] }>();
-  private readonly decodedThemeAudio = new Map<string, { impact?: AudioBuffer; roll?: AudioBuffer }>();
+  private readonly themeAudio = new Map<
+    string,
+    { impact?: ArrayBuffer; roll?: ArrayBuffer; volume: number; playbackRate: [number, number] }
+  >();
+  private readonly decodedThemeAudio = new Map<
+    string,
+    { impact?: AudioBuffer; roll?: AudioBuffer }
+  >();
   private readonly decodingThemeAudio = new Map<string, Promise<void>>();
   public enabled = true;
 
@@ -35,7 +41,12 @@ export class DraftrollAudio {
 
   registerThemeAudio(
     themeId: string,
-    audio: { impact?: ArrayBuffer; roll?: ArrayBuffer; volume?: number; playbackRate?: [number, number] },
+    audio: {
+      impact?: ArrayBuffer;
+      roll?: ArrayBuffer;
+      volume?: number;
+      playbackRate?: [number, number];
+    },
   ): void {
     this.themeAudio.set(themeId, {
       impact: audio.impact?.slice(0),
@@ -130,7 +141,8 @@ export class DraftrollAudio {
     source.buffer = this.getImpactNoise(ctx);
     source.playbackRate.value = pitch;
     const filter = ctx.createBiquadFilter();
-    filter.type = sound.impactSet === 'wood' || sound.impactSet === 'stone' ? 'lowpass' : 'bandpass';
+    filter.type =
+      sound.impactSet === 'wood' || sound.impactSet === 'stone' ? 'lowpass' : 'bandpass';
     filter.frequency.value = frequency;
     filter.Q.value = 0.55 + sound.resonance * 4.2;
     const gain = ctx.createGain();
@@ -142,12 +154,26 @@ export class DraftrollAudio {
 
     const oscillator = ctx.createOscillator();
     const toneGain = ctx.createGain();
-    oscillator.type = sound.impactSet === 'metal' || sound.impactSet === 'crystal' ? 'sine' : sound.impactSet === 'bone' ? 'triangle' : 'sine';
-    oscillator.frequency.setValueAtTime(frequency * (sound.impactSet === 'stone' || sound.impactSet === 'wood' ? 0.42 : 1), now);
+    oscillator.type =
+      sound.impactSet === 'metal' || sound.impactSet === 'crystal'
+        ? 'sine'
+        : sound.impactSet === 'bone'
+          ? 'triangle'
+          : 'sine';
+    oscillator.frequency.setValueAtTime(
+      frequency * (sound.impactSet === 'stone' || sound.impactSet === 'wood' ? 0.42 : 1),
+      now,
+    );
     oscillator.frequency.exponentialRampToValueAtTime(Math.max(34, frequency * 0.72), now + length);
-    const tonePeak = Math.min(0.1, (0.01 + normalized * 0.055) * (0.5 + sound.resonance) * sound.weight);
+    const tonePeak = Math.min(
+      0.1,
+      (0.01 + normalized * 0.055) * (0.5 + sound.resonance) * sound.weight,
+    );
     toneGain.gain.setValueAtTime(tonePeak, now);
-    toneGain.gain.exponentialRampToValueAtTime(0.0001, now + length * (0.75 + sound.resonance * 0.7));
+    toneGain.gain.exponentialRampToValueAtTime(
+      0.0001,
+      now + length * (0.75 + sound.resonance * 0.7),
+    );
     oscillator.connect(toneGain).connect(this.master);
     oscillator.start(now);
     oscillator.stop(now + length * (0.9 + sound.resonance * 0.8));
@@ -197,7 +223,9 @@ export class DraftrollAudio {
       if (definition.impact) decoded.impact = await ctx.decodeAudioData(definition.impact.slice(0));
       if (definition.roll) decoded.roll = await ctx.decodeAudioData(definition.roll.slice(0));
       this.decodedThemeAudio.set(themeId, decoded);
-    })().catch(() => undefined).finally(() => this.decodingThemeAudio.delete(themeId));
+    })()
+      .catch(() => undefined)
+      .finally(() => this.decodingThemeAudio.delete(themeId));
     this.decodingThemeAudio.set(themeId, decoding);
     return decoding;
   }

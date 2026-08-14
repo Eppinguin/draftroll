@@ -286,7 +286,9 @@ export const ROOM_POLICY_PRESETS: Readonly<Record<RoomPolicyPreset, RoomPolicy>>
  *
  * @public
  */
-export const DEFAULT_ROOM_POLICY: Readonly<RoomPolicy> = Object.freeze(cloneRoomPolicy(OPEN_TABLE_POLICY));
+export const DEFAULT_ROOM_POLICY: Readonly<RoomPolicy> = Object.freeze(
+  cloneRoomPolicy(OPEN_TABLE_POLICY),
+);
 
 /**
  * Creates a complete room policy from a preset and optional patch.
@@ -305,12 +307,11 @@ export function createRoomPolicy(preset: RoomPolicyPreset = 'open-table'): RoomP
 export function applyRoomPolicyPatch(current: RoomPolicy, patch: RoomPolicyPatch): RoomPolicy {
   const base = patch.preset ? createRoomPolicy(patch.preset) : cloneRoomPolicy(current);
   const enabled = patch.enabled ?? base.enabled;
-  const shutdownReason = patch.shutdownReason === null
-    ? undefined
-    : patch.shutdownReason ?? base.shutdownReason;
+  const shutdownReason =
+    patch.shutdownReason === null ? undefined : (patch.shutdownReason ?? base.shutdownReason);
   return {
     ...base,
-    preset: hasCustomPolicyFields(patch) ? 'custom' : patch.preset ?? base.preset,
+    preset: hasCustomPolicyFields(patch) ? 'custom' : (patch.preset ?? base.preset),
     enabled,
     ...(shutdownReason ? { shutdownReason } : {}),
     access: { ...current.access },
@@ -318,9 +319,10 @@ export function applyRoomPolicyPatch(current: RoomPolicy, patch: RoomPolicyPatch
     limits: { ...base.limits, ...patch.limits },
     rateLimits: { ...base.rateLimits, ...patch.rateLimits },
     lifecycle: { ...base.lifecycle, ...patch.lifecycle },
-    renderer: base.renderer || patch.renderer
-      ? { ...(base.renderer ?? OPEN_TABLE_POLICY.renderer!), ...patch.renderer }
-      : undefined,
+    renderer:
+      base.renderer || patch.renderer
+        ? { ...(base.renderer ?? OPEN_TABLE_POLICY.renderer!), ...patch.renderer }
+        : undefined,
   };
 }
 
@@ -342,11 +344,13 @@ export function cloneRoomPolicy(policy: RoomPolicy): RoomPolicy {
 }
 
 function hasCustomPolicyFields(patch: RoomPolicyPatch): boolean {
-  return patch.enabled !== undefined
-    || patch.shutdownReason !== undefined
-    || patch.authorization !== undefined
-    || patch.limits !== undefined
-    || patch.rateLimits !== undefined
-    || patch.lifecycle !== undefined
-    || patch.renderer !== undefined;
+  return (
+    patch.enabled !== undefined ||
+    patch.shutdownReason !== undefined ||
+    patch.authorization !== undefined ||
+    patch.limits !== undefined ||
+    patch.rateLimits !== undefined ||
+    patch.lifecycle !== undefined ||
+    patch.renderer !== undefined
+  );
 }

@@ -6,15 +6,22 @@ const root = resolve(import.meta.dirname, '..');
 const worker = readFileSync(join(root, 'apps/worker/src/index.ts'), 'utf8');
 const runtime = readFileSync(join(root, 'packages/protocol/src/runtime.ts'), 'utf8');
 const deploy = readFileSync(join(root, 'apps/worker/wrangler.deploy.example.jsonc'), 'utf8');
-const migrationEvents = readFileSync(join(root, 'apps/worker/migrations/0005_room_events.sql'), 'utf8');
-const migrationRequests = readFileSync(join(root, 'apps/worker/migrations/0006_room_requests.sql'), 'utf8');
+const migrationEvents = readFileSync(
+  join(root, 'apps/worker/migrations/0005_room_events.sql'),
+  'utf8',
+);
+const migrationRequests = readFileSync(
+  join(root, 'apps/worker/migrations/0006_room_requests.sql'),
+  'utf8',
+);
 
 for (const marker of [
   "this.state.getWebSockets('draftroll-room')",
   'deserializeAttachment(socket)',
   'serializeAttachment',
   'private getSessions()',
-]) assert.ok(worker.includes(marker), `Durable Object hibernation recovery is missing ${marker}`);
+])
+  assert.ok(worker.includes(marker), `Durable Object hibernation recovery is missing ${marker}`);
 
 const bulkStart = worker.indexOf('private async handleBulkRollUpdate');
 const bulkEnd = worker.indexOf('private async handleVisibilityUpdate', bulkStart);
@@ -26,9 +33,11 @@ for (const marker of [
   'await this.state.storage.put(storageEntries)',
   'for (const internal of internalEvents) this.broadcastRoll(internal)',
   'this.persistEventSafely(acknowledgement, policy)',
-]) assert.ok(bulk.includes(marker), `bulk update atomicity/idempotency is missing ${marker}`);
+])
+  assert.ok(bulk.includes(marker), `bulk update atomicity/idempotency is missing ${marker}`);
 assert.ok(
-  bulk.indexOf('await this.state.storage.put(storageEntries)') < bulk.indexOf('for (const internal of internalEvents) this.broadcastRoll(internal)'),
+  bulk.indexOf('await this.state.storage.put(storageEntries)') <
+    bulk.indexOf('for (const internal of internalEvents) this.broadcastRoll(internal)'),
   'bulk update broadcasts before the atomic Durable Object commit',
 );
 
@@ -39,7 +48,8 @@ for (const marker of [
   'private async recordPersistenceFailure',
   "this.logStructured('persistence.failed'",
   "this.state.storage.get<PersistenceFailure[]>('persistenceFailures')",
-]) assert.ok(worker.includes(marker), `D1 retry/failure diagnostics are missing ${marker}`);
+])
+  assert.ok(worker.includes(marker), `D1 retry/failure diagnostics are missing ${marker}`);
 
 for (const marker of [
   'INSERT INTO room_events',
@@ -48,8 +58,9 @@ for (const marker of [
   'missedEventsTruncated',
   'private async getDurableEvents',
   "url.pathname.endsWith('/diagnostics')",
-  "Room diagnostics require room:manage",
-]) assert.ok(worker.includes(marker), `durable recovery/diagnostics are missing ${marker}`);
+  'Room diagnostics require room:manage',
+])
+  assert.ok(worker.includes(marker), `durable recovery/diagnostics are missing ${marker}`);
 
 for (const marker of [
   'maximumInboundMessageBytes',
@@ -57,7 +68,11 @@ for (const marker of [
   'function isOriginAllowed',
   'origin_not_allowed',
   'payload_too_large',
-]) assert.ok(worker.includes(marker) || runtime.includes(marker), `origin/payload enforcement is missing ${marker}`);
+])
+  assert.ok(
+    worker.includes(marker) || runtime.includes(marker),
+    `origin/payload enforcement is missing ${marker}`,
+  );
 
 for (const sql of [migrationEvents, migrationRequests]) {
   assert.match(sql, /CREATE TABLE IF NOT EXISTS/i);
@@ -66,22 +81,39 @@ for (const sql of [migrationEvents, migrationRequests]) {
 assert.match(migrationEvents, /room_events/i);
 assert.match(migrationRequests, /room_requests/i);
 
-for (const environment of ['staging', 'production']) assert.ok(deploy.includes(`"${environment}"`), `missing ${environment} Wrangler environment`);
-assert.equal((deploy.match(/"ALLOW_ANONYMOUS": "false"/g) ?? []).length, 2, 'staging and production must disable anonymous access');
-assert.ok(deploy.includes('REPLACE_WITH_STAGING_D1_DATABASE_ID'), 'staging D1 placeholder is missing');
-assert.ok(deploy.includes('REPLACE_WITH_PRODUCTION_D1_DATABASE_ID'), 'production D1 placeholder is missing');
+for (const environment of ['staging', 'production'])
+  assert.ok(deploy.includes(`"${environment}"`), `missing ${environment} Wrangler environment`);
+assert.equal(
+  (deploy.match(/"ALLOW_ANONYMOUS": "false"/g) ?? []).length,
+  2,
+  'staging and production must disable anonymous access',
+);
+assert.ok(
+  deploy.includes('REPLACE_WITH_STAGING_D1_DATABASE_ID'),
+  'staging D1 placeholder is missing',
+);
+assert.ok(
+  deploy.includes('REPLACE_WITH_PRODUCTION_D1_DATABASE_ID'),
+  'production D1 placeholder is missing',
+);
 assert.ok(deploy.includes('ROOM_TOKEN_REQUIRE_JTI'), 'token ID requirement is missing');
 assert.ok(deploy.includes('ALLOWED_ORIGINS'), 'allowed-origin configuration is missing');
 
-console.log(JSON.stringify({
-  ok: true,
-  checks: [
-    'Durable Object hibernation attachment restoration',
-    'atomic bulk validation/commit before broadcast',
-    'persistent request idempotency and long-range event recovery',
-    'bounded D1 retry and persisted failure diagnostics',
-    'manager-only room diagnostics',
-    'origin, protocol, and payload-size enforcement',
-    'staging/production secure deployment templates',
-  ],
-}, null, 2));
+console.log(
+  JSON.stringify(
+    {
+      ok: true,
+      checks: [
+        'Durable Object hibernation attachment restoration',
+        'atomic bulk validation/commit before broadcast',
+        'persistent request idempotency and long-range event recovery',
+        'bounded D1 retry and persisted failure diagnostics',
+        'manager-only room diagnostics',
+        'origin, protocol, and payload-size enforcement',
+        'staging/production secure deployment templates',
+      ],
+    },
+    null,
+    2,
+  ),
+);

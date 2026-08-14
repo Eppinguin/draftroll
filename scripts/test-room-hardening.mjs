@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { runTsc } from './lib/load-typescript.mjs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -11,22 +11,29 @@ const outDir = join(tempRoot, 'build');
 const configPath = join(tempRoot, 'tsconfig.json');
 
 try {
-  await writeFile(configPath, JSON.stringify({
-    compilerOptions: {
-      target: 'ES2022',
-      module: 'CommonJS',
-      moduleResolution: 'Node',
-      rootDir: join(projectRoot, 'packages'),
-      outDir,
-      strict: true,
-      skipLibCheck: true,
-      esModuleInterop: true,
-      lib: ['ES2022', 'DOM', 'DOM.Iterable'],
-    },
-    include: [join(projectRoot, 'packages/protocol/**/*.ts')],
-  }, null, 2));
+  await writeFile(
+    configPath,
+    JSON.stringify(
+      {
+        compilerOptions: {
+          target: 'ES2022',
+          module: 'CommonJS',
+          moduleResolution: 'Node',
+          rootDir: join(projectRoot, 'packages'),
+          outDir,
+          strict: true,
+          skipLibCheck: true,
+          esModuleInterop: true,
+          lib: ['ES2023', 'DOM', 'DOM.Iterable'],
+        },
+        include: [join(projectRoot, 'packages/protocol/**/*.ts')],
+      },
+      null,
+      2,
+    ),
+  );
 
-  const compile = spawnSync('tsc', ['-p', configPath], { cwd: projectRoot, encoding: 'utf8' });
+  const compile = runTsc(['-p', configPath], { cwd: projectRoot });
   if (compile.status !== 0) {
     process.stderr.write(compile.stdout);
     process.stderr.write(compile.stderr);
@@ -50,7 +57,9 @@ try {
   assert.equal(decodeRoomPolicy(open).success, true);
   assert.equal(privateGm.authorization.allowOwnRollReveal, false);
   assert.equal(moderated.authorization.allowHiddenRolls, false);
-  assert.ok(moderated.rateLimits.commandsPerMinutePerSession < open.rateLimits.commandsPerMinutePerSession);
+  assert.ok(
+    moderated.rateLimits.commandsPerMinutePerSession < open.rateLimits.commandsPerMinutePerSession,
+  );
 
   const patchResult = decodeRoomPolicyPatch({
     enabled: false,
@@ -75,14 +84,19 @@ try {
 
   const invalidLimit = decodeRoomPolicyPatch({ limits: { maximumInboundMessageBytes: 128 } });
   assert.equal(invalidLimit.success, false);
-  assert.ok(invalidLimit.error.issues.some((issue) => issue.path.endsWith('.maximumInboundMessageBytes')));
+  assert.ok(
+    invalidLimit.error.issues.some((issue) => issue.path.endsWith('.maximumInboundMessageBytes')),
+  );
 
-  const command = decodeClientToServerEvent({
-    type: 'set_room_policy',
-    requestId: 'policy-1',
-    expectedRevision: 0,
-    policy: { rateLimits: { rollsPerMinutePerRoom: 40 } },
-  }, { rejectUnknownFields: true });
+  const command = decodeClientToServerEvent(
+    {
+      type: 'set_room_policy',
+      requestId: 'policy-1',
+      expectedRevision: 0,
+      policy: { rateLimits: { rollsPerMinutePerRoom: 40 } },
+    },
+    { rejectUnknownFields: true },
+  );
   assert.equal(command.success, true);
 
   const actor = { participantId: 'gm', sessionId: 'gm-session', name: 'GM', roles: ['gm'] };
@@ -131,14 +145,22 @@ try {
     'persistenceFailures',
     'origin_not_allowed',
   ]) {
-    assert.ok(workerSource.includes(required), `worker hardening implementation is missing ${required}`);
+    assert.ok(
+      workerSource.includes(required),
+      `worker hardening implementation is missing ${required}`,
+    );
   }
 
   const workspace = await readFile(join(projectRoot, 'pnpm-workspace.yaml'), 'utf8');
   assert.match(workspace, /allowBuilds:/);
   assert.match(workspace, /esbuild:\s*true/);
   assert.match(workspace, /workerd:\s*true/);
-  const wrangler = JSON.parse((await readFile(join(projectRoot, 'apps/worker/wrangler.jsonc'), 'utf8')).replace(/^\s*\/\/.*$/gm, ''));
+  const wrangler = JSON.parse(
+    (await readFile(join(projectRoot, 'apps/worker/wrangler.jsonc'), 'utf8')).replace(
+      /^\s*\/\/.*$/gm,
+      '',
+    ),
+  );
   assert.equal(wrangler.compatibility_date, '2026-07-29');
 
   const packagePaths = [
@@ -153,20 +175,34 @@ try {
     'packages/themes/package.json',
     'apps/worker/package.json',
   ];
-  const versions = await Promise.all(packagePaths.map(async (path) => JSON.parse(await readFile(join(projectRoot, path), 'utf8')).version));
-  assert.deepEqual([...new Set(versions)], ['0.1.0'], 'implementation work must not bump package versions');
+  const versions = await Promise.all(
+    packagePaths.map(
+      async (path) => JSON.parse(await readFile(join(projectRoot, path), 'utf8')).version,
+    ),
+  );
+  assert.deepEqual(
+    [...new Set(versions)],
+    ['0.1.0'],
+    'implementation work must not bump package versions',
+  );
 
-  console.log(JSON.stringify({
-    ok: true,
-    tested: [
-      'room-policy presets and patch merging',
-      'policy runtime validation and bounds',
-      'sequenced policy request and replay events',
-      'rate-limit, participant, storage, expiry, and retention implementation presence',
-      'esbuild/workerd allowBuilds and Wrangler compatibility date',
-      'no package version bumps',
-    ],
-  }, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        ok: true,
+        tested: [
+          'room-policy presets and patch merging',
+          'policy runtime validation and bounds',
+          'sequenced policy request and replay events',
+          'rate-limit, participant, storage, expiry, and retention implementation presence',
+          'esbuild/workerd allowBuilds and Wrangler compatibility date',
+          'no package version bumps',
+        ],
+      },
+      null,
+      2,
+    ),
+  );
 } finally {
   await rm(tempRoot, { recursive: true, force: true });
 }

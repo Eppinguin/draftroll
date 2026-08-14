@@ -1,0 +1,71 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "perf": "error",
+    "pedantic": "off",
+    "style": "off"
+  },
+  "options": {
+    "denyWarnings": true,
+    "reportUnusedDisableDirectives": "error",
+    "typeAware": true
+  },
+  "plugins": [
+    "eslint",
+    "typescript",
+    "unicorn",
+    "oxc",
+    "import",
+    "promise",
+    "node",
+    "react",
+    "jsx-a11y",
+    "vue"
+  ],
+  "rules": {
+    "eslint/eqeqeq": ["error", "always", { "null": "ignore" }],
+    "eslint/no-debugger": "error",
+    "eslint/no-eval": "error",
+    "eslint/no-implied-eval": "error",
+    "eslint/no-new-func": "error",
+    "eslint/no-warning-comments": [
+      "error",
+      { "terms": ["todo", "fixme", "xxx"], "location": "start" }
+    ],
+    "eslint/no-underscore-dangle": [
+      "error",
+      {
+        "allow": ["__draftrollTest", "_defaultValue"],
+        "allowFunctionParams": true
+      }
+    ],
+    "eslint/no-await-in-loop": "off",
+    "typescript/consistent-return": "off",
+    "promise/always-return": "off",
+    "import/no-unassigned-import": ["error", { "allow": ["**/*.css", "./main"] }],
+    "import/export": "error",
+    "import/no-cycle": "error",
+    "import/no-duplicates": "error",
+    "import/no-self-import": "error",
+    "typescript/await-thenable": "error",
+    "typescript/no-explicit-any": "error",
+    "typescript/no-floating-promises": "error",
+    "typescript/no-misused-promises": "error",
+    "typescript/only-throw-error": "error",
+    "typescript/switch-exhaustiveness-check": "error"
+  },
+  "ignorePatterns": [
+    "packages/*/dist/**",
+    "apps/worker/worker-configuration.d.ts",
+    "**/worker-configuration.d.ts",
+    "benchmark-results/**",
+    "dist/**",
+    "dist-browser/**",
+    "dist-overlay/**",
+    ".release-build/**",
+    "playwright-report/**",
+    "test-results/**"
+  ]
+}

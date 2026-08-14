@@ -65,6 +65,13 @@ The planner also uses:
 - modest dice-to-dice restitution
 - conservative friction
 
+Edge-balance correction is contact-aware. A nearly motionless die that touches
+only the table may receive a small, cooldown-bounded wake-up so an exact solver
+equilibrium does not leave it balanced on an edge. Dice braced by other dice or
+a wall are treated as a physically valid pile and are never repeatedly woken.
+This keeps dense pools from running to the planning timeout without flattening
+stacks, skipping collisions, or changing the recorded trajectory frequency.
+
 These settings prioritize contact integrity for transient planning. They do not keep a high-frequency render loop active after the roll.
 
 ## Exact predetermined faces

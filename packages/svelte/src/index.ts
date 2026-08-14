@@ -7,7 +7,11 @@
  * @packageDocumentation
  */
 
-import type { DraftrollSession, DraftrollSessionRoll, DraftrollSessionSnapshot } from '../../sdk/src/index';
+import type {
+  DraftrollSession,
+  DraftrollSessionRoll,
+  DraftrollSessionSnapshot,
+} from '../../sdk/src/index';
 
 /**
  * Svelte store snapshot containing session state and retained rolls.

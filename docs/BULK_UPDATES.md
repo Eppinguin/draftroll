@@ -3,19 +3,22 @@
 Bulk updates apply multiple existing-roll corrections as one room transaction.
 
 ```ts
-const result = await session.bulkUpdateRolls([
-  {
-    roll: attack,
-    update: { dice: [{ id: attack.dice[0].id, result: 20 }] },
-    animate: true,
-    audit: { reason: 'Table correction', label: 'GM ruling' },
-  },
-  {
-    roll: damage,
-    update: { annotation: 'Resistance applied' },
-    animate: false,
-  },
-], { signal });
+const result = await session.bulkUpdateRolls(
+  [
+    {
+      roll: attack,
+      update: { dice: [{ id: attack.dice[0].id, result: 20 }] },
+      animate: true,
+      audit: { reason: 'Table correction', label: 'GM ruling' },
+    },
+    {
+      roll: damage,
+      update: { annotation: 'Resistance applied' },
+      animate: false,
+    },
+  ],
+  { signal },
+);
 ```
 
 ## Guarantees

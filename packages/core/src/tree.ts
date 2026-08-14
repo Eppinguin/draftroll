@@ -32,7 +32,10 @@ export function walkRollTree(root: RollTreeNode, visitor: RollTreeVisitor): void
  *
  * @public
  */
-export function findRollNode(root: RollTreeNode, predicate: (node: RollTreeNode) => boolean): RollTreeNode | null {
+export function findRollNode(
+  root: RollTreeNode,
+  predicate: (node: RollTreeNode) => boolean,
+): RollTreeNode | null {
   let match: RollTreeNode | null = null;
   walkRollTree(root, (node) => {
     if (!match && predicate(node)) match = node;
@@ -45,7 +48,10 @@ export function findRollNode(root: RollTreeNode, predicate: (node: RollTreeNode)
  *
  * @public
  */
-export function filterRollNodes(root: RollTreeNode, predicate: (node: RollTreeNode) => boolean): RollTreeNode[] {
+export function filterRollNodes(
+  root: RollTreeNode,
+  predicate: (node: RollTreeNode) => boolean,
+): RollTreeNode[] {
   const matches: RollTreeNode[] = [];
   walkRollTree(root, (node) => {
     if (predicate(node)) matches.push(node);
@@ -63,7 +69,8 @@ export function leftmostRollNode(root: RollTreeNode): RollTreeNode {
   while (true) {
     if (current.kind === 'binary') current = current.left;
     else if (current.kind === 'parenthetical' || current.kind === 'unary') current = current.child;
-    else if ((current.kind === 'dice' || current.kind === 'set') && current.children.length > 0) current = current.children[0];
+    else if ((current.kind === 'dice' || current.kind === 'set') && current.children.length > 0)
+      current = current.children[0];
     else return current;
   }
 }
@@ -78,7 +85,8 @@ export function rightmostRollNode(root: RollTreeNode): RollTreeNode {
   while (true) {
     if (current.kind === 'binary') current = current.right;
     else if (current.kind === 'parenthetical' || current.kind === 'unary') current = current.child;
-    else if ((current.kind === 'dice' || current.kind === 'set') && current.children.length > 0) current = current.children[current.children.length - 1];
+    else if ((current.kind === 'dice' || current.kind === 'set') && current.children.length > 0)
+      current = current.children[current.children.length - 1];
     else return current;
   }
 }

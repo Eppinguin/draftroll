@@ -40,11 +40,24 @@ interface BrowserFixtureApi {
   ready: Promise<void>;
   getState(): BrowserFixtureState;
   rollLocal(expression?: string): Promise<{ total: number; dice: number }>;
-  connectRoom(options?: { roomId?: string; participantId?: string; sessionId?: string; name?: string }): Promise<void>;
-  rollRoom(expression?: string, visibility?: RollVisibility): Promise<{ rollId: string; hidden: boolean; total: number | null }>;
+  connectRoom(options?: {
+    roomId?: string;
+    participantId?: string;
+    sessionId?: string;
+    name?: string;
+  }): Promise<void>;
+  rollRoom(
+    expression?: string,
+    visibility?: RollVisibility,
+  ): Promise<{ rollId: string; hidden: boolean; total: number | null }>;
   revealLast(): Promise<{ rollId: string; revision: number; total: number | null }>;
   destroyOverlay(): void;
   closeRoom(): void;
+  /**
+   * Drops the live WebSocket the way a lost network would, without marking the close
+   * intentional, so the client's reconnect and event-replay path runs.
+   */
+  dropConnection(): void;
 }
 
 declare global {
@@ -81,6 +94,18 @@ let overlay: DraftrollOverlayRenderer | undefined;
 let draftroll: Draftroll;
 let roomSession: DraftrollRoomSession | null = null;
 let lastRoomRoll: DraftrollRoomRoll | null = null;
+// Tracks the socket the room client is currently using so a test can sever it. Playwright's
+// `context.setOffline` does not close an already-established WebSocket, so it never triggers
+// the reconnect path this fixture needs to exercise.
+let liveSocket: WebSocket | null = null;
+
+const TrackedWebSocket = new Proxy(WebSocket, {
+  construct(target, args: [string | URL, (string | string[])?]) {
+    const socket = new target(...args);
+    liveSocket = socket;
+    return socket;
+  },
+});
 
 const ready = initialize();
 window.__draftrollTest = {
@@ -96,6 +121,9 @@ window.__draftrollTest = {
     renderState();
   },
   closeRoom: () => roomSession?.close(),
+  // 4900 carries no protocol meaning (4001-4003 are password/token cases the client treats as
+  // intentional), so the client sees an unexpected close and runs reconnect + event replay.
+  dropConnection: () => liveSocket?.close(4900, 'test transport drop'),
 };
 
 window.addEventListener('securitypolicyviolation', (event) => {
@@ -154,7 +182,9 @@ async function initialize(): Promise<void> {
   }
 }
 
-async function rollLocal(expression = '1d20+1d8+1d2+1dF+1d9'): Promise<{ total: number; dice: number }> {
+async function rollLocal(
+  expression = '1d20+1d8+1d2+1dF+1d9',
+): Promise<{ total: number; dice: number }> {
   await ready;
   const roll = draftroll.roll(expression, {
     render: rendererEnabled,
@@ -168,7 +198,9 @@ async function rollLocal(expression = '1d20+1d8+1d2+1dF+1d9'): Promise<{ total: 
   return { total: roll.total, dice: roll.dice.length };
 }
 
-async function connectRoom(options: { roomId?: string; participantId?: string; sessionId?: string; name?: string } = {}): Promise<void> {
+async function connectRoom(
+  options: { roomId?: string; participantId?: string; sessionId?: string; name?: string } = {},
+): Promise<void> {
   if (roomSession) return;
   if (!draftroll) await ready;
   const roomId = options.roomId ?? `browser-${crypto.randomUUID()}`;
@@ -180,6 +212,7 @@ async function connectRoom(options: { roomId?: string; participantId?: string; s
       sessionId: options.sessionId ?? `session-${crypto.randomUUID()}`,
       name: options.name ?? 'Browser participant',
     },
+    WebSocketImpl: TrackedWebSocket,
     reconnect: true,
     reconnectDelayMs: 150,
     clockSyncSamples: 1,
@@ -258,11 +291,12 @@ function recordRoomEvent(event: {
     total: event.result?.total ?? null,
     replayed: event.replayed === true,
   };
-  const existing = state.roomEvents.findIndex((candidate) =>
-    candidate.rollId === entry.rollId
-      && candidate.type === entry.type
-      && candidate.revision === entry.revision
-      && candidate.eventSequence === entry.eventSequence,
+  const existing = state.roomEvents.findIndex(
+    (candidate) =>
+      candidate.rollId === entry.rollId &&
+      candidate.type === entry.type &&
+      candidate.revision === entry.revision &&
+      candidate.eventSequence === entry.eventSequence,
   );
   if (existing >= 0) state.roomEvents[existing] = entry;
   else state.roomEvents.push(entry);
@@ -270,7 +304,10 @@ function recordRoomEvent(event: {
 }
 
 function syncParticipants(): void {
-  state.participants = roomSession?.room.participants.map((participant) => participant.name).sort() ?? [];
+  state.participants =
+    roomSession?.room.participants
+      .map((participant) => participant.name)
+      .toSorted((left, right) => left.localeCompare(right)) ?? [];
   renderState();
 }
 

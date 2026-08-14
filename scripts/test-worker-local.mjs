@@ -22,12 +22,16 @@ const stopServer = async () => {
   stopping = true;
   if (process.platform === 'win32') {
     await new Promise((resolve) => {
-      const killer = spawn('taskkill', ['/pid', String(server.pid), '/T', '/F'], { stdio: 'ignore' });
+      const killer = spawn('taskkill', ['/pid', String(server.pid), '/T', '/F'], {
+        stdio: 'ignore',
+      });
       killer.on('exit', resolve);
       killer.on('error', resolve);
     });
   } else {
     try {
+      if (server.pid === undefined) throw new Error('Worker process has no pid');
+      // Negative pid signals the whole process group spawned with `detached`.
       process.kill(-server.pid, 'SIGTERM');
     } catch {
       server.kill('SIGTERM');
@@ -47,16 +51,24 @@ try {
 
 async function runCommand(args) {
   await new Promise((resolve, reject) => {
-    const child = spawn(pnpmCommand, args, { cwd: process.cwd(), env: process.env, stdio: 'inherit' });
+    const child = spawn(pnpmCommand, args, {
+      cwd: process.cwd(),
+      env: process.env,
+      stdio: 'inherit',
+    });
     child.on('error', reject);
-    child.on('exit', (code) => code === 0 ? resolve() : reject(new Error(`pnpm ${args.join(' ')} exited with code ${code}`)));
+    child.on('exit', (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`pnpm ${args.join(' ')} exited with code ${code}`));
+    });
   });
 }
 
 async function waitForHealth(url, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (server.exitCode !== null) throw new Error(`Wrangler exited before becoming ready (code ${server.exitCode})`);
+    if (server.exitCode !== null)
+      throw new Error(`Wrangler exited before becoming ready (code ${server.exitCode})`);
     try {
       const response = await fetch(url);
       if (response.ok) return;

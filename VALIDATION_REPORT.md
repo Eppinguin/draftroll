@@ -1,6 +1,6 @@
 # Draftroll validation report
 
-Validated on 2026-07-31 with Node.js 22.16.0 and the repository's global TypeScript compiler.
+Validated on 2026-08-01 with Node.js 22.16.0 and the repository's global TypeScript compiler.
 
 ## Passed
 
@@ -49,3 +49,13 @@ No real Cloudflare D1 IDs, domains, origins, tokens, or signing secrets are incl
 - `node scripts/test-tsdoc-declarations.mjs` passes for all 13 published declaration entry points after package generation.
 - A comment-stripped TypeScript emission comparison confirms that the source documentation changes do not alter runtime semantics.
 - The reference-parser mode could not be executed in this environment because the configured package gateway does not provide the TSDoc packages; it is wired into `pnpm check` and `pnpm test:release` for a normal dependency installation.
+
+## Code quality and Web Crypto compatibility
+
+- Fixed TypeScript 5.8 Web Crypto compatibility by copying decoded signatures into an owned `ArrayBuffer` before calling `SubtleCrypto.verify`. This avoids passing `Uint8Array<ArrayBufferLike>` where the DOM API requires an `ArrayBuffer`-backed `BufferSource`.
+- Added exact Oxlint, `oxlint-tsgolint`, and Oxfmt development dependencies.
+- Added strict root linting with correctness, suspicious, and performance categories; selected high-value pedantic/type-aware rules; import-cycle checks; warnings-as-errors; unused-disable reporting; and deterministic formatting configuration.
+- Added `pnpm lint`, `pnpm lint:fix`, `pnpm format`, `pnpm format:check`, `pnpm check:quality`, and `pnpm test:quality-config`.
+- Integrated quality gates into `pnpm check` and `pnpm test:release`.
+- Added editor configuration and `docs/CODE_QUALITY.md`.
+- The Oxc binaries were unavailable in this isolated validation environment because its package gateway does not mirror them. Configuration structure, exact versions, command wiring, Web Crypto source contracts, TypeScript package/Worker checks, declaration generation, and existing deterministic regressions were validated directly. Run `pnpm install && pnpm check` against the public registry to execute Oxlint and Oxfmt themselves.

@@ -16,7 +16,25 @@ interface Trajectory {
   arcHeight: number;
   rotationStart: number;
   rotationTurns: number;
+  coinAngularSpeed: number;
+  coinTiltAxis: number;
+  coinFinalYaw: number;
+  coinYawSpeed: number;
+  coinRicochet: number;
+  coinTravelAngle: number;
+  coinBounceScale: number;
+  coinFirstContact: number;
+  coinSecondContact: number;
+  coinThirdContact: number;
+  coinDuration: number;
   delay: number;
+}
+
+interface CoinVisual {
+  group: THREE.Group;
+  geometries: THREE.BufferGeometry[];
+  materials: THREE.Material[];
+  textures: THREE.Texture[];
 }
 
 let shadowTexture: THREE.CanvasTexture | null = null;
@@ -105,7 +123,14 @@ function createVisualTexture(spec: DraftrollFallbackVisual): THREE.CanvasTexture
   } else if (spec.kind === 'fate') {
     roundedRect(context, bounds.x, bounds.y, bounds.width, bounds.height, 62);
   } else {
-    roundedRect(context, bounds.x, bounds.y, bounds.width, bounds.height, spec.kind === 'card' ? 48 : 100);
+    roundedRect(
+      context,
+      bounds.x,
+      bounds.y,
+      bounds.width,
+      bounds.height,
+      spec.kind === 'card' ? 48 : 100,
+    );
   }
 
   const fill = context.createLinearGradient(120, 70, 520, 390);
@@ -190,7 +215,7 @@ function visualBounds(kind: DraftrollFallbackKind): {
 }
 
 function normalizeTheme(theme: string): ThemeName {
-  return Object.prototype.hasOwnProperty.call(THEMES, theme) ? theme as ThemeName : 'dragon';
+  return Object.prototype.hasOwnProperty.call(THEMES, theme) ? theme : 'dragon';
 }
 
 function truncate(value: string, maximum: number): string {
@@ -207,14 +232,199 @@ function easeOutBack(value: number): number {
   return 1 + (overshoot + 1) * shifted * shifted * shifted + overshoot * shifted * shifted;
 }
 
+function parabolicHop(progress: number, start: number, end: number, height: number): number {
+  const localProgress = THREE.MathUtils.clamp((progress - start) / (end - start), 0, 1);
+  return 4 * height * localProgress * (1 - localProgress);
+}
+
+function coinAngularDisplacement(
+  progress: number,
+  trajectory: Trajectory,
+  angularSpeed: number,
+): number {
+  const segments = [
+    { start: 0, end: trajectory.coinFirstContact, rate: 1 },
+    { start: trajectory.coinFirstContact, end: trajectory.coinSecondContact, rate: 0.48 },
+    { start: trajectory.coinSecondContact, end: trajectory.coinThirdContact, rate: 0.2 },
+    { start: trajectory.coinThirdContact, end: 1, rate: 0.06 },
+  ];
+  let displacement = 0;
+  for (const segment of segments) {
+    const duration = Math.max(0, Math.min(progress, segment.end) - segment.start);
+    displacement += duration * angularSpeed * segment.rate;
+    if (progress <= segment.end) break;
+  }
+  return displacement;
+}
+
+function coinTravelProgress(progress: number, trajectory: Trajectory): number {
+  if (progress < trajectory.coinFirstContact) {
+    return (progress / trajectory.coinFirstContact) * 0.84;
+  }
+  if (progress < trajectory.coinSecondContact) {
+    return THREE.MathUtils.lerp(
+      0.84,
+      0.94,
+      (progress - trajectory.coinFirstContact) /
+        (trajectory.coinSecondContact - trajectory.coinFirstContact),
+    );
+  }
+  if (progress < trajectory.coinThirdContact) {
+    return THREE.MathUtils.lerp(
+      0.94,
+      0.985,
+      (progress - trajectory.coinSecondContact) /
+        (trajectory.coinThirdContact - trajectory.coinSecondContact),
+    );
+  }
+  return THREE.MathUtils.lerp(
+    0.985,
+    1,
+    (progress - trajectory.coinThirdContact) / (1 - trajectory.coinThirdContact),
+  );
+}
+
+function coinRicochetOffset(progress: number, trajectory: Trajectory): number {
+  if (progress < trajectory.coinFirstContact) return 0;
+  if (progress < trajectory.coinSecondContact) {
+    return THREE.MathUtils.lerp(
+      0,
+      trajectory.coinRicochet,
+      (progress - trajectory.coinFirstContact) /
+        (trajectory.coinSecondContact - trajectory.coinFirstContact),
+    );
+  }
+  if (progress < trajectory.coinThirdContact) {
+    return THREE.MathUtils.lerp(
+      trajectory.coinRicochet,
+      trajectory.coinRicochet * -0.35,
+      (progress - trajectory.coinSecondContact) /
+        (trajectory.coinThirdContact - trajectory.coinSecondContact),
+    );
+  }
+  return THREE.MathUtils.lerp(
+    trajectory.coinRicochet * -0.35,
+    0,
+    (progress - trajectory.coinThirdContact) / (1 - trajectory.coinThirdContact),
+  );
+}
+
+function randomSettledPosition(
+  count: number,
+  bounds: FallbackVisualBounds,
+  occupied: readonly THREE.Vector2[],
+  random: () => number,
+): THREE.Vector2 {
+  const rangeX = Math.max(0.2, bounds.x - 0.95);
+  const rangeZ = Math.max(0.2, bounds.z - 0.95);
+  const minimumSeparation = count <= 12 ? 1.72 : count <= 20 ? 1.46 : 1.22;
+  const candidate = new THREE.Vector2();
+  const best = new THREE.Vector2();
+  let bestDistance = -1;
+
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    candidate.set((random() * 2 - 1) * rangeX, (random() * 2 - 1) * rangeZ);
+    const nearest = occupied.reduce(
+      (distance, position) => Math.min(distance, candidate.distanceTo(position)),
+      Number.POSITIVE_INFINITY,
+    );
+    if (nearest >= minimumSeparation) return candidate.clone();
+    if (nearest > bestDistance) {
+      bestDistance = nearest;
+      best.copy(candidate);
+    }
+  }
+  return best;
+}
+
+function cropCoinTexture(texture: THREE.CanvasTexture): void {
+  texture.offset.set(100 / 640, 0);
+  texture.repeat.set(440 / 640, 1);
+  texture.needsUpdate = true;
+}
+
+function createCoinVisual(texture: THREE.CanvasTexture, spec: DraftrollFallbackVisual): CoinVisual {
+  const palette = THEMES[normalizeTheme(spec.theme)];
+  const group = new THREE.Group();
+  const bodyGeometry = new THREE.CylinderGeometry(0.76, 0.76, 0.14, 64, 1, false);
+  const faceGeometry = new THREE.CircleGeometry(0.69, 64);
+  const edgeMaterial = new THREE.MeshStandardMaterial({
+    color: palette.edge,
+    emissive: palette.shadow,
+    emissiveIntensity: 0.08,
+    metalness: 0.58,
+    roughness: 0.3,
+    transparent: true,
+    opacity: 0,
+  });
+  const capMaterial = new THREE.MeshStandardMaterial({
+    color: palette.base,
+    metalness: 0.42,
+    roughness: 0.36,
+    transparent: true,
+    opacity: 0,
+  });
+
+  // The fallback artwork is rectangular. Crop its centered square so the
+  // circular result face remains round when it is applied to the 3D coin.
+  cropCoinTexture(texture);
+  const faceMaterial = new THREE.MeshBasicMaterial({
+    map: texture,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    toneMapped: false,
+    side: THREE.FrontSide,
+  });
+  const backTexture = createVisualTexture({
+    ...spec,
+    label: spec.oppositeLabel ?? '•',
+  });
+  cropCoinTexture(backTexture);
+  const backMaterial = new THREE.MeshBasicMaterial({
+    map: backTexture,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    toneMapped: false,
+    side: THREE.FrontSide,
+  });
+
+  const body = new THREE.Mesh(bodyGeometry, [edgeMaterial, capMaterial, capMaterial]);
+  body.castShadow = true;
+  body.receiveShadow = true;
+  group.add(body);
+
+  const face = new THREE.Mesh(faceGeometry, faceMaterial);
+  face.rotation.x = -Math.PI / 2;
+  face.position.y = 0.072;
+  face.renderOrder = 6;
+  group.add(face);
+
+  const back = new THREE.Mesh(faceGeometry, backMaterial);
+  back.rotation.x = Math.PI / 2;
+  back.position.y = -0.072;
+  back.renderOrder = 6;
+  group.add(back);
+
+  return {
+    group,
+    geometries: [bodyGeometry, faceGeometry],
+    materials: [edgeMaterial, capMaterial, faceMaterial, backMaterial],
+    textures: [backTexture],
+  };
+}
+
 export class FallbackVisualInstance {
   readonly group = new THREE.Group();
   readonly spec: DraftrollFallbackVisual;
   private readonly texture: THREE.CanvasTexture;
   private readonly material: THREE.SpriteMaterial;
   private readonly sprite: THREE.Sprite;
+  private readonly coin: CoinVisual | null;
   private readonly shadowMaterial: THREE.SpriteMaterial;
   private readonly shadow: THREE.Sprite;
+  private readonly coinFlipAxis = new THREE.Vector3(1, 0, 0);
   private trajectory: Trajectory | null = null;
   private settled = false;
 
@@ -232,7 +442,8 @@ export class FallbackVisualInstance {
     const scale = visualScale(spec.kind);
     this.sprite.scale.set(scale.x, scale.y, 1);
     this.sprite.renderOrder = 5;
-    this.group.add(this.sprite);
+    this.coin = spec.kind === 'coin' ? createCoinVisual(this.texture, spec) : null;
+    this.group.add(this.coin?.group ?? this.sprite);
 
     this.shadowMaterial = new THREE.SpriteMaterial({
       map: getShadowTexture(),
@@ -256,6 +467,7 @@ export class FallbackVisualInstance {
     count: number,
     bounds: FallbackVisualBounds,
     random: () => number,
+    occupied: THREE.Vector2[] = [],
   ): void {
     const columns = Math.min(5, Math.max(1, count));
     const rows = Math.ceil(count / columns);
@@ -265,56 +477,188 @@ export class FallbackVisualInstance {
     const spacingX = Math.min(2.45, (bounds.x * 2 - 1.8) / Math.max(1, rowCount));
     const x = (column - (rowCount - 1) / 2) * spacingX;
     const z = -bounds.z + 1.18 + row * Math.min(1.5, 2.8 / Math.max(1, rows));
-    const fromLeft = index % 2 === 0;
+    const isCoin = this.spec.kind === 'coin';
+    const fromLeft = isCoin ? random() < 0.5 : index % 2 === 0;
+    const scatteredEnd = isCoin ? randomSettledPosition(count, bounds, occupied, random) : null;
+    const coinFirstContact = isCoin ? 0.7 + random() * 0.06 : 0.56;
+    const coinSecondContact = isCoin
+      ? coinFirstContact + (1 - coinFirstContact) * (0.38 + random() * 0.08)
+      : 0.76;
+    const coinThirdContact = isCoin
+      ? coinSecondContact + (1 - coinSecondContact) * (0.48 + random() * 0.12)
+      : 0.9;
+    const endX =
+      scatteredEnd?.x ??
+      THREE.MathUtils.clamp(x + (random() - 0.5) * 0.22, -bounds.x + 0.8, bounds.x - 0.8);
+    const endZ =
+      scatteredEnd?.y ??
+      THREE.MathUtils.clamp(z + (random() - 0.5) * 0.18, -bounds.z + 0.72, bounds.z - 0.72);
+    const coinTossAngle = isCoin ? random() * Math.PI * 2 : 0;
+    const coinTossDistance = isCoin ? 0.95 + random() * 1.15 : 0;
     this.settled = false;
     this.trajectory = {
       start: new THREE.Vector3(
-        (fromLeft ? -bounds.x - 1.4 : bounds.x + 1.4) + (random() - 0.5) * 0.8,
-        2.8 + random() * 1.6,
-        bounds.z * (0.25 + random() * 0.75),
+        isCoin
+          ? THREE.MathUtils.clamp(
+              endX - Math.cos(coinTossAngle) * coinTossDistance,
+              -bounds.x + 0.8,
+              bounds.x - 0.8,
+            )
+          : (fromLeft ? -bounds.x - 1.05 : bounds.x + 1.05) + (random() - 0.5) * 0.8,
+        isCoin ? 0.28 + random() * 0.3 : 2.8 + random() * 1.6,
+        isCoin
+          ? THREE.MathUtils.clamp(
+              endZ - Math.sin(coinTossAngle) * coinTossDistance,
+              -bounds.z + 0.8,
+              bounds.z - 0.8,
+            )
+          : (random() * 2 - 1) * bounds.z,
       ),
-      end: new THREE.Vector3(
-        THREE.MathUtils.clamp(x + (random() - 0.5) * 0.22, -bounds.x + 0.8, bounds.x - 0.8),
-        0.48,
-        THREE.MathUtils.clamp(z + (random() - 0.5) * 0.18, -bounds.z + 0.72, bounds.z - 0.72),
-      ),
-      arcHeight: 2.1 + random() * 1.5,
+      end: new THREE.Vector3(endX, isCoin ? 0.08 : 0.48, endZ),
+      arcHeight: isCoin ? 2.15 + random() * 0.75 : 2.1 + random() * 1.5,
       rotationStart: (random() - 0.5) * Math.PI,
       rotationTurns: (fromLeft ? 1 : -1) * (1.2 + random() * 2.2),
-      delay: Math.min(0.22, index * 0.028 + random() * 0.035),
+      coinAngularSpeed: isCoin ? 4.1 + random() * 1.3 : 0,
+      coinTiltAxis: isCoin ? coinTossAngle - Math.PI / 2 + (random() - 0.5) * 0.18 : 0,
+      coinFinalYaw: isCoin ? random() * Math.PI * 2 : 0,
+      coinYawSpeed: isCoin ? (random() - 0.5) * 0.16 : 0,
+      coinRicochet: isCoin ? (random() - 0.5) * 0.24 : 0,
+      coinTravelAngle: coinTossAngle,
+      coinBounceScale: isCoin ? 0.82 + random() * 0.34 : 1,
+      coinFirstContact,
+      coinSecondContact,
+      coinThirdContact,
+      coinDuration: isCoin ? 1.72 + random() * 0.16 : 1,
+      delay: isCoin ? 0.025 + random() * 0.11 : Math.min(0.22, index * 0.028 + random() * 0.035),
     };
+    occupied.push(new THREE.Vector2(this.trajectory.end.x, this.trajectory.end.z));
+    this.coinFlipAxis.set(
+      Math.cos(this.trajectory.coinTiltAxis),
+      0,
+      Math.sin(this.trajectory.coinTiltAxis),
+    );
     this.group.position.copy(this.trajectory.start);
     this.material.rotation = this.trajectory.rotationStart;
     this.material.opacity = 0;
+    for (const material of this.coin?.materials ?? []) material.opacity = 0;
     this.shadowMaterial.opacity = 0;
-    this.group.scale.setScalar(0.55);
+    this.group.scale.setScalar(this.coin ? 1 : 0.55);
   }
 
-  update(progress: number): void {
+  update(progress: number, planDuration = 1): void {
     if (this.settled) return;
     const trajectory = this.trajectory;
     if (!trajectory) return;
-    const normalized = THREE.MathUtils.clamp((progress - trajectory.delay) / Math.max(0.001, 1 - trajectory.delay), 0, 1);
+    const normalized = this.coin
+      ? THREE.MathUtils.clamp(
+          (progress * planDuration - trajectory.delay) / trajectory.coinDuration,
+          0,
+          1,
+        )
+      : THREE.MathUtils.clamp(
+          (progress - trajectory.delay) / Math.max(0.001, 1 - trajectory.delay),
+          0,
+          1,
+        );
     this.group.visible = normalized > 0;
     if (normalized <= 0) return;
 
-    const travel = easeOutCubic(normalized);
-    this.group.position.lerpVectors(trajectory.start, trajectory.end, travel);
-    const arc = Math.sin(normalized * Math.PI) * trajectory.arcHeight * (1 - normalized * 0.38);
-    const settleBounce = normalized > 0.72
-      ? Math.sin((normalized - 0.72) * Math.PI * 7) * (1 - normalized) * 0.36
-      : 0;
-    this.group.position.y = trajectory.end.y + arc + settleBounce;
-    this.material.rotation = trajectory.rotationStart + trajectory.rotationTurns * Math.PI * 2 * (1 - Math.pow(1 - normalized, 2));
-    this.material.opacity = THREE.MathUtils.clamp(normalized * 5, 0, 1);
-    this.shadowMaterial.opacity = THREE.MathUtils.clamp((normalized - 0.22) * 1.2, 0, 0.34) * (1 - Math.min(0.8, arc / 5));
-    const scale = easeOutBack(Math.min(1, normalized * 1.45));
-    this.group.scale.setScalar(Math.max(0.2, scale));
+    let heightAboveGround: number;
+    if (this.coin) {
+      const travel = coinTravelProgress(normalized, trajectory);
+      this.group.position.lerpVectors(trajectory.start, trajectory.end, travel);
+      const ricochet = coinRicochetOffset(normalized, trajectory);
+      this.group.position.x -= Math.sin(trajectory.coinTravelAngle) * ricochet;
+      this.group.position.z += Math.cos(trajectory.coinTravelAngle) * ricochet;
+
+      const totalFlip = coinAngularDisplacement(1, trajectory, trajectory.coinAngularSpeed);
+      const flipAngle =
+        (coinAngularDisplacement(normalized, trajectory, trajectory.coinAngularSpeed) - totalFlip) *
+        Math.PI *
+        2;
+      const totalYaw = coinAngularDisplacement(1, trajectory, trajectory.coinYawSpeed);
+      const yawAngle =
+        trajectory.coinFinalYaw +
+        (coinAngularDisplacement(normalized, trajectory, trajectory.coinYawSpeed) - totalYaw) *
+          Math.PI *
+          2;
+      const supportHeight =
+        0.07 * Math.abs(Math.cos(flipAngle)) + 0.76 * Math.abs(Math.sin(flipAngle));
+      const contactFlip =
+        (coinAngularDisplacement(
+          trajectory.coinFirstContact,
+          trajectory,
+          trajectory.coinAngularSpeed,
+        ) -
+          totalFlip) *
+        Math.PI *
+        2;
+      const contactSupport =
+        0.07 * Math.abs(Math.cos(contactFlip)) + 0.76 * Math.abs(Math.sin(contactFlip));
+      if (normalized < trajectory.coinFirstContact) {
+        const flight = normalized / trajectory.coinFirstContact;
+        this.group.position.y =
+          0.01 +
+          THREE.MathUtils.lerp(trajectory.start.y - 0.01, contactSupport, flight) +
+          4 * trajectory.arcHeight * flight * (1 - flight);
+      } else {
+        const bounceHeight =
+          normalized < trajectory.coinSecondContact
+            ? parabolicHop(
+                normalized,
+                trajectory.coinFirstContact,
+                trajectory.coinSecondContact,
+                0.28 * trajectory.coinBounceScale,
+              )
+            : normalized < trajectory.coinThirdContact
+              ? parabolicHop(
+                  normalized,
+                  trajectory.coinSecondContact,
+                  trajectory.coinThirdContact,
+                  0.085 * trajectory.coinBounceScale,
+                )
+              : parabolicHop(
+                  normalized,
+                  trajectory.coinThirdContact,
+                  1,
+                  0.018 * trajectory.coinBounceScale,
+                );
+        this.group.position.y = 0.01 + supportHeight + bounceHeight;
+      }
+      heightAboveGround = this.group.position.y - trajectory.end.y;
+      this.coin.group.quaternion.setFromAxisAngle(this.coinFlipAxis, flipAngle);
+      this.coin.group.rotateY(yawAngle);
+    } else {
+      const travel = easeOutCubic(normalized);
+      this.group.position.lerpVectors(trajectory.start, trajectory.end, travel);
+      const arc = Math.sin(normalized * Math.PI) * trajectory.arcHeight * (1 - normalized * 0.38);
+      const settleBounce =
+        normalized > 0.72
+          ? Math.sin((normalized - 0.72) * Math.PI * 7) * (1 - normalized) * 0.36
+          : 0;
+      heightAboveGround = arc + settleBounce;
+      this.group.position.y = trajectory.end.y + heightAboveGround;
+      this.material.rotation =
+        trajectory.rotationStart +
+        trajectory.rotationTurns * Math.PI * 2 * (1 - Math.pow(1 - normalized, 2));
+    }
+    const opacity = THREE.MathUtils.clamp(normalized * 5, 0, 1);
+    this.material.opacity = opacity;
+    for (const material of this.coin?.materials ?? []) material.opacity = opacity;
+    this.shadowMaterial.opacity =
+      THREE.MathUtils.clamp((normalized - 0.22) * 1.2, 0, 0.34) *
+      (1 - Math.min(0.8, Math.max(0, heightAboveGround) / 5));
+    this.shadow.position.y = 0.01 - this.group.position.y;
+    if (!this.coin) {
+      const scale = easeOutBack(Math.min(1, normalized * 1.45));
+      this.group.scale.setScalar(Math.max(0.2, scale));
+    }
   }
 
   settle(): void {
     if (this.settled) return;
-    this.update(1);
+    const duration = this.trajectory ? this.trajectory.delay + this.trajectory.coinDuration : 1;
+    this.update(1, duration);
     this.settled = true;
   }
 
@@ -322,9 +666,23 @@ export class FallbackVisualInstance {
     return this.group.getWorldPosition(target);
   }
 
+  getSettledPosition(target = new THREE.Vector2()): THREE.Vector2 {
+    return this.trajectory
+      ? target.set(this.trajectory.end.x, this.trajectory.end.z)
+      : target.set(this.group.position.x, this.group.position.z);
+  }
+
+  getSettleTime(planDuration: number): number {
+    if (!this.coin || !this.trajectory) return planDuration;
+    return Math.min(planDuration, this.trajectory.delay + this.trajectory.coinDuration);
+  }
+
   dispose(): void {
     this.texture.dispose();
     this.material.dispose();
+    for (const geometry of this.coin?.geometries ?? []) geometry.dispose();
+    for (const material of this.coin?.materials ?? []) material.dispose();
+    for (const texture of this.coin?.textures ?? []) texture.dispose();
     this.shadowMaterial.dispose();
   }
 }

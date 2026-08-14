@@ -72,7 +72,9 @@ The default settled threshold is 78%.
 Always seeks to the elapsed position and continues the remaining replay, even when most of the animation has elapsed.
 
 ```ts
-lateEvent: { mode: 'seek' }
+lateEvent: {
+  mode: 'seek';
+}
 ```
 
 ### `settled`
@@ -80,7 +82,9 @@ lateEvent: { mode: 'seek' }
 Immediately presents the final settled result. This is useful for compact logs, reduced-motion experiences, or applications that never want catch-up motion.
 
 ```ts
-lateEvent: { mode: 'settled' }
+lateEvent: {
+  mode: 'settled';
+}
 ```
 
 ### `replay`
@@ -88,7 +92,9 @@ lateEvent: { mode: 'settled' }
 Starts the deterministic replay from frame zero regardless of how late the event arrived. This is an explicit presentation choice and should not be used for synchronized table state by default.
 
 ```ts
-lateEvent: { mode: 'replay' }
+lateEvent: {
+  mode: 'replay';
+}
 ```
 
 ## Reconnect behavior

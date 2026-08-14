@@ -7,20 +7,28 @@
  * @packageDocumentation
  */
 
-import type { DraftrollSession, DraftrollSessionRoll, DraftrollSessionSnapshot } from '../../sdk/src/index';
+import type {
+  DraftrollSession,
+  DraftrollSessionRoll,
+  DraftrollSessionSnapshot,
+} from '../../sdk/src/index';
 
 /**
  * Minimal readonly Vue ref shape used by the binding.
  *
  * @public
  */
-export interface VueReadonlyRef<T> { readonly value: T }
+export interface VueReadonlyRef<T> {
+  readonly value: T;
+}
 /**
  * Minimal writable Vue ref shape used by the binding.
  *
  * @public
  */
-export interface VueWritableRef<T> extends VueReadonlyRef<T> { value: T }
+export interface VueWritableRef<T> extends VueReadonlyRef<T> {
+  value: T;
+}
 /**
  * Minimal Vue runtime surface required by the binding.
  *
@@ -52,11 +60,19 @@ export interface DraftrollVueState {
  *
  * @public
  */
-export function useDraftroll(Vue: DraftrollVueRuntime, session: DraftrollSession): DraftrollVueState {
+export function useDraftroll(
+  Vue: DraftrollVueRuntime,
+  session: DraftrollSession,
+): DraftrollVueState {
   const snapshot = Vue.shallowRef(session.snapshot);
   const rolls = Vue.shallowRef(session.rollLog);
-  const updateState = () => { snapshot.value = session.snapshot; };
-  const updateRolls = () => { rolls.value = session.rollLog; updateState(); };
+  const updateState = () => {
+    snapshot.value = session.snapshot;
+  };
+  const updateRolls = () => {
+    rolls.value = session.rollLog;
+    updateState();
+  };
   const unsubscribers = [
     session.on('state', updateState),
     session.on('rendererChanged', updateState),

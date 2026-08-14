@@ -3,30 +3,17 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "lib": [
-      "ES2022",
-      "WebWorker"
-    ],
+    "lib": ["ES2023", "WebWorker"],
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true,
     "types": [],
     "allowImportingTsExtensions": true,
-    "baseUrl": "../..",
     "paths": {
-      "@draftroll/core": [
-        "packages/core/src/index.ts"
-      ],
-      "@draftroll/protocol": [
-        "packages/protocol/src/index.ts"
-      ],
-      "@draftroll/server": [
-        "packages/server/src/index.ts"
-      ]
+      "@draftroll/core": ["../../packages/core/src/index.ts"],
+      "@draftroll/protocol": ["../../packages/protocol/src/index.ts"],
+      "@draftroll/server": ["../../packages/server/src/index.ts"]
     }
   },
-  "include": [
-    "src",
-    "worker-configuration.d.ts"
-  ]
+  "include": ["src", "worker-configuration.d.ts"]
 }

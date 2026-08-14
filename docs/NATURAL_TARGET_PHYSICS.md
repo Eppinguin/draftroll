@@ -2,7 +2,7 @@
 
 Draftroll separates **result authority** from **physical presentation**. The rules engine or room server decides each die value first. The renderer then presents that already-authoritative value through an ordinary rigid-body trajectory.
 
-The renderer does not change a result after generation, rewrite face labels, apply late torque, or move a die a second time after it appears to settle.
+The renderer does not change a result after generation, rewrite face labels, apply result-directed late torque, or move a die a second time after it appears to settle.
 
 ## Shape-symmetry targeting
 
@@ -47,6 +47,12 @@ The exact-result path now has no:
 - second settlement phase
 
 If the worker cannot produce a valid standard-die plan, the renderer does not show a partially corrected throw. The workerless local fallback uses the same shape-symmetry transformation before playback.
+
+## Stable physical resting poses
+
+A low average velocity is not enough to finish a plan. An unobstructed die touching only the table must also remain seated on a supporting face for a short stable window. Dice braced by the wall or other dice are allowed to keep their naturally tilted pile orientation. A shape-aware alignment check distinguishes a face-down rest from the exact edge and corner equilibria that a numerical rigid-body solver can otherwise preserve.
+
+When an unobstructed, nearly motionless body is balanced on an edge or corner, Draftroll briefly unloads the exact contact equilibrium and wakes it with a small rotation toward the closest face selected by its existing physical orientation. Corrections have a per-die cooldown, so they cannot repeatedly energize a settled pool. This settling nudge is independent of the requested result and happens inside the hidden planning simulation, before playback begins. It neither changes the natural collision path already taken nor creates a visible correction phase.
 
 ## Concurrent table behavior
 
@@ -122,7 +128,7 @@ Important fields are:
 }
 ```
 
-Some older diagnostic fields remain at zero or one for API compatibility. No assistance stage is executed.
+Some older diagnostic fields remain at zero or one for API compatibility. No result-targeting assistance stage is executed.
 
 ## Validation scope
 
@@ -132,6 +138,7 @@ Deterministic tests verify:
 - complete-trajectory local rotation rather than end-frame correction
 - removal of torque and micro-correction code
 - final top-face verification
+- shape-aware rejection and release of edge/corner resting poses
 - parallel shared-world planning
 - additive preservation of already-visible trajectories
 - unchanged package, protocol, and deployment versions

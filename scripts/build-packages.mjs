@@ -1,13 +1,13 @@
 import { cp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
-import { spawnSync } from 'node:child_process';
-import { dirname, extname, join, relative, resolve, sep } from 'node:path';
+import { runTsc } from './lib/load-typescript.mjs';
+import { dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const buildRoot = join(root, '.release-build');
 const packagesRoot = join(root, 'packages');
 
-const compile = spawnSync('tsc', ['-p', 'tsconfig.release.json'], { cwd: root, encoding: 'utf8' });
+const compile = runTsc(['-p', 'tsconfig.release.json'], { cwd: root });
 if (compile.status !== 0) {
   process.stderr.write(compile.stdout);
   process.stderr.write(compile.stderr);
@@ -28,12 +28,16 @@ async function rewriteFile(path) {
   const outputExtension = path.endsWith('.d.ts') ? '.js' : '.js';
   const source = await readFile(path, 'utf8');
   const rewritten = source
-    .replace(/(\bfrom\s+|\bimport\s*\(\s*|\bimport\s+)(["'])([^"']+)\2/g, (match, prefix, quote, specifier) => (
-      `${prefix}${quote}${rewriteSpecifier(specifier, outputExtension)}${quote}`
-    ))
-    .replace(/(\bexport\s+\*\s+from\s+)(["'])([^"']+)\2/g, (match, prefix, quote, specifier) => (
-      `${prefix}${quote}${rewriteSpecifier(specifier, outputExtension)}${quote}`
-    ));
+    .replace(
+      /(\bfrom\s+|\bimport\s*\(\s*|\bimport\s+)(["'])([^"']+)\2/g,
+      (match, prefix, quote, specifier) =>
+        `${prefix}${quote}${rewriteSpecifier(specifier, outputExtension)}${quote}`,
+    )
+    .replace(
+      /(\bexport\s+\*\s+from\s+)(["'])([^"']+)\2/g,
+      (match, prefix, quote, specifier) =>
+        `${prefix}${quote}${rewriteSpecifier(specifier, outputExtension)}${quote}`,
+    );
   await writeFile(path, rewritten);
 }
 

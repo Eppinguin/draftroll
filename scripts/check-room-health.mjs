@@ -5,7 +5,9 @@ const roomId = process.env.DRAFTROLL_ROOM_ID;
 const token = process.env.DRAFTROLL_ROOM_TOKEN;
 const timeoutMs = readNonNegativeNumber(process.env.DRAFTROLL_HEALTH_TIMEOUT_MS, 10_000);
 if (!baseUrlValue) {
-  console.error('Set DRAFTROLL_BASE_URL. Set DRAFTROLL_ROOM_ID and DRAFTROLL_ROOM_TOKEN for manager diagnostics.');
+  console.error(
+    'Set DRAFTROLL_BASE_URL. Set DRAFTROLL_ROOM_ID and DRAFTROLL_ROOM_TOKEN for manager diagnostics.',
+  );
   process.exit(2);
 }
 
@@ -15,7 +17,8 @@ assert.equal(healthResponse.status, 200);
 const health = await healthResponse.json();
 assert.equal(health.ok, true);
 assert.equal(health.protocolVersion, 2);
-if (process.env.DRAFTROLL_EXPECT_ENV) assert.equal(health.environment, process.env.DRAFTROLL_EXPECT_ENV);
+if (process.env.DRAFTROLL_EXPECT_ENV)
+  assert.equal(health.environment, process.env.DRAFTROLL_EXPECT_ENV);
 
 let diagnostics;
 if (roomId) {
@@ -23,30 +26,54 @@ if (roomId) {
   const url = new URL(`/rooms/${encodeURIComponent(roomId)}/diagnostics`, baseUrl);
   url.searchParams.set('protocolVersion', '2');
   url.searchParams.set('participantId', process.env.DRAFTROLL_PARTICIPANT_ID ?? 'operations-probe');
-  url.searchParams.set('sessionId', process.env.DRAFTROLL_SESSION_ID ?? `operations-${Date.now().toString(36)}`);
+  url.searchParams.set(
+    'sessionId',
+    process.env.DRAFTROLL_SESSION_ID ?? `operations-${Date.now().toString(36)}`,
+  );
   url.searchParams.set('name', 'Operations probe');
   const response = await fetchChecked(url, { headers: { Authorization: `Bearer ${token}` } });
   assert.equal(response.status, 200, `diagnostics returned HTTP ${response.status}`);
   diagnostics = await response.json();
-  const maximumPersistenceFailures = readNonNegativeNumber(process.env.DRAFTROLL_MAX_PERSISTENCE_FAILURES, 0);
-  const maximumBufferedEvents = readNonNegativeNumber(process.env.DRAFTROLL_MAX_BUFFERED_EVENTS, Number.POSITIVE_INFINITY);
+  const maximumPersistenceFailures = readNonNegativeNumber(
+    process.env.DRAFTROLL_MAX_PERSISTENCE_FAILURES,
+    0,
+  );
+  const maximumBufferedEvents = readNonNegativeNumber(
+    process.env.DRAFTROLL_MAX_BUFFERED_EVENTS,
+    Number.POSITIVE_INFINITY,
+  );
   const minimumReadyRatio = readRatio(process.env.DRAFTROLL_MIN_RENDERER_READY_RATIO, 0);
   const persistenceFailures = Number(diagnostics.persistenceFailures ?? 0);
   const bufferedEvents = Number(diagnostics.bufferedEvents ?? 0);
   const authorizedSessions = Number(diagnostics.authorizedSessions ?? 0);
   const rendererReadySessions = Number(diagnostics.rendererReadySessions ?? 0);
   const readyRatio = authorizedSessions > 0 ? rendererReadySessions / authorizedSessions : 1;
-  assert.ok(persistenceFailures <= maximumPersistenceFailures, `persistence failure budget exceeded: ${persistenceFailures} > ${maximumPersistenceFailures}`);
-  assert.ok(bufferedEvents <= maximumBufferedEvents, `buffered event budget exceeded: ${bufferedEvents} > ${maximumBufferedEvents}`);
-  assert.ok(readyRatio >= minimumReadyRatio, `renderer-ready ratio below threshold: ${readyRatio} < ${minimumReadyRatio}`);
+  assert.ok(
+    persistenceFailures <= maximumPersistenceFailures,
+    `persistence failure budget exceeded: ${persistenceFailures} > ${maximumPersistenceFailures}`,
+  );
+  assert.ok(
+    bufferedEvents <= maximumBufferedEvents,
+    `buffered event budget exceeded: ${bufferedEvents} > ${maximumBufferedEvents}`,
+  );
+  assert.ok(
+    readyRatio >= minimumReadyRatio,
+    `renderer-ready ratio below threshold: ${readyRatio} < ${minimumReadyRatio}`,
+  );
 }
 
-console.log(JSON.stringify({
-  ok: true,
-  checkedAt: new Date().toISOString(),
-  health,
-  diagnostics,
-}, null, 2));
+console.log(
+  JSON.stringify(
+    {
+      ok: true,
+      checkedAt: new Date().toISOString(),
+      health,
+      diagnostics,
+    },
+    null,
+    2,
+  ),
+);
 
 async function fetchChecked(url, init = {}) {
   return fetch(url, { ...init, redirect: 'error', signal: AbortSignal.timeout(timeoutMs) });
@@ -55,7 +82,8 @@ async function fetchChecked(url, init = {}) {
 function readNonNegativeNumber(value, fallback) {
   if (value === undefined || value === '') return fallback;
   const parsed = Number(value);
-  if ((!Number.isFinite(parsed) && parsed !== Number.POSITIVE_INFINITY) || parsed < 0) throw new Error('Health thresholds must be non-negative numbers');
+  if ((!Number.isFinite(parsed) && parsed !== Number.POSITIVE_INFINITY) || parsed < 0)
+    throw new Error('Health thresholds must be non-negative numbers');
   return parsed;
 }
 

@@ -21,7 +21,7 @@ const packages = [
   'server',
   'react',
   'vue',
-  'svelte'
+  'svelte',
 ];
 
 function run(command, args, cwd = root) {
@@ -39,7 +39,11 @@ function rewriteWorkspaceDependencies(manifest, versions) {
   for (const section of ['dependencies', 'optionalDependencies']) {
     for (const [name, range] of Object.entries(rewritten[section] ?? {})) {
       if (!name.startsWith('@draftroll/')) continue;
-      assert.match(range, /^workspace:/, `${manifest.name} must use the workspace protocol for ${name}`);
+      assert.match(
+        range,
+        /^workspace:/,
+        `${manifest.name} must use the workspace protocol for ${name}`,
+      );
       const version = versions.get(name);
       assert.ok(version, `Unknown workspace dependency ${name}`);
       rewritten[section][name] = version;
@@ -56,7 +60,9 @@ try {
   const manifests = new Map();
   const versions = new Map();
   for (const name of packages) {
-    const manifest = JSON.parse(await readFile(join(root, 'packages', name, 'package.json'), 'utf8'));
+    const manifest = JSON.parse(
+      await readFile(join(root, 'packages', name, 'package.json'), 'utf8'),
+    );
     manifests.set(name, manifest);
     versions.set(manifest.name, manifest.version);
   }
@@ -74,7 +80,14 @@ try {
     const releaseManifest = rewriteWorkspaceDependencies(manifests.get(name), versions);
     await writeFile(join(staged, 'package.json'), `${JSON.stringify(releaseManifest, null, 2)}\n`);
 
-    const output = run('npm', ['pack', staged, '--pack-destination', packDir, '--json', '--ignore-scripts']);
+    const output = run('npm', [
+      'pack',
+      staged,
+      '--pack-destination',
+      packDir,
+      '--json',
+      '--ignore-scripts',
+    ]);
     const starts = [...output.matchAll(/\[\s*\{\s*"id"/g)];
     const jsonStart = starts.at(-1)?.index;
     if (jsonStart === undefined) throw new Error(`npm pack did not return JSON for ${name}`);
@@ -83,22 +96,37 @@ try {
   }
 
   await mkdir(appDir, { recursive: true });
-  const appDependencies = Object.fromEntries(tarballs.map((tarball) => {
-    const filename = tarball.split('/').at(-1);
-    const packageName = filename
-      .replace(/^draftroll-/, '@draftroll/')
-      .replace(/-0\.1\.0\.tgz$/, '');
-    return [packageName, `file:${tarball}`];
-  }));
-  await writeFile(join(appDir, 'package.json'), `${JSON.stringify({
-    name: 'draftroll-pack-smoke',
-    private: true,
-    type: 'module',
-    dependencies: appDependencies
-  }, null, 2)}\n`);
-  run('npm', ['install', '--offline', '--legacy-peer-deps', '--ignore-scripts', '--no-audit', '--no-fund'], appDir);
+  const appDependencies = Object.fromEntries(
+    tarballs.map((tarball) => {
+      const filename = tarball.split('/').at(-1);
+      const packageName = filename
+        .replace(/^draftroll-/, '@draftroll/')
+        .replace(/-0\.1\.0\.tgz$/, '');
+      return [packageName, `file:${tarball}`];
+    }),
+  );
+  await writeFile(
+    join(appDir, 'package.json'),
+    `${JSON.stringify(
+      {
+        name: 'draftroll-pack-smoke',
+        private: true,
+        type: 'module',
+        dependencies: appDependencies,
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  run(
+    'npm',
+    ['install', '--offline', '--legacy-peer-deps', '--ignore-scripts', '--no-audit', '--no-fund'],
+    appDir,
+  );
 
-  await writeFile(join(appDir, 'smoke.mjs'), `
+  await writeFile(
+    join(appDir, 'smoke.mjs'),
+    `
     import assert from 'node:assert/strict';
     import * as errors from '@draftroll/errors';
     import * as protocol from '@draftroll/protocol';
@@ -129,10 +157,13 @@ try {
     assert.equal(typeof react.createDraftrollReactBindings, 'function');
     assert.equal(typeof vue.useDraftroll, 'function');
     assert.equal(typeof svelte.createDraftrollStore, 'function');
-  `);
+  `,
+  );
   run('node', ['smoke.mjs'], appDir);
 
-  const manifest = JSON.parse(await readFile(join(appDir, 'node_modules/@draftroll/sdk/package.json'), 'utf8'));
+  const manifest = JSON.parse(
+    await readFile(join(appDir, 'node_modules/@draftroll/sdk/package.json'), 'utf8'),
+  );
   assert.equal(manifest.exports['.'].types, './dist/index.d.ts');
   assert.equal(manifest.exports['.'].default, './dist/index.js');
   assert.equal(manifest.exports['.'].browser.types, './dist/browser.d.ts');

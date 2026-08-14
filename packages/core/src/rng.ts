@@ -30,7 +30,8 @@ export class CryptoRng implements DiceRng {
 
     const limit = Math.floor(0x1_0000_0000 / span) * span;
     const buffer = new Uint32Array(1);
-    do cryptoApi.getRandomValues(buffer); while (buffer[0] >= limit);
+    do cryptoApi.getRandomValues(buffer);
+    while (buffer[0] >= limit);
     return min + (buffer[0] % span);
   }
 }
@@ -62,7 +63,7 @@ export class SeededRng implements DiceRng {
   }
 
   private next(): number {
-    let value = this.state += 0x6d2b79f5;
+    let value = (this.state += 0x6d2b79f5);
     value = Math.imul(value ^ (value >>> 15), value | 1);
     value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
     return ((value ^ (value >>> 14)) >>> 0) / 0x1_0000_0000;
