@@ -10,7 +10,6 @@ const [
   physicalVisuals,
   physicalPlanner,
   rollWorker,
-  physicalWorker,
   physicsShapes,
   restingPhysics,
   visualBase,
@@ -25,7 +24,6 @@ const [
   readFile(new URL('../src/physical-die-visuals.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/physical-roll-planner.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/roll-worker.ts', import.meta.url), 'utf8'),
-  readFile(new URL('../src/physical-roll-worker.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/physics-shapes.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/resting-physics.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/fallback-visuals-base.ts', import.meta.url), 'utf8'),
@@ -103,7 +101,7 @@ assert.match(physicalPlanner, /releaseUnstableRestPose/);
 assert.match(physicalPlanner, /resolveLandedPhysicalOutcome/);
 assert.match(physicalPlanner, /extractPhysicalTransforms/);
 
-// The established roll worker is now the generic physical worker for canonical + additional dice.
+// The established roll worker is the only physical worker protocol for canonical + additional dice.
 assert.match(rollWorker, /PhysicalRollPlanner/);
 assert.match(rollWorker, /AdditionalPhysicalPlanEntry/);
 assert.match(rollWorker, /definition\?: PhysicalDieDefinition/);
@@ -113,11 +111,6 @@ assert.match(rollWorker, /additionalTransforms/);
 assert.match(rollWorker, /additionalLandings/);
 assert.match(rollWorker, /extractPhysicalTransforms/);
 assert.doesNotMatch(rollWorker, /new CANNON\.World/);
-
-// Transitional physical worker entrypoint must not grow a second planner implementation.
-assert.match(physicalWorker, /import '\.\/roll-worker'/);
-assert.doesNotMatch(physicalWorker, /PhysicalRollPlanner/);
-assert.doesNotMatch(physicalWorker, /new CANNON\.World/);
 
 // Numeric spinner inputs are promoted immediately into the physical model.
 assert.match(visuals, /PhysicalDieVisualInstance/);
@@ -129,12 +122,24 @@ assert.match(physicalVisuals, /createDefaultPhysicalDiePresentation/);
 assert.match(physicalVisuals, /remapPhysicalDiePresentation/);
 assert.match(physicalVisuals, /physicalDieColliderRadius/);
 assert.match(physicalVisuals, /localPlanner\.simulate/);
-assert.match(physicalVisuals, /physical-roll-worker\.ts/);
 assert.match(physicalVisuals, /installPhysicalWorkerBridge/);
+assert.match(physicalVisuals, /additional:\s*entries\.map/);
+assert.match(physicalVisuals, /owner\.addEventListener\('message'/);
+assert.match(physicalVisuals, /nativePostMessage\.call\(\s*owner/);
 assert.match(physicalVisuals, /activePhysicalDice/);
 assert.match(physicalVisuals, /pendingPhysicalDice/);
+assert.doesNotMatch(physicalVisuals, /new Worker\(/);
 assert.doesNotMatch(physicalVisuals, /new CANNON\.World/);
 assert.doesNotMatch(physicalVisuals, /settledRotation/);
+
+// Runtime themes can paint arbitrary artwork into generated physical outcome slots.
+assert.match(physicalVisuals, /getRuntimeThemeTexture/);
+assert.match(physicalVisuals, /getRuntimeThemeMaterial/);
+assert.match(physicalVisuals, /function atlasCellTexture/);
+assert.match(physicalVisuals, /LABEL_ATLAS_COLUMNS = 5/);
+assert.match(physicalVisuals, /LABEL_ATLAS_ROWS = 4/);
+assert.match(physicalVisuals, /getRuntimeThemeTexture\(spec\.theme, spec\.type, 'label'\)/);
+assert.match(physicalVisuals, /ownedLabelTextures/);
 
 // Generated geometry remains the arbitrary-shape provider, not a separate die architecture.
 assert.match(polyhedra, /function fibonacciPoints/);
@@ -175,8 +180,12 @@ assert.match(visualBase, /getSettleTime/);
 
 assert.match(html, /1d20\+1d2\+1dF\+1d9\+1d100/);
 
-// These modules were the old parallel generated-dice architecture and must stay deleted.
-for (const legacy of ['../src/generated-die-visuals.ts', '../src/generated-roll-worker.ts']) {
+// These modules were the old parallel generated/physical worker architecture and must stay deleted.
+for (const legacy of [
+  '../src/generated-die-visuals.ts',
+  '../src/generated-roll-worker.ts',
+  '../src/physical-roll-worker.ts',
+]) {
   await assert.rejects(access(new URL(legacy, import.meta.url)));
 }
 
@@ -190,11 +199,13 @@ console.log(JSON.stringify({
   targetingModes: ['symmetry', 'relabel', 'fixed'],
   sharedPhysicalPlanner: true,
   unifiedRollWorkerProtocol: true,
+  onePhysicalWorker: true,
   cachedPlannerWorlds: true,
   additiveLockedMotion: true,
   genericRestingPhysics: true,
   generatedGeneratedCollisions: true,
   generatedStandardCollisions: true,
+  runtimeThemeArtwork: true,
   noParallelGeneratedPhysicsEngine: true,
   automaticFaceEdgeVertexLabels: true,
   generatedFaceLabelCoverage: true,
