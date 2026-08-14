@@ -1,10 +1,12 @@
 import * as THREE from 'three';
-import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import type {
   DraftrollFallbackKind,
   DraftrollFallbackVisual,
 } from '../packages/renderer/src/index';
-import { createReadablePolyhedron, type ReadablePolyhedron } from '../packages/renderer/src/polyhedra';
+import {
+  createReadablePolyhedron,
+  type ReadablePolyhedron,
+} from '../packages/renderer/src/polyhedra';
 import { THEMES, type ThemeName } from './themes';
 
 export interface FallbackVisualBounds {
@@ -23,6 +25,7 @@ interface Trajectory {
   spinY: number;
   spinZ: number;
   finalYaw: number;
+  finalScale: number;
 }
 
 interface ThreeDimensionalVisual {
@@ -31,9 +34,30 @@ interface ThreeDimensionalVisual {
   geometries: THREE.BufferGeometry[];
   materials: THREE.Material[];
   textures: THREE.Texture[];
-  labelMaterial?: THREE.MeshBasicMaterial;
 }
 
+interface FaceFrame {
+  center: THREE.Vector3;
+  normal: THREE.Vector3;
+  tangent: THREE.Vector3;
+  bitangent: THREE.Vector3;
+  width: number;
+  height: number;
+  quaternion: THREE.Quaternion;
+}
+
+interface CardLayout {
+  position: THREE.Vector2;
+  scale: number;
+  yaw: number;
+}
+
+const CARD_WIDTH = 1.42;
+const CARD_HEIGHT = 2.02;
+const CARD_GAP = 0.18;
+const CARD_ROW_GAP = 0.2;
+const UP = new THREE.Vector3(0, 1, 0);
+const FORWARD = new THREE.Vector3(0, 0, 1);
 let shadowTexture: THREE.CanvasTexture | null = null;
 
 function normalizeTheme(theme: string): ThemeName {
@@ -133,17 +157,17 @@ function createDieSurfaceTexture(spec: DraftrollFallbackVisual): THREE.CanvasTex
   gradient.addColorStop(1, cssColor(palette.shadow));
   context.fillStyle = gradient;
   context.fillRect(0, 0, 512, 512);
-  context.globalAlpha = 0.11;
+  context.globalAlpha = 0.1;
   context.strokeStyle = palette.label;
   context.lineWidth = 2;
-  for (let i = -512; i < 1024; i += 28) {
+  for (let value = -512; value < 1024; value += 32) {
     context.beginPath();
-    context.moveTo(i, 0);
-    context.lineTo(i - 512, 512);
+    context.moveTo(value, 0);
+    context.lineTo(value - 512, 512);
     context.stroke();
   }
-  context.globalAlpha = 0.08;
-  for (let index = 0; index < 54; index += 1) {
+  context.globalAlpha = 0.07;
+  for (let index = 0; index < 48; index += 1) {
     const x = (index * 193) % 512;
     const y = (index * 311) % 512;
     context.beginPath();
@@ -151,6 +175,7 @@ function createDieSurfaceTexture(spec: DraftrollFallbackVisual): THREE.CanvasTex
     context.fillStyle = index % 2 ? '#ffffff' : '#000000';
     context.fill();
   }
+  context.globalAlpha = 1;
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = 8;
@@ -173,23 +198,27 @@ function createCardFrontTexture(spec: DraftrollFallbackVisual): THREE.CanvasText
   const red = spec.metadata?.color === 'red';
   const ink = red ? '#b51e2e' : '#151515';
 
-  roundedRect(context, 12, 12, 676, 956, 48);
-  context.fillStyle = '#faf8f1';
-  context.fill();
-  context.lineWidth = 12;
-  context.strokeStyle = '#d5cdbd';
-  context.stroke();
+  // The mesh itself supplies the rounded silhouette. Painting to the edge avoids
+  // the old rectangular-looking frame around an otherwise rounded card.
+  context.fillStyle = '#fbf9f2';
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  const wash = context.createLinearGradient(0, 0, canvas.width, canvas.height);
+  wash.addColorStop(0, 'rgba(255,255,255,.34)');
+  wash.addColorStop(0.55, 'rgba(255,255,255,0)');
+  wash.addColorStop(1, 'rgba(137,116,86,.05)');
+  context.fillStyle = wash;
+  context.fillRect(0, 0, canvas.width, canvas.height);
 
   context.fillStyle = ink;
   context.textAlign = 'center';
   context.textBaseline = 'middle';
   context.font = '700 92px Georgia, serif';
-  context.fillText(rank, 82, 86);
+  context.fillText(rank, 78, 82);
   context.font = '76px Georgia, serif';
-  context.fillText(suit || '✦', 82, 168);
+  context.fillText(suit || '✦', 78, 162);
 
   context.save();
-  context.translate(618, 894);
+  context.translate(622, 898);
   context.rotate(Math.PI);
   context.font = '700 92px Georgia, serif';
   context.fillText(rank, 0, 0);
@@ -197,10 +226,10 @@ function createCardFrontTexture(spec: DraftrollFallbackVisual): THREE.CanvasText
   context.fillText(suit || '✦', 0, 82);
   context.restore();
 
-  context.font = spec.metadata?.joker ? '260px Georgia, serif' : '330px Georgia, serif';
-  context.fillText(spec.metadata?.joker ? '✦' : (suit || '✦'), 350, 475);
+  context.font = spec.metadata?.joker ? '250px Georgia, serif' : '320px Georgia, serif';
+  context.fillText(spec.metadata?.joker ? '✦' : (suit || '✦'), 350, 478);
   if (spec.metadata?.joker) {
-    context.font = '700 72px Georgia, serif';
+    context.font = '700 70px Georgia, serif';
     context.fillText('JOKER', 350, 700);
   }
 
@@ -217,20 +246,17 @@ function createCardBackTexture(spec: DraftrollFallbackVisual): THREE.CanvasTextu
   const context = canvas.getContext('2d');
   if (!context) throw new Error('Canvas 2D context unavailable.');
   const palette = THEMES[normalizeTheme(spec.theme)];
-  roundedRect(context, 12, 12, 676, 956, 48);
-  context.fillStyle = '#f8f5ec';
-  context.fill();
-  context.lineWidth = 12;
-  context.strokeStyle = '#d5cdbd';
-  context.stroke();
-  roundedRect(context, 42, 42, 616, 896, 34);
+  context.fillStyle = '#fbf9f2';
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  roundedRect(context, 26, 26, 648, 928, 38);
   context.fillStyle = cssColor(palette.shadow);
   context.fill();
-  context.lineWidth = 8;
+  roundedRect(context, 42, 42, 616, 896, 30);
   context.strokeStyle = cssColor(palette.edge);
+  context.lineWidth = 7;
   context.stroke();
   context.save();
-  roundedRect(context, 58, 58, 584, 864, 26);
+  roundedRect(context, 50, 50, 600, 880, 26);
   context.clip();
   context.strokeStyle = cssColor(palette.edge);
   context.globalAlpha = 0.5;
@@ -282,8 +308,8 @@ function triangulateTexturedShape(shape: ReadablePolyhedron): THREE.BufferGeomet
     const spanU = Math.max(1e-5, maxU - minU);
     const spanV = Math.max(1e-5, maxV - minV);
     const uv = projected.map((value) => [
-      0.08 + 0.84 * (value.u - minU) / spanU,
-      0.08 + 0.84 * (value.v - minV) / spanV,
+      0.06 + 0.88 * (value.u - minU) / spanU,
+      0.06 + 0.88 * (value.v - minV) / spanV,
     ] as const);
     for (let index = 1; index + 1 < face.length; index += 1) {
       for (const localIndex of [0, index, index + 1]) {
@@ -309,40 +335,78 @@ function parseNumericSides(spec: DraftrollFallbackVisual): number | null {
   return Number.isSafeInteger(sides) && sides >= 1 ? sides : null;
 }
 
-function faceCenterAndNormal(shape: ReadablePolyhedron, faceIndex: number): { center: THREE.Vector3; normal: THREE.Vector3 } {
+function faceFrame(shape: ReadablePolyhedron, faceIndex: number): FaceFrame {
   const face = shape.faces[faceIndex];
   const points = face.map((index) => new THREE.Vector3(...shape.vertices[index]));
-  const center = points.reduce((sum, value) => sum.add(value), new THREE.Vector3()).multiplyScalar(1 / points.length);
+  const center = points
+    .reduce((sum, value) => sum.add(value), new THREE.Vector3())
+    .multiplyScalar(1 / points.length);
   const normal = new THREE.Vector3()
     .crossVectors(points[1].clone().sub(points[0]), points[2].clone().sub(points[0]))
     .normalize();
   if (normal.dot(center) < 0) normal.negate();
-  return { center, normal };
+
+  let tangent = points[1].clone().sub(points[0]);
+  for (let index = 0; index < points.length; index += 1) {
+    const edge = points[(index + 1) % points.length].clone().sub(points[index]);
+    if (edge.lengthSq() > tangent.lengthSq()) tangent = edge;
+  }
+  tangent.normalize();
+  const bitangent = new THREE.Vector3().crossVectors(normal, tangent).normalize();
+  tangent = new THREE.Vector3().crossVectors(bitangent, normal).normalize();
+
+  const projected = points.map((point) => {
+    const offset = point.clone().sub(center);
+    return { x: offset.dot(tangent), y: offset.dot(bitangent) };
+  });
+  const width = Math.max(...projected.map((value) => value.x)) - Math.min(...projected.map((value) => value.x));
+  const height = Math.max(...projected.map((value) => value.y)) - Math.min(...projected.map((value) => value.y));
+  const basis = new THREE.Matrix4().makeBasis(tangent, bitangent, normal);
+  const quaternion = new THREE.Quaternion().setFromRotationMatrix(basis);
+  return { center, normal, tangent, bitangent, width, height, quaternion };
 }
 
-function logicalResultIndex(spec: DraftrollFallbackVisual, sides: number): number {
+function logicalResultValue(spec: DraftrollFallbackVisual, sides: number): number {
   const numeric = typeof spec.result === 'number' ? spec.result : Number(spec.numericValue);
-  if (Number.isFinite(numeric)) return Math.max(0, Math.round(numeric) - 1) % Math.max(1, sides);
-  return 0;
+  if (!Number.isFinite(numeric)) return 1;
+  return THREE.MathUtils.clamp(Math.round(numeric), 1, Math.max(1, sides));
 }
 
-function createFaceLabelTexture(spec: DraftrollFallbackVisual): THREE.CanvasTexture {
+function logicalFaceValues(shape: ReadablePolyhedron, sides: number): number[] {
+  if (sides === 1) return shape.landingFaces.map(() => 1);
+  if (sides === 3 && shape.landingFaces.length === 6) return [1, 1, 2, 2, 3, 3];
+  if (shape.exact && shape.landingFaces.length === sides) {
+    return shape.landingFaces.map((_face, index) => index + 1);
+  }
+  return shape.landingFaces.map((_face, index) => index + 1);
+}
+
+function createNumberTexture(spec: DraftrollFallbackVisual, value: number | string): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
-  canvas.width = 320;
-  canvas.height = 320;
+  canvas.width = 256;
+  canvas.height = 256;
   const context = canvas.getContext('2d');
   if (!context) throw new Error('Canvas 2D context unavailable.');
   const palette = THEMES[normalizeTheme(spec.theme)];
+  const label = String(value);
+  const length = label.length;
   context.textAlign = 'center';
   context.textBaseline = 'middle';
-  const label = String(spec.label);
-  context.font = `800 ${label.length > 3 ? 132 : 176}px system-ui, sans-serif`;
-  context.lineWidth = 18;
   context.lineJoin = 'round';
-  context.strokeStyle = 'rgba(0,0,0,.75)';
-  context.strokeText(label, 160, 160);
+  context.font = `800 ${length >= 3 ? 104 : length === 2 ? 128 : 154}px system-ui, sans-serif`;
+  context.lineWidth = length >= 3 ? 12 : 14;
+  context.strokeStyle = 'rgba(0,0,0,.7)';
+  context.strokeText(label, 128, 126);
   context.fillStyle = palette.label;
-  context.fillText(label, 160, 160);
+  context.fillText(label, 128, 126);
+  if (label === '6' || label === '9') {
+    context.strokeStyle = palette.label;
+    context.lineWidth = 8;
+    context.beginPath();
+    context.moveTo(93, 202);
+    context.lineTo(163, 202);
+    context.stroke();
+  }
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = 8;
@@ -384,40 +448,61 @@ function createGeneratedDieVisual(spec: DraftrollFallbackVisual): ThreeDimension
   edges.scale.setScalar(1.004);
   group.add(edges);
 
-  const logicalIndex = logicalResultIndex(spec, sides);
-  const landingFace = shape.landingFaces[logicalIndex % shape.landingFaces.length] ?? 0;
-  const { center, normal } = faceCenterAndNormal(shape, landingFace);
-  const labelTexture = createFaceLabelTexture(spec);
-  const labelMaterial = new THREE.MeshBasicMaterial({
-    map: labelTexture,
-    transparent: true,
-    opacity: 0,
-    depthWrite: false,
-    toneMapped: false,
-    side: THREE.DoubleSide,
-  });
-  const labelGeometry = new THREE.PlaneGeometry(0.62, 0.62);
-  const label = new THREE.Mesh(labelGeometry, labelMaterial);
-  label.position.copy(center).addScaledVector(normal, 0.012);
-  label.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
-  label.renderOrder = 7;
-  group.add(label);
+  const textures: THREE.Texture[] = [surfaceTexture];
+  const geometries: THREE.BufferGeometry[] = [geometry, edgeGeometry];
+  const materials: THREE.Material[] = [material, edgeMaterial];
+  const result = logicalResultValue(spec, sides);
+  const faceValues = logicalFaceValues(shape, sides);
+  let resultNormal: THREE.Vector3 | null = null;
 
-  // Orient the chosen authoritative result face upward at rest.
-  const settledRotation = new THREE.Quaternion().setFromUnitVectors(normal, new THREE.Vector3(0, 1, 0));
-  group.userData.settledRotation = settledRotation;
+  // Exact solids are numbered on every legal result surface. This makes d5/d7/etc.
+  // read like actual dice instead of blank polyhedra with one late result sticker.
+  // Representative high-count solids only label the authoritative face because
+  // their geometry intentionally has fewer landing surfaces than logical values.
+  const facesToLabel = shape.exact
+    ? shape.landingFaces.map((faceIndex, index) => ({ faceIndex, value: faceValues[index] ?? index + 1 }))
+    : [{
+        faceIndex: shape.landingFaces[(result - 1) % Math.max(1, shape.landingFaces.length)] ?? 0,
+        value: result,
+      }];
+
+  for (const { faceIndex, value } of facesToLabel) {
+    const frame = faceFrame(shape, faceIndex);
+    if (value === result && resultNormal === null) resultNormal = frame.normal.clone();
+    const texture = createNumberTexture(spec, value);
+    const labelMaterial = new THREE.MeshBasicMaterial({
+      map: texture,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      toneMapped: false,
+      side: THREE.DoubleSide,
+    });
+    const smallestSpan = Math.max(0.2, Math.min(frame.width, frame.height));
+    const labelSize = THREE.MathUtils.clamp(smallestSpan * 0.5, 0.22, 0.58);
+    const labelGeometry = new THREE.PlaneGeometry(labelSize, labelSize);
+    const label = new THREE.Mesh(labelGeometry, labelMaterial);
+    label.position.copy(frame.center).addScaledVector(frame.normal, 0.014);
+    label.quaternion.copy(frame.quaternion);
+    label.renderOrder = 7;
+    group.add(label);
+    textures.push(texture);
+    geometries.push(labelGeometry);
+    materials.push(labelMaterial);
+  }
+
+  if (resultNormal === null) {
+    const fallbackFace = shape.landingFaces[(result - 1) % Math.max(1, shape.landingFaces.length)] ?? 0;
+    resultNormal = faceFrame(shape, fallbackFace).normal;
+  }
+  group.userData.settledRotation = new THREE.Quaternion().setFromUnitVectors(resultNormal, UP);
 
   if (shape.family === 'd1-cylinder') group.scale.set(0.9, 0.9, 1.04);
-  else if (shape.family === 'drum' || shape.family === 'representative') group.scale.set(1.08, 0.92, 1.08);
+  else if (shape.family === 'drum' || shape.family === 'representative') {
+    group.scale.set(1.08, 0.92, 1.08);
+  }
 
-  return {
-    mode: 'die',
-    group,
-    geometries: [geometry, edgeGeometry, labelGeometry],
-    materials: [material, edgeMaterial, labelMaterial],
-    textures: [surfaceTexture, labelTexture],
-    labelMaterial,
-  };
+  return { mode: 'die', group, geometries, materials, textures };
 }
 
 function cropCoinTexture(texture: THREE.CanvasTexture): void {
@@ -426,18 +511,47 @@ function cropCoinTexture(texture: THREE.CanvasTexture): void {
   texture.needsUpdate = true;
 }
 
-function createCoinVisual(texture: THREE.CanvasTexture, spec: DraftrollFallbackVisual): ThreeDimensionalVisual {
+function createCoinVisual(
+  texture: THREE.CanvasTexture,
+  spec: DraftrollFallbackVisual,
+): ThreeDimensionalVisual {
   const palette = THEMES[normalizeTheme(spec.theme)];
   const group = new THREE.Group();
   const bodyGeometry = new THREE.CylinderGeometry(0.76, 0.76, 0.14, 64, 1, false);
   const faceGeometry = new THREE.CircleGeometry(0.69, 64);
-  const edgeMaterial = new THREE.MeshStandardMaterial({ color: palette.edge, metalness: 0.58, roughness: 0.3, transparent: true, opacity: 0 });
-  const capMaterial = new THREE.MeshStandardMaterial({ color: palette.base, metalness: 0.42, roughness: 0.36, transparent: true, opacity: 0 });
+  const edgeMaterial = new THREE.MeshStandardMaterial({
+    color: palette.edge,
+    metalness: 0.58,
+    roughness: 0.3,
+    transparent: true,
+    opacity: 0,
+  });
+  const capMaterial = new THREE.MeshStandardMaterial({
+    color: palette.base,
+    metalness: 0.42,
+    roughness: 0.36,
+    transparent: true,
+    opacity: 0,
+  });
   cropCoinTexture(texture);
-  const faceMaterial = new THREE.MeshBasicMaterial({ map: texture, transparent: true, opacity: 0, depthWrite: false, toneMapped: false, side: THREE.DoubleSide });
+  const faceMaterial = new THREE.MeshBasicMaterial({
+    map: texture,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    toneMapped: false,
+    side: THREE.DoubleSide,
+  });
   const backTexture = createFallbackTexture({ ...spec, label: spec.oppositeLabel ?? '•' });
   cropCoinTexture(backTexture);
-  const backMaterial = new THREE.MeshBasicMaterial({ map: backTexture, transparent: true, opacity: 0, depthWrite: false, toneMapped: false, side: THREE.DoubleSide });
+  const backMaterial = new THREE.MeshBasicMaterial({
+    map: backTexture,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    toneMapped: false,
+    side: THREE.DoubleSide,
+  });
   const body = new THREE.Mesh(bodyGeometry, [edgeMaterial, capMaterial, capMaterial]);
   body.castShadow = true;
   body.receiveShadow = true;
@@ -450,32 +564,97 @@ function createCoinVisual(texture: THREE.CanvasTexture, spec: DraftrollFallbackV
   back.rotation.x = Math.PI / 2;
   back.position.y = -0.072;
   group.add(back);
-  return { mode: 'coin', group, geometries: [bodyGeometry, faceGeometry], materials: [edgeMaterial, capMaterial, faceMaterial, backMaterial], textures: [backTexture] };
+  return {
+    mode: 'coin',
+    group,
+    geometries: [bodyGeometry, faceGeometry],
+    materials: [edgeMaterial, capMaterial, faceMaterial, backMaterial],
+    textures: [backTexture],
+  };
+}
+
+function createRoundedCardShape(width: number, height: number, radius: number): THREE.Shape {
+  const halfWidth = width / 2;
+  const halfHeight = height / 2;
+  const r = Math.min(radius, halfWidth, halfHeight);
+  const shape = new THREE.Shape();
+  shape.moveTo(-halfWidth + r, -halfHeight);
+  shape.lineTo(halfWidth - r, -halfHeight);
+  shape.quadraticCurveTo(halfWidth, -halfHeight, halfWidth, -halfHeight + r);
+  shape.lineTo(halfWidth, halfHeight - r);
+  shape.quadraticCurveTo(halfWidth, halfHeight, halfWidth - r, halfHeight);
+  shape.lineTo(-halfWidth + r, halfHeight);
+  shape.quadraticCurveTo(-halfWidth, halfHeight, -halfWidth, halfHeight - r);
+  shape.lineTo(-halfWidth, -halfHeight + r);
+  shape.quadraticCurveTo(-halfWidth, -halfHeight, -halfWidth + r, -halfHeight);
+  return shape;
+}
+
+function normalizeCardUvs(geometry: THREE.BufferGeometry, width: number, height: number): void {
+  const positions = geometry.getAttribute('position');
+  const uv = new Float32Array(positions.count * 2);
+  for (let index = 0; index < positions.count; index += 1) {
+    uv[index * 2] = THREE.MathUtils.clamp((positions.getX(index) + width / 2) / width, 0, 1);
+    uv[index * 2 + 1] = THREE.MathUtils.clamp((positions.getY(index) + height / 2) / height, 0, 1);
+  }
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
 }
 
 function createCardVisual(spec: DraftrollFallbackVisual): ThreeDimensionalVisual {
   const group = new THREE.Group();
-  const width = 1.42;
-  const height = 2.02;
-  const thickness = 0.055;
-  const bodyGeometry = new RoundedBoxGeometry(width, height, thickness, 4, 0.06);
-  const frontGeometry = new THREE.PlaneGeometry(width * 0.96, height * 0.96);
+  const thickness = 0.048;
+  const radius = 0.115;
+  const shape = createRoundedCardShape(CARD_WIDTH, CARD_HEIGHT, radius);
+  const bodyGeometry = new THREE.ExtrudeGeometry(shape, {
+    depth: thickness,
+    steps: 1,
+    bevelEnabled: true,
+    bevelSize: 0.014,
+    bevelThickness: 0.01,
+    bevelSegments: 3,
+    curveSegments: 18,
+  });
+  bodyGeometry.center();
+  bodyGeometry.computeBoundingBox();
+  const surfaceZ = Math.max(thickness / 2, bodyGeometry.boundingBox?.max.z ?? thickness / 2) + 0.0015;
+  const frontGeometry = new THREE.ShapeGeometry(shape, 18);
+  normalizeCardUvs(frontGeometry, CARD_WIDTH, CARD_HEIGHT);
   const backGeometry = frontGeometry.clone();
   const frontTexture = createCardFrontTexture(spec);
   const backTexture = createCardBackTexture(spec);
-  const bodyMaterial = new THREE.MeshStandardMaterial({ color: 0xe9e3d6, roughness: 0.55, metalness: 0, transparent: true, opacity: 0 });
-  const frontMaterial = new THREE.MeshBasicMaterial({ map: frontTexture, transparent: true, opacity: 0, depthWrite: true, toneMapped: false, side: THREE.FrontSide });
-  const backMaterial = new THREE.MeshBasicMaterial({ map: backTexture, transparent: true, opacity: 0, depthWrite: true, toneMapped: false, side: THREE.FrontSide });
+  const bodyMaterial = new THREE.MeshStandardMaterial({
+    color: 0xf5f1e8,
+    roughness: 0.68,
+    metalness: 0,
+    transparent: true,
+    opacity: 0,
+  });
+  const frontMaterial = new THREE.MeshBasicMaterial({
+    map: frontTexture,
+    transparent: true,
+    opacity: 0,
+    depthWrite: true,
+    toneMapped: false,
+    side: THREE.FrontSide,
+  });
+  const backMaterial = new THREE.MeshBasicMaterial({
+    map: backTexture,
+    transparent: true,
+    opacity: 0,
+    depthWrite: true,
+    toneMapped: false,
+    side: THREE.FrontSide,
+  });
   const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
   body.castShadow = true;
   body.receiveShadow = true;
   group.add(body);
   const front = new THREE.Mesh(frontGeometry, frontMaterial);
-  front.position.z = thickness / 2 + 0.003;
+  front.position.z = surfaceZ;
   front.renderOrder = 6;
   group.add(front);
   const back = new THREE.Mesh(backGeometry, backMaterial);
-  back.position.z = -thickness / 2 - 0.003;
+  back.position.z = -surfaceZ;
   back.rotation.y = Math.PI;
   back.renderOrder = 6;
   group.add(back);
@@ -522,7 +701,10 @@ function randomSettledPosition(
   let bestDistance = -1;
   for (let attempt = 0; attempt < 80; attempt += 1) {
     candidate.set((random() * 2 - 1) * rangeX, (random() * 2 - 1) * rangeZ);
-    const nearest = occupied.reduce((distance, position) => Math.min(distance, candidate.distanceTo(position)), Number.POSITIVE_INFINITY);
+    const nearest = occupied.reduce(
+      (distance, position) => Math.min(distance, candidate.distanceTo(position)),
+      Number.POSITIVE_INFINITY,
+    );
     if (nearest >= minimumSeparation) return candidate.clone();
     if (nearest > bestDistance) {
       bestDistance = nearest;
@@ -532,13 +714,40 @@ function randomSettledPosition(
   return best;
 }
 
-function cardSettledPosition(index: number, count: number, bounds: FallbackVisualBounds): THREE.Vector2 {
-  const columns = Math.min(7, count);
-  const row = Math.floor(index / columns);
-  const column = index % columns;
-  const rowCount = Math.min(columns, count - row * columns);
-  const spacing = Math.min(1.15, (bounds.x * 2 - 1.8) / Math.max(1, rowCount));
-  return new THREE.Vector2((column - (rowCount - 1) / 2) * spacing, -0.4 + row * 1.2);
+function cardSettledLayout(
+  index: number,
+  count: number,
+  bounds: FallbackVisualBounds,
+): CardLayout {
+  const availableWidth = Math.max(CARD_WIDTH * 0.5, bounds.x * 2 - 1.1);
+  const availableDepth = Math.max(CARD_HEIGHT * 0.5, bounds.z * 2 - 1.2);
+  let bestColumns = 1;
+  let bestScale = 0;
+
+  for (let columns = 1; columns <= Math.min(7, count); columns += 1) {
+    const rows = Math.ceil(count / columns);
+    const scaleByWidth =
+      (availableWidth - Math.max(0, columns - 1) * CARD_GAP) / (columns * CARD_WIDTH);
+    const scaleByDepth =
+      (availableDepth - Math.max(0, rows - 1) * CARD_ROW_GAP) / (rows * CARD_HEIGHT);
+    const scale = Math.min(1, scaleByWidth, scaleByDepth);
+    if (scale > bestScale) {
+      bestScale = scale;
+      bestColumns = columns;
+    }
+  }
+
+  const scale = THREE.MathUtils.clamp(bestScale, 0.32, 1);
+  const rows = Math.ceil(count / bestColumns);
+  const row = Math.floor(index / bestColumns);
+  const column = index % bestColumns;
+  const rowCount = Math.min(bestColumns, count - row * bestColumns);
+  const xStep = CARD_WIDTH * scale + CARD_GAP;
+  const zStep = CARD_HEIGHT * scale + CARD_ROW_GAP;
+  const x = (column - (rowCount - 1) / 2) * xStep;
+  const z = (row - (rows - 1) / 2) * zStep;
+  const yaw = THREE.MathUtils.clamp((column - (rowCount - 1) / 2) * 0.018, -0.045, 0.045);
+  return { position: new THREE.Vector2(x, z), scale, yaw };
 }
 
 export class FallbackVisualInstance {
@@ -556,7 +765,14 @@ export class FallbackVisualInstance {
   constructor(spec: DraftrollFallbackVisual) {
     this.spec = spec;
     this.texture = createFallbackTexture(spec);
-    this.material = new THREE.SpriteMaterial({ map: this.texture, transparent: true, depthWrite: false, depthTest: true, toneMapped: false, opacity: 0 });
+    this.material = new THREE.SpriteMaterial({
+      map: this.texture,
+      transparent: true,
+      depthWrite: false,
+      depthTest: true,
+      toneMapped: false,
+      opacity: 0,
+    });
     this.sprite = new THREE.Sprite(this.material);
     const scale = visualScale(spec.kind);
     this.sprite.scale.set(scale.x, scale.y, 1);
@@ -568,9 +784,20 @@ export class FallbackVisualInstance {
         : createGeneratedDieVisual(spec);
     this.group.add(this.threeDimensional?.group ?? this.sprite);
 
-    this.shadowMaterial = new THREE.SpriteMaterial({ map: getShadowTexture(), transparent: true, opacity: 0, depthWrite: false, depthTest: true, toneMapped: false });
+    this.shadowMaterial = new THREE.SpriteMaterial({
+      map: getShadowTexture(),
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      depthTest: true,
+      toneMapped: false,
+    });
     this.shadow = new THREE.Sprite(this.shadowMaterial);
-    this.shadow.scale.set(this.threeDimensional?.mode === 'card' ? 1.65 : scale.x * 0.82, this.threeDimensional?.mode === 'card' ? 0.72 : scale.y * 0.34, 1);
+    this.shadow.scale.set(
+      this.threeDimensional?.mode === 'card' ? 1.45 : scale.x * 0.82,
+      this.threeDimensional?.mode === 'card' ? 0.62 : scale.y * 0.34,
+      1,
+    );
     this.shadow.position.y = -0.38;
     this.shadow.renderOrder = 1;
     this.group.add(this.shadow);
@@ -586,24 +813,34 @@ export class FallbackVisualInstance {
   ): void {
     const mode = this.threeDimensional?.mode ?? 'sprite';
     const isCard = mode === 'card';
-    const end = isCard ? cardSettledPosition(index, count, bounds) : randomSettledPosition(count, bounds, occupied, random);
+    const cardLayout = isCard ? cardSettledLayout(index, count, bounds) : null;
+    const end = cardLayout?.position ?? randomSettledPosition(count, bounds, occupied, random);
     occupied.push(end.clone());
     const fromLeft = index % 2 === 0;
     this.trajectory = {
       start: isCard
-        ? new THREE.Vector3(-bounds.x + 0.9, 1.05 + index * 0.012, bounds.z - 0.95)
+        ? new THREE.Vector3(-bounds.x + 0.86, 1.02 + index * 0.012, bounds.z - 0.88)
         : new THREE.Vector3(
-            THREE.MathUtils.clamp(end.x + (fromLeft ? -1 : 1) * (1.5 + random() * 1.3), -bounds.x + 0.7, bounds.x - 0.7),
+            THREE.MathUtils.clamp(
+              end.x + (fromLeft ? -1 : 1) * (1.5 + random() * 1.3),
+              -bounds.x + 0.7,
+              bounds.x - 0.7,
+            ),
             2.4 + random() * 1.7,
-            THREE.MathUtils.clamp(end.y + (random() - 0.5) * 2.2, -bounds.z + 0.7, bounds.z - 0.7),
+            THREE.MathUtils.clamp(
+              end.y + (random() - 0.5) * 2.2,
+              -bounds.z + 0.7,
+              bounds.z - 0.7,
+            ),
           ),
-      end: new THREE.Vector3(end.x, isCard ? 0.055 : 0.72, end.y),
-      arcHeight: isCard ? 0.55 + Math.min(0.35, count * 0.025) : 1.8 + random() * 1.45,
-      delay: isCard ? Math.min(0.48, index * 0.075) : Math.min(0.2, index * 0.025 + random() * 0.04),
+      end: new THREE.Vector3(end.x, isCard ? 0.045 : 0.72, end.y),
+      arcHeight: isCard ? 0.5 + Math.min(0.3, count * 0.022) : 1.8 + random() * 1.45,
+      delay: isCard ? Math.min(0.52, index * 0.078) : Math.min(0.2, index * 0.025 + random() * 0.04),
       spinX: isCard ? 0 : (fromLeft ? 1 : -1) * (Math.PI * 4 + random() * Math.PI * 4),
       spinY: isCard ? Math.PI : (random() - 0.5) * Math.PI * 8,
-      spinZ: isCard ? (random() - 0.5) * 0.22 : (random() - 0.5) * Math.PI * 6,
-      finalYaw: isCard ? (index - (count - 1) / 2) * 0.045 : random() * Math.PI * 2,
+      spinZ: isCard ? (random() - 0.5) * 0.1 : (random() - 0.5) * Math.PI * 6,
+      finalYaw: cardLayout?.yaw ?? random() * Math.PI * 2,
+      finalScale: cardLayout?.scale ?? 1,
     };
     this.settled = false;
     this.group.position.copy(this.trajectory.start);
@@ -612,16 +849,19 @@ export class FallbackVisualInstance {
     for (const material of this.threeDimensional?.materials ?? []) {
       if ('opacity' in material) material.opacity = 0;
     }
-    if (this.threeDimensional?.labelMaterial) this.threeDimensional.labelMaterial.opacity = 0;
     this.shadowMaterial.opacity = 0;
-    this.group.scale.setScalar(isCard ? 1 : this.threeDimensional ? 1 : 0.55);
+    this.group.scale.setScalar(isCard ? this.trajectory.finalScale : this.threeDimensional ? 1 : 0.55);
     this.group.visible = false;
   }
 
   update(progress: number, _planDuration = 1): void {
     if (this.settled || !this.trajectory) return;
     const trajectory = this.trajectory;
-    const normalized = THREE.MathUtils.clamp((progress - trajectory.delay) / Math.max(0.001, 1 - trajectory.delay), 0, 1);
+    const normalized = THREE.MathUtils.clamp(
+      (progress - trajectory.delay) / Math.max(0.001, 1 - trajectory.delay),
+      0,
+      1,
+    );
     this.group.visible = normalized > 0;
     if (normalized <= 0) return;
     const mode = this.threeDimensional?.mode ?? 'sprite';
@@ -631,35 +871,59 @@ export class FallbackVisualInstance {
       const travel = easeInOutCubic(normalized);
       this.group.position.lerpVectors(trajectory.start, trajectory.end, travel);
       this.group.position.y += Math.sin(normalized * Math.PI) * trajectory.arcHeight;
-      const flip = THREE.MathUtils.smoothstep(normalized, 0.15, 0.78);
-      const yaw = THREE.MathUtils.lerp(Math.PI, trajectory.finalYaw, flip);
-      const pitch = THREE.MathUtils.lerp(-Math.PI / 2 + 0.15, -Math.PI / 2, THREE.MathUtils.smoothstep(normalized, 0.55, 1));
-      const roll = trajectory.spinZ * Math.sin(normalized * Math.PI);
-      this.threeDimensional.group.rotation.set(pitch, yaw, roll, 'XYZ');
-      const settle = THREE.MathUtils.smoothstep(normalized, 0.82, 1);
-      this.group.position.y += Math.sin(settle * Math.PI) * 0.035;
-      for (const material of this.threeDimensional.materials) if ('opacity' in material) material.opacity = opacity;
+
+      const flip = THREE.MathUtils.smoothstep(normalized, 0.2, 0.82);
+      const faceUp = new THREE.Quaternion()
+        .setFromAxisAngle(UP, trajectory.finalYaw)
+        .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2));
+      const faceDown = faceUp.clone().multiply(
+        new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI),
+      );
+      this.threeDimensional.group.quaternion.copy(faceDown).slerp(faceUp, flip);
+      const bank = trajectory.spinZ * Math.sin(normalized * Math.PI);
+      this.threeDimensional.group.rotateZ(bank);
+
+      const settle = THREE.MathUtils.smoothstep(normalized, 0.84, 1);
+      this.group.position.y += Math.sin(settle * Math.PI) * 0.026;
+      this.group.scale.setScalar(trajectory.finalScale);
+      for (const material of this.threeDimensional.materials) {
+        if ('opacity' in material) material.opacity = opacity;
+      }
     } else {
       const travel = easeOutCubic(normalized);
       this.group.position.lerpVectors(trajectory.start, trajectory.end, travel);
       const arc = Math.sin(normalized * Math.PI) * trajectory.arcHeight * (1 - normalized * 0.34);
-      const settleBounce = normalized > 0.72 ? Math.sin((normalized - 0.72) * Math.PI * 7) * (1 - normalized) * 0.28 : 0;
+      const settleBounce = normalized > 0.72
+        ? Math.sin((normalized - 0.72) * Math.PI * 7) * (1 - normalized) * 0.28
+        : 0;
       this.group.position.y = trajectory.end.y + arc + settleBounce;
       if (this.threeDimensional) {
         const spin = 1 - (1 - normalized) ** 2.35;
-        const moving = new THREE.Quaternion().setFromEuler(new THREE.Euler(trajectory.spinX * spin, trajectory.spinY * spin, trajectory.spinZ * spin, 'XYZ'));
-        let settledRotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.12, trajectory.finalYaw, -0.06));
+        const moving = new THREE.Quaternion().setFromEuler(
+          new THREE.Euler(
+            trajectory.spinX * spin,
+            trajectory.spinY * spin,
+            trajectory.spinZ * spin,
+            'XYZ',
+          ),
+        );
+        let settledRotation = new THREE.Quaternion().setFromEuler(
+          new THREE.Euler(0.12, trajectory.finalYaw, -0.06),
+        );
         if (mode === 'die') {
           const faceUp = this.threeDimensional.group.userData.settledRotation;
           if (faceUp instanceof THREE.Quaternion) {
-            settledRotation = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), trajectory.finalYaw).multiply(faceUp);
+            settledRotation = new THREE.Quaternion()
+              .setFromAxisAngle(UP, trajectory.finalYaw)
+              .multiply(faceUp);
           }
         }
-        this.threeDimensional.group.quaternion.copy(moving).slerp(settledRotation, THREE.MathUtils.smoothstep(normalized, 0.76, 1));
+        this.threeDimensional.group.quaternion
+          .copy(moving)
+          .slerp(settledRotation, THREE.MathUtils.smoothstep(normalized, 0.76, 1));
         for (const material of this.threeDimensional.materials) {
-          if ('opacity' in material && material !== this.threeDimensional.labelMaterial) material.opacity = opacity;
+          if ('opacity' in material) material.opacity = opacity;
         }
-        if (this.threeDimensional.labelMaterial) this.threeDimensional.labelMaterial.opacity = THREE.MathUtils.smoothstep(normalized, 0.79, 0.96);
       } else {
         this.material.rotation += trajectory.spinZ / 180 * (1 - normalized);
         this.material.opacity = opacity;
@@ -668,7 +932,9 @@ export class FallbackVisualInstance {
     }
 
     const height = Math.max(0, this.group.position.y - trajectory.end.y);
-    this.shadowMaterial.opacity = THREE.MathUtils.clamp((normalized - 0.08) * 1.5, 0, 0.34) * (1 - Math.min(0.8, height / 4));
+    this.shadowMaterial.opacity =
+      THREE.MathUtils.clamp((normalized - 0.08) * 1.5, 0, 0.34) *
+      (1 - Math.min(0.8, height / 4));
     this.shadow.position.y = 0.02 - this.group.position.y;
   }
 
@@ -683,7 +949,9 @@ export class FallbackVisualInstance {
   }
 
   getSettledPosition(target = new THREE.Vector2()): THREE.Vector2 {
-    return this.trajectory ? target.set(this.trajectory.end.x, this.trajectory.end.z) : target.set(this.group.position.x, this.group.position.z);
+    return this.trajectory
+      ? target.set(this.trajectory.end.x, this.trajectory.end.z)
+      : target.set(this.group.position.x, this.group.position.z);
   }
 
   getSettleTime(planDuration: number): number {
