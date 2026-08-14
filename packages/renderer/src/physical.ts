@@ -1,14 +1,29 @@
+/**
+ * Serializable physical-die contracts shared by renderer integrations.
+ *
+ * @remarks
+ * Separates geometry and support states from face presentation so canonical, generated, and
+ * theme-supplied dice can share one physics model while presenting numbers, text, icons, or
+ * textures.
+ *
+ * @packageDocumentation
+ */
+
 import type {
   PolyhedronLabelAnchor,
   PolyhedronVertex,
   ReadablePolyhedron,
 } from './polyhedra';
 
-/** Where a physical die's geometry came from. */
+/**
+ * Identifies the provider of one physical die's geometry.
+ *
+ * @public
+ */
 export type PhysicalDieGeometrySource = 'canonical' | 'generated' | 'theme';
 
 /**
- * How an authoritative result is made visible without changing a recorded physical trajectory.
+ * Selects how an authoritative result is made visible without changing a recorded trajectory.
  *
  * @public
  */
@@ -26,7 +41,7 @@ export type PhysicalDieFaceContent =
   | { kind: 'texture'; asset: string; label?: string };
 
 /**
- * Stable support state on a physical die, independent of what is painted on it.
+ * Describes one stable support state independently of what is painted on it.
  *
  * @public
  */
@@ -45,7 +60,7 @@ export interface PhysicalDieOutcomeSlot {
 }
 
 /**
- * Serializable collider used by the browser physics planner.
+ * Describes a serializable collider used by the browser physics planner.
  *
  * @public
  */
@@ -68,7 +83,7 @@ export type SerializedPhysicalCollider =
     };
 
 /**
- * Geometry/physics contract shared by canonical, generated, and theme-supplied physical dice.
+ * Defines geometry, support states, and targeting for any physical die.
  *
  * @remarks
  * Presentation content is deliberately separate so numbers, text, icons, or textures can occupy
@@ -91,7 +106,7 @@ export interface PhysicalDieDefinition {
 }
 
 /**
- * Visual content assigned one-to-one to the physical outcome slots.
+ * Assigns visual content one-to-one to a definition's physical outcome slots.
  *
  * @public
  */
@@ -100,7 +115,7 @@ export interface PhysicalDiePresentation {
 }
 
 /**
- * Complete geometry plus presentation description for one physical die.
+ * Combines one physical definition with its independent face presentation.
  *
  * @public
  */
@@ -110,7 +125,7 @@ export interface PhysicalDieModel {
 }
 
 /**
- * Serializable input for a theme or host that supplies its own physical die geometry.
+ * Supplies serializable host or theme geometry for a custom physical die.
  *
  * @public
  */
