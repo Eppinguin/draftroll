@@ -3,6 +3,7 @@ import type {
   DraftrollFallbackKind,
   DraftrollFallbackVisual,
 } from '../packages/renderer/src/index';
+import { createReadablePolyhedron } from '../packages/renderer/src/polyhedra';
 import { THEMES, type ThemeName } from './themes';
 
 export interface FallbackVisualBounds {
@@ -14,27 +15,19 @@ interface Trajectory {
   start: THREE.Vector3;
   end: THREE.Vector3;
   arcHeight: number;
-  rotationStart: number;
-  rotationTurns: number;
-  coinAngularSpeed: number;
-  coinTiltAxis: number;
-  coinFinalYaw: number;
-  coinYawSpeed: number;
-  coinRicochet: number;
-  coinTravelAngle: number;
-  coinBounceScale: number;
-  coinFirstContact: number;
-  coinSecondContact: number;
-  coinThirdContact: number;
-  coinDuration: number;
   delay: number;
+  spinX: number;
+  spinY: number;
+  spinZ: number;
+  finalYaw: number;
 }
 
-interface CoinVisual {
+interface ThreeDimensionalVisual {
   group: THREE.Group;
   geometries: THREE.BufferGeometry[];
   materials: THREE.Material[];
   textures: THREE.Texture[];
+  labelMaterial?: THREE.SpriteMaterial;
 }
 
 let shadowTexture: THREE.CanvasTexture | null = null;
@@ -97,6 +90,14 @@ function polygon(
   context.closePath();
 }
 
+function normalizeTheme(theme: string): ThemeName {
+  return Object.prototype.hasOwnProperty.call(THEMES, theme) ? theme as ThemeName : 'dragon';
+}
+
+function truncate(value: string, maximum: number): string {
+  return value.length <= maximum ? value : `${value.slice(0, Math.max(1, maximum - 1))}…`;
+}
+
 function createVisualTexture(spec: DraftrollFallbackVisual): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
   canvas.width = 640;
@@ -114,23 +115,17 @@ function createVisualTexture(spec: DraftrollFallbackVisual): THREE.CanvasTexture
   context.shadowBlur = 28;
   context.shadowOffsetY = 14;
 
-  const bounds = visualBounds(spec.kind);
-  if (spec.kind === 'coin' || spec.kind === 'spinner') {
+  if (spec.kind === 'coin') {
     context.beginPath();
-    context.arc(canvas.width / 2, canvas.height / 2, bounds.radius, 0, Math.PI * 2);
+    context.arc(canvas.width / 2, canvas.height / 2, 188, 0, Math.PI * 2);
   } else if (spec.kind === 'percentile') {
-    polygon(context, canvas.width / 2, canvas.height / 2, bounds.radius, 10);
+    polygon(context, canvas.width / 2, canvas.height / 2, 188, 10);
   } else if (spec.kind === 'fate') {
-    roundedRect(context, bounds.x, bounds.y, bounds.width, bounds.height, 62);
+    roundedRect(context, 130, 30, 380, 380, 62);
+  } else if (spec.kind === 'token') {
+    roundedRect(context, 84, 66, 472, 308, 100);
   } else {
-    roundedRect(
-      context,
-      bounds.x,
-      bounds.y,
-      bounds.width,
-      bounds.height,
-      spec.kind === 'card' ? 48 : 100,
-    );
+    roundedRect(context, 62, 42, 516, 356, spec.kind === 'card' ? 48 : 88);
   }
 
   const fill = context.createLinearGradient(120, 70, 520, 390);
@@ -144,36 +139,6 @@ function createVisualTexture(spec: DraftrollFallbackVisual): THREE.CanvasTexture
   context.strokeStyle = edge;
   context.stroke();
   context.restore();
-
-  context.save();
-  context.globalAlpha = 0.18;
-  context.strokeStyle = palette.label;
-  context.lineWidth = 3;
-  for (let index = 0; index < 9; index += 1) {
-    context.beginPath();
-    context.arc(
-      canvas.width * (0.22 + index * 0.07),
-      canvas.height * (0.24 + Math.sin(index * 1.7) * 0.08),
-      26 + index * 4,
-      0,
-      Math.PI * 2,
-    );
-    context.stroke();
-  }
-  context.restore();
-
-  if (spec.kind === 'spinner') {
-    context.save();
-    context.translate(canvas.width / 2, canvas.height / 2);
-    context.fillStyle = edge;
-    context.beginPath();
-    context.moveTo(0, -172);
-    context.lineTo(-24, -118);
-    context.lineTo(24, -118);
-    context.closePath();
-    context.fill();
-    context.restore();
-  }
 
   const label = truncate(spec.label, 14);
   context.textAlign = 'center';
@@ -199,27 +164,197 @@ function createVisualTexture(spec: DraftrollFallbackVisual): THREE.CanvasTexture
   return texture;
 }
 
-function visualBounds(kind: DraftrollFallbackKind): {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  radius: number;
-} {
-  if (kind === 'coin' || kind === 'spinner' || kind === 'percentile') {
-    return { x: 120, y: 20, width: 400, height: 400, radius: 188 };
+function createResultLabelTexture(spec: DraftrollFallbackVisual): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 384;
+  canvas.height = 256;
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('Canvas 2D context unavailable.');
+  const palette = THEMES[normalizeTheme(spec.theme)];
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
+  context.lineJoin = 'round';
+  const label = truncate(spec.label, 10);
+  context.font = `800 ${label.length > 4 ? 118 : 156}px system-ui, sans-serif`;
+  context.lineWidth = 18;
+  context.strokeStyle = 'rgba(0,0,0,.82)';
+  context.strokeText(label, canvas.width / 2, 118);
+  context.fillStyle = palette.label;
+  context.shadowColor = palette.labelGlow;
+  context.shadowBlur = 22;
+  context.fillText(label, canvas.width / 2, 118);
+  context.shadowBlur = 0;
+  context.font = '650 31px system-ui, sans-serif';
+  context.fillStyle = 'rgba(255,255,255,.9)';
+  context.fillText(truncate(spec.title, 20), canvas.width / 2, 218);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+function triangulateFaces(vertices: readonly (readonly [number, number, number])[], faces: readonly number[][]): THREE.BufferGeometry {
+  const positions: number[] = [];
+  for (const face of faces) {
+    if (face.length < 3) continue;
+    for (let index = 1; index + 1 < face.length; index += 1) {
+      for (const vertexIndex of [face[0], face[index], face[index + 1]]) {
+        const vertex = vertices[vertexIndex];
+        positions.push(vertex[0], vertex[1], vertex[2]);
+      }
+    }
   }
-  if (kind === 'fate') return { x: 130, y: 30, width: 380, height: 380, radius: 0 };
-  if (kind === 'token') return { x: 84, y: 66, width: 472, height: 308, radius: 0 };
-  return { x: 62, y: 42, width: 516, height: 356, radius: 0 };
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.computeVertexNormals();
+  geometry.computeBoundingSphere();
+  return geometry;
 }
 
-function normalizeTheme(theme: string): ThemeName {
-  return Object.prototype.hasOwnProperty.call(THEMES, theme) ? theme : 'dragon';
+function parseNumericSides(spec: DraftrollFallbackVisual): number | null {
+  if (typeof spec.sides === 'number' && Number.isSafeInteger(spec.sides) && spec.sides >= 1) return spec.sides;
+  const match = /^d(\d+)$/i.exec(spec.type);
+  if (!match) return null;
+  const value = Number(match[1]);
+  return Number.isSafeInteger(value) && value >= 1 ? value : null;
 }
 
-function truncate(value: string, maximum: number): string {
-  return value.length <= maximum ? value : `${value.slice(0, Math.max(1, maximum - 1))}…`;
+function createGeneratedDieVisual(spec: DraftrollFallbackVisual): ThreeDimensionalVisual | null {
+  const sides = parseNumericSides(spec);
+  if (spec.kind !== 'spinner' || sides === null) return null;
+  const shape = createReadablePolyhedron(sides);
+  const palette = THEMES[normalizeTheme(spec.theme)];
+  const group = new THREE.Group();
+  const geometry = triangulateFaces(shape.vertices, shape.faces);
+  const material = new THREE.MeshPhysicalMaterial({
+    color: palette.base,
+    emissive: palette.shadow,
+    emissiveIntensity: 0.13,
+    metalness: 0.28,
+    roughness: 0.34,
+    clearcoat: 0.42,
+    clearcoatRoughness: 0.24,
+    flatShading: true,
+    transparent: true,
+    opacity: 0,
+  });
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  group.add(mesh);
+
+  const edgeGeometry = new THREE.EdgesGeometry(geometry, 12);
+  const edgeMaterial = new THREE.LineBasicMaterial({
+    color: palette.edge,
+    transparent: true,
+    opacity: 0,
+  });
+  const edges = new THREE.LineSegments(edgeGeometry, edgeMaterial);
+  edges.scale.setScalar(1.006);
+  group.add(edges);
+
+  const labelTexture = createResultLabelTexture(spec);
+  const labelMaterial = new THREE.SpriteMaterial({
+    map: labelTexture,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    depthTest: false,
+    toneMapped: false,
+  });
+  const label = new THREE.Sprite(labelMaterial);
+  label.scale.set(1.35, 0.9, 1);
+  label.position.y = 0.34;
+  label.renderOrder = 8;
+  group.add(label);
+
+  // d1 is intentionally longer; high-count drums are slightly wider so the silhouette reads.
+  if (shape.family === 'd1-cylinder') group.scale.set(0.78, 0.78, 1.08);
+  else if (shape.family === 'drum' || shape.family === 'representative') group.scale.set(1.08, 0.92, 1.08);
+
+  return {
+    group,
+    geometries: [geometry, edgeGeometry],
+    materials: [material, edgeMaterial, labelMaterial],
+    textures: [labelTexture],
+    labelMaterial,
+  };
+}
+
+function cropCoinTexture(texture: THREE.CanvasTexture): void {
+  texture.offset.set(100 / 640, 0);
+  texture.repeat.set(440 / 640, 1);
+  texture.needsUpdate = true;
+}
+
+function createCoinVisual(texture: THREE.CanvasTexture, spec: DraftrollFallbackVisual): ThreeDimensionalVisual {
+  const palette = THEMES[normalizeTheme(spec.theme)];
+  const group = new THREE.Group();
+  const bodyGeometry = new THREE.CylinderGeometry(0.76, 0.76, 0.14, 64, 1, false);
+  const faceGeometry = new THREE.CircleGeometry(0.69, 64);
+  const edgeMaterial = new THREE.MeshStandardMaterial({
+    color: palette.edge,
+    metalness: 0.58,
+    roughness: 0.3,
+    transparent: true,
+    opacity: 0,
+  });
+  const capMaterial = new THREE.MeshStandardMaterial({
+    color: palette.base,
+    metalness: 0.42,
+    roughness: 0.36,
+    transparent: true,
+    opacity: 0,
+  });
+
+  cropCoinTexture(texture);
+  const faceMaterial = new THREE.MeshBasicMaterial({
+    map: texture,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    toneMapped: false,
+    side: THREE.FrontSide,
+  });
+  const backTexture = createVisualTexture({ ...spec, label: spec.oppositeLabel ?? '•' });
+  cropCoinTexture(backTexture);
+  const backMaterial = new THREE.MeshBasicMaterial({
+    map: backTexture,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    toneMapped: false,
+    side: THREE.FrontSide,
+  });
+
+  const body = new THREE.Mesh(bodyGeometry, [edgeMaterial, capMaterial, capMaterial]);
+  body.castShadow = true;
+  body.receiveShadow = true;
+  group.add(body);
+  const face = new THREE.Mesh(faceGeometry, faceMaterial);
+  face.rotation.x = -Math.PI / 2;
+  face.position.y = 0.072;
+  face.renderOrder = 6;
+  group.add(face);
+  const back = new THREE.Mesh(faceGeometry, backMaterial);
+  back.rotation.x = Math.PI / 2;
+  back.position.y = -0.072;
+  back.renderOrder = 6;
+  group.add(back);
+
+  return {
+    group,
+    geometries: [bodyGeometry, faceGeometry],
+    materials: [edgeMaterial, capMaterial, faceMaterial, backMaterial],
+    textures: [backTexture],
+  };
+}
+
+function visualScale(kind: DraftrollFallbackKind): THREE.Vector2 {
+  if (kind === 'card') return new THREE.Vector2(2.15, 1.48);
+  if (kind === 'token') return new THREE.Vector2(1.95, 1.28);
+  if (kind === 'fate') return new THREE.Vector2(1.55, 1.55);
+  return new THREE.Vector2(1.62, 1.16);
 }
 
 function easeOutCubic(value: number): number {
@@ -230,83 +365,6 @@ function easeOutBack(value: number): number {
   const overshoot = 1.70158;
   const shifted = value - 1;
   return 1 + (overshoot + 1) * shifted * shifted * shifted + overshoot * shifted * shifted;
-}
-
-function parabolicHop(progress: number, start: number, end: number, height: number): number {
-  const localProgress = THREE.MathUtils.clamp((progress - start) / (end - start), 0, 1);
-  return 4 * height * localProgress * (1 - localProgress);
-}
-
-function coinAngularDisplacement(
-  progress: number,
-  trajectory: Trajectory,
-  angularSpeed: number,
-): number {
-  const segments = [
-    { start: 0, end: trajectory.coinFirstContact, rate: 1 },
-    { start: trajectory.coinFirstContact, end: trajectory.coinSecondContact, rate: 0.48 },
-    { start: trajectory.coinSecondContact, end: trajectory.coinThirdContact, rate: 0.2 },
-    { start: trajectory.coinThirdContact, end: 1, rate: 0.06 },
-  ];
-  let displacement = 0;
-  for (const segment of segments) {
-    const duration = Math.max(0, Math.min(progress, segment.end) - segment.start);
-    displacement += duration * angularSpeed * segment.rate;
-    if (progress <= segment.end) break;
-  }
-  return displacement;
-}
-
-function coinTravelProgress(progress: number, trajectory: Trajectory): number {
-  if (progress < trajectory.coinFirstContact) {
-    return (progress / trajectory.coinFirstContact) * 0.84;
-  }
-  if (progress < trajectory.coinSecondContact) {
-    return THREE.MathUtils.lerp(
-      0.84,
-      0.94,
-      (progress - trajectory.coinFirstContact) /
-        (trajectory.coinSecondContact - trajectory.coinFirstContact),
-    );
-  }
-  if (progress < trajectory.coinThirdContact) {
-    return THREE.MathUtils.lerp(
-      0.94,
-      0.985,
-      (progress - trajectory.coinSecondContact) /
-        (trajectory.coinThirdContact - trajectory.coinSecondContact),
-    );
-  }
-  return THREE.MathUtils.lerp(
-    0.985,
-    1,
-    (progress - trajectory.coinThirdContact) / (1 - trajectory.coinThirdContact),
-  );
-}
-
-function coinRicochetOffset(progress: number, trajectory: Trajectory): number {
-  if (progress < trajectory.coinFirstContact) return 0;
-  if (progress < trajectory.coinSecondContact) {
-    return THREE.MathUtils.lerp(
-      0,
-      trajectory.coinRicochet,
-      (progress - trajectory.coinFirstContact) /
-        (trajectory.coinSecondContact - trajectory.coinFirstContact),
-    );
-  }
-  if (progress < trajectory.coinThirdContact) {
-    return THREE.MathUtils.lerp(
-      trajectory.coinRicochet,
-      trajectory.coinRicochet * -0.35,
-      (progress - trajectory.coinSecondContact) /
-        (trajectory.coinThirdContact - trajectory.coinSecondContact),
-    );
-  }
-  return THREE.MathUtils.lerp(
-    trajectory.coinRicochet * -0.35,
-    0,
-    (progress - trajectory.coinThirdContact) / (1 - trajectory.coinThirdContact),
-  );
 }
 
 function randomSettledPosition(
@@ -321,7 +379,6 @@ function randomSettledPosition(
   const candidate = new THREE.Vector2();
   const best = new THREE.Vector2();
   let bestDistance = -1;
-
   for (let attempt = 0; attempt < 80; attempt += 1) {
     candidate.set((random() * 2 - 1) * rangeX, (random() * 2 - 1) * rangeZ);
     const nearest = occupied.reduce(
@@ -337,94 +394,22 @@ function randomSettledPosition(
   return best;
 }
 
-function cropCoinTexture(texture: THREE.CanvasTexture): void {
-  texture.offset.set(100 / 640, 0);
-  texture.repeat.set(440 / 640, 1);
-  texture.needsUpdate = true;
-}
-
-function createCoinVisual(texture: THREE.CanvasTexture, spec: DraftrollFallbackVisual): CoinVisual {
-  const palette = THEMES[normalizeTheme(spec.theme)];
-  const group = new THREE.Group();
-  const bodyGeometry = new THREE.CylinderGeometry(0.76, 0.76, 0.14, 64, 1, false);
-  const faceGeometry = new THREE.CircleGeometry(0.69, 64);
-  const edgeMaterial = new THREE.MeshStandardMaterial({
-    color: palette.edge,
-    emissive: palette.shadow,
-    emissiveIntensity: 0.08,
-    metalness: 0.58,
-    roughness: 0.3,
-    transparent: true,
-    opacity: 0,
-  });
-  const capMaterial = new THREE.MeshStandardMaterial({
-    color: palette.base,
-    metalness: 0.42,
-    roughness: 0.36,
-    transparent: true,
-    opacity: 0,
-  });
-
-  // The fallback artwork is rectangular. Crop its centered square so the
-  // circular result face remains round when it is applied to the 3D coin.
-  cropCoinTexture(texture);
-  const faceMaterial = new THREE.MeshBasicMaterial({
-    map: texture,
-    transparent: true,
-    opacity: 0,
-    depthWrite: false,
-    toneMapped: false,
-    side: THREE.FrontSide,
-  });
-  const backTexture = createVisualTexture({
-    ...spec,
-    label: spec.oppositeLabel ?? '•',
-  });
-  cropCoinTexture(backTexture);
-  const backMaterial = new THREE.MeshBasicMaterial({
-    map: backTexture,
-    transparent: true,
-    opacity: 0,
-    depthWrite: false,
-    toneMapped: false,
-    side: THREE.FrontSide,
-  });
-
-  const body = new THREE.Mesh(bodyGeometry, [edgeMaterial, capMaterial, capMaterial]);
-  body.castShadow = true;
-  body.receiveShadow = true;
-  group.add(body);
-
-  const face = new THREE.Mesh(faceGeometry, faceMaterial);
-  face.rotation.x = -Math.PI / 2;
-  face.position.y = 0.072;
-  face.renderOrder = 6;
-  group.add(face);
-
-  const back = new THREE.Mesh(faceGeometry, backMaterial);
-  back.rotation.x = Math.PI / 2;
-  back.position.y = -0.072;
-  back.renderOrder = 6;
-  group.add(back);
-
-  return {
-    group,
-    geometries: [bodyGeometry, faceGeometry],
-    materials: [edgeMaterial, capMaterial, faceMaterial, backMaterial],
-    textures: [backTexture],
-  };
-}
-
+/**
+ * Presentation object for non-standard results.
+ *
+ * Numeric `spinner` fallbacks are rendered as real 3D solids. Their result is still authoritative
+ * before animation; the result label fades in only during settlement, following Dicebox's useful
+ * separation between motion geometry and logical result presentation.
+ */
 export class FallbackVisualInstance {
   readonly group = new THREE.Group();
   readonly spec: DraftrollFallbackVisual;
   private readonly texture: THREE.CanvasTexture;
   private readonly material: THREE.SpriteMaterial;
   private readonly sprite: THREE.Sprite;
-  private readonly coin: CoinVisual | null;
+  private readonly threeDimensional: ThreeDimensionalVisual | null;
   private readonly shadowMaterial: THREE.SpriteMaterial;
   private readonly shadow: THREE.Sprite;
-  private readonly coinFlipAxis = new THREE.Vector3(1, 0, 0);
   private trajectory: Trajectory | null = null;
   private settled = false;
 
@@ -442,8 +427,11 @@ export class FallbackVisualInstance {
     const scale = visualScale(spec.kind);
     this.sprite.scale.set(scale.x, scale.y, 1);
     this.sprite.renderOrder = 5;
-    this.coin = spec.kind === 'coin' ? createCoinVisual(this.texture, spec) : null;
-    this.group.add(this.coin?.group ?? this.sprite);
+
+    this.threeDimensional = spec.kind === 'coin'
+      ? createCoinVisual(this.texture, spec)
+      : createGeneratedDieVisual(spec);
+    this.group.add(this.threeDimensional?.group ?? this.sprite);
 
     this.shadowMaterial = new THREE.SpriteMaterial({
       map: getShadowTexture(),
@@ -458,7 +446,6 @@ export class FallbackVisualInstance {
     this.shadow.position.y = -0.38;
     this.shadow.renderOrder = 1;
     this.group.add(this.shadow);
-
     this.group.visible = false;
   }
 
@@ -469,196 +456,99 @@ export class FallbackVisualInstance {
     random: () => number,
     occupied: THREE.Vector2[] = [],
   ): void {
-    const columns = Math.min(5, Math.max(1, count));
-    const rows = Math.ceil(count / columns);
-    const column = index % columns;
-    const row = Math.floor(index / columns);
-    const rowCount = Math.min(columns, count - row * columns);
-    const spacingX = Math.min(2.45, (bounds.x * 2 - 1.8) / Math.max(1, rowCount));
-    const x = (column - (rowCount - 1) / 2) * spacingX;
-    const z = -bounds.z + 1.18 + row * Math.min(1.5, 2.8 / Math.max(1, rows));
-    const isCoin = this.spec.kind === 'coin';
-    const fromLeft = isCoin ? random() < 0.5 : index % 2 === 0;
-    const scatteredEnd = isCoin ? randomSettledPosition(count, bounds, occupied, random) : null;
-    const coinFirstContact = isCoin ? 0.7 + random() * 0.06 : 0.56;
-    const coinSecondContact = isCoin
-      ? coinFirstContact + (1 - coinFirstContact) * (0.38 + random() * 0.08)
-      : 0.76;
-    const coinThirdContact = isCoin
-      ? coinSecondContact + (1 - coinSecondContact) * (0.48 + random() * 0.12)
-      : 0.9;
-    const endX =
-      scatteredEnd?.x ??
-      THREE.MathUtils.clamp(x + (random() - 0.5) * 0.22, -bounds.x + 0.8, bounds.x - 0.8);
-    const endZ =
-      scatteredEnd?.y ??
-      THREE.MathUtils.clamp(z + (random() - 0.5) * 0.18, -bounds.z + 0.72, bounds.z - 0.72);
-    const coinTossAngle = isCoin ? random() * Math.PI * 2 : 0;
-    const coinTossDistance = isCoin ? 0.95 + random() * 1.15 : 0;
-    this.settled = false;
+    const end = randomSettledPosition(count, bounds, occupied, random);
+    occupied.push(end.clone());
+    const fromLeft = index % 2 === 0;
+    const is3d = this.threeDimensional !== null;
     this.trajectory = {
       start: new THREE.Vector3(
-        isCoin
-          ? THREE.MathUtils.clamp(
-              endX - Math.cos(coinTossAngle) * coinTossDistance,
-              -bounds.x + 0.8,
-              bounds.x - 0.8,
-            )
+        is3d
+          ? THREE.MathUtils.clamp(end.x + (fromLeft ? -1 : 1) * (1.5 + random() * 1.3), -bounds.x + 0.7, bounds.x - 0.7)
           : (fromLeft ? -bounds.x - 1.05 : bounds.x + 1.05) + (random() - 0.5) * 0.8,
-        isCoin ? 0.28 + random() * 0.3 : 2.8 + random() * 1.6,
-        isCoin
-          ? THREE.MathUtils.clamp(
-              endZ - Math.sin(coinTossAngle) * coinTossDistance,
-              -bounds.z + 0.8,
-              bounds.z - 0.8,
-            )
+        is3d ? 2.4 + random() * 1.7 : 2.8 + random() * 1.6,
+        is3d
+          ? THREE.MathUtils.clamp(end.y + (random() - 0.5) * 2.2, -bounds.z + 0.7, bounds.z - 0.7)
           : (random() * 2 - 1) * bounds.z,
       ),
-      end: new THREE.Vector3(endX, isCoin ? 0.08 : 0.48, endZ),
-      arcHeight: isCoin ? 2.15 + random() * 0.75 : 2.1 + random() * 1.5,
-      rotationStart: (random() - 0.5) * Math.PI,
-      rotationTurns: (fromLeft ? 1 : -1) * (1.2 + random() * 2.2),
-      coinAngularSpeed: isCoin ? 4.1 + random() * 1.3 : 0,
-      coinTiltAxis: isCoin ? coinTossAngle - Math.PI / 2 + (random() - 0.5) * 0.18 : 0,
-      coinFinalYaw: isCoin ? random() * Math.PI * 2 : 0,
-      coinYawSpeed: isCoin ? (random() - 0.5) * 0.16 : 0,
-      coinRicochet: isCoin ? (random() - 0.5) * 0.24 : 0,
-      coinTravelAngle: coinTossAngle,
-      coinBounceScale: isCoin ? 0.82 + random() * 0.34 : 1,
-      coinFirstContact,
-      coinSecondContact,
-      coinThirdContact,
-      coinDuration: isCoin ? 1.72 + random() * 0.16 : 1,
-      delay: isCoin ? 0.025 + random() * 0.11 : Math.min(0.22, index * 0.028 + random() * 0.035),
+      end: new THREE.Vector3(end.x, is3d ? 0.72 : 0.48, end.y),
+      arcHeight: is3d ? 1.8 + random() * 1.45 : 2.1 + random() * 1.5,
+      delay: Math.min(0.2, index * 0.025 + random() * 0.04),
+      spinX: (fromLeft ? 1 : -1) * (Math.PI * 4 + random() * Math.PI * 4),
+      spinY: (random() - 0.5) * Math.PI * 8,
+      spinZ: (random() - 0.5) * Math.PI * 6,
+      finalYaw: random() * Math.PI * 2,
     };
-    occupied.push(new THREE.Vector2(this.trajectory.end.x, this.trajectory.end.z));
-    this.coinFlipAxis.set(
-      Math.cos(this.trajectory.coinTiltAxis),
-      0,
-      Math.sin(this.trajectory.coinTiltAxis),
-    );
+    this.settled = false;
     this.group.position.copy(this.trajectory.start);
-    this.material.rotation = this.trajectory.rotationStart;
+    this.group.quaternion.identity();
+    this.material.rotation = (random() - 0.5) * Math.PI;
     this.material.opacity = 0;
-    for (const material of this.coin?.materials ?? []) material.opacity = 0;
+    for (const material of this.threeDimensional?.materials ?? []) {
+      if ('opacity' in material) material.opacity = 0;
+    }
+    if (this.threeDimensional?.labelMaterial) this.threeDimensional.labelMaterial.opacity = 0;
     this.shadowMaterial.opacity = 0;
-    this.group.scale.setScalar(this.coin ? 1 : 0.55);
+    this.group.scale.setScalar(is3d ? 1 : 0.55);
+    this.group.visible = false;
   }
 
-  update(progress: number, planDuration = 1): void {
+  update(progress: number, _planDuration = 1): void {
     if (this.settled) return;
     const trajectory = this.trajectory;
     if (!trajectory) return;
-    const normalized = this.coin
-      ? THREE.MathUtils.clamp(
-          (progress * planDuration - trajectory.delay) / trajectory.coinDuration,
-          0,
-          1,
-        )
-      : THREE.MathUtils.clamp(
-          (progress - trajectory.delay) / Math.max(0.001, 1 - trajectory.delay),
-          0,
-          1,
-        );
+    const normalized = THREE.MathUtils.clamp(
+      (progress - trajectory.delay) / Math.max(0.001, 1 - trajectory.delay),
+      0,
+      1,
+    );
     this.group.visible = normalized > 0;
     if (normalized <= 0) return;
 
-    let heightAboveGround: number;
-    if (this.coin) {
-      const travel = coinTravelProgress(normalized, trajectory);
-      this.group.position.lerpVectors(trajectory.start, trajectory.end, travel);
-      const ricochet = coinRicochetOffset(normalized, trajectory);
-      this.group.position.x -= Math.sin(trajectory.coinTravelAngle) * ricochet;
-      this.group.position.z += Math.cos(trajectory.coinTravelAngle) * ricochet;
+    const travel = easeOutCubic(normalized);
+    this.group.position.lerpVectors(trajectory.start, trajectory.end, travel);
+    const arc = Math.sin(normalized * Math.PI) * trajectory.arcHeight * (1 - normalized * 0.34);
+    const settleBounce = normalized > 0.72
+      ? Math.sin((normalized - 0.72) * Math.PI * 7) * (1 - normalized) * 0.28
+      : 0;
+    this.group.position.y = trajectory.end.y + arc + settleBounce;
 
-      const totalFlip = coinAngularDisplacement(1, trajectory, trajectory.coinAngularSpeed);
-      const flipAngle =
-        (coinAngularDisplacement(normalized, trajectory, trajectory.coinAngularSpeed) - totalFlip) *
-        Math.PI *
-        2;
-      const totalYaw = coinAngularDisplacement(1, trajectory, trajectory.coinYawSpeed);
-      const yawAngle =
-        trajectory.coinFinalYaw +
-        (coinAngularDisplacement(normalized, trajectory, trajectory.coinYawSpeed) - totalYaw) *
-          Math.PI *
-          2;
-      const supportHeight =
-        0.07 * Math.abs(Math.cos(flipAngle)) + 0.76 * Math.abs(Math.sin(flipAngle));
-      const contactFlip =
-        (coinAngularDisplacement(
-          trajectory.coinFirstContact,
-          trajectory,
-          trajectory.coinAngularSpeed,
-        ) -
-          totalFlip) *
-        Math.PI *
-        2;
-      const contactSupport =
-        0.07 * Math.abs(Math.cos(contactFlip)) + 0.76 * Math.abs(Math.sin(contactFlip));
-      if (normalized < trajectory.coinFirstContact) {
-        const flight = normalized / trajectory.coinFirstContact;
-        this.group.position.y =
-          0.01 +
-          THREE.MathUtils.lerp(trajectory.start.y - 0.01, contactSupport, flight) +
-          4 * trajectory.arcHeight * flight * (1 - flight);
-      } else {
-        const bounceHeight =
-          normalized < trajectory.coinSecondContact
-            ? parabolicHop(
-                normalized,
-                trajectory.coinFirstContact,
-                trajectory.coinSecondContact,
-                0.28 * trajectory.coinBounceScale,
-              )
-            : normalized < trajectory.coinThirdContact
-              ? parabolicHop(
-                  normalized,
-                  trajectory.coinSecondContact,
-                  trajectory.coinThirdContact,
-                  0.085 * trajectory.coinBounceScale,
-                )
-              : parabolicHop(
-                  normalized,
-                  trajectory.coinThirdContact,
-                  1,
-                  0.018 * trajectory.coinBounceScale,
-                );
-        this.group.position.y = 0.01 + supportHeight + bounceHeight;
-      }
-      heightAboveGround = this.group.position.y - trajectory.end.y;
-      this.coin.group.quaternion.setFromAxisAngle(this.coinFlipAxis, flipAngle);
-      this.coin.group.rotateY(yawAngle);
-    } else {
-      const travel = easeOutCubic(normalized);
-      this.group.position.lerpVectors(trajectory.start, trajectory.end, travel);
-      const arc = Math.sin(normalized * Math.PI) * trajectory.arcHeight * (1 - normalized * 0.38);
-      const settleBounce =
-        normalized > 0.72
-          ? Math.sin((normalized - 0.72) * Math.PI * 7) * (1 - normalized) * 0.36
-          : 0;
-      heightAboveGround = arc + settleBounce;
-      this.group.position.y = trajectory.end.y + heightAboveGround;
-      this.material.rotation =
-        trajectory.rotationStart +
-        trajectory.rotationTurns * Math.PI * 2 * (1 - Math.pow(1 - normalized, 2));
-    }
     const opacity = THREE.MathUtils.clamp(normalized * 5, 0, 1);
-    this.material.opacity = opacity;
-    for (const material of this.coin?.materials ?? []) material.opacity = opacity;
-    this.shadowMaterial.opacity =
-      THREE.MathUtils.clamp((normalized - 0.22) * 1.2, 0, 0.34) *
-      (1 - Math.min(0.8, Math.max(0, heightAboveGround) / 5));
-    this.shadow.position.y = 0.01 - this.group.position.y;
-    if (!this.coin) {
+    if (this.threeDimensional) {
+      const spin = 1 - Math.pow(1 - normalized, 2.35);
+      const settleBlend = THREE.MathUtils.smoothstep(normalized, 0.78, 1);
+      const moving = new THREE.Euler(
+        trajectory.spinX * spin,
+        trajectory.spinY * spin,
+        trajectory.spinZ * spin,
+        'XYZ',
+      );
+      const movingQuaternion = new THREE.Quaternion().setFromEuler(moving);
+      const settledQuaternion = new THREE.Quaternion().setFromEuler(
+        new THREE.Euler(0.18, trajectory.finalYaw, -0.08, 'XYZ'),
+      );
+      this.threeDimensional.group.quaternion.copy(movingQuaternion).slerp(settledQuaternion, settleBlend);
+      for (const material of this.threeDimensional.materials) {
+        if ('opacity' in material && material !== this.threeDimensional.labelMaterial) material.opacity = opacity;
+      }
+      if (this.threeDimensional.labelMaterial) {
+        this.threeDimensional.labelMaterial.opacity = THREE.MathUtils.smoothstep(normalized, 0.72, 0.94);
+      }
+    } else {
+      this.material.rotation += (trajectory.spinZ / 180) * (1 - normalized);
+      this.material.opacity = opacity;
       const scale = easeOutBack(Math.min(1, normalized * 1.45));
       this.group.scale.setScalar(Math.max(0.2, scale));
     }
+
+    this.shadowMaterial.opacity =
+      THREE.MathUtils.clamp((normalized - 0.12) * 1.4, 0, 0.34) *
+      (1 - Math.min(0.78, Math.max(0, arc) / 4));
+    this.shadow.position.y = 0.02 - this.group.position.y;
   }
 
   settle(): void {
     if (this.settled) return;
-    const duration = this.trajectory ? this.trajectory.delay + this.trajectory.coinDuration : 1;
-    this.update(1, duration);
+    this.update(1, 1);
     this.settled = true;
   }
 
@@ -673,23 +563,15 @@ export class FallbackVisualInstance {
   }
 
   getSettleTime(planDuration: number): number {
-    if (!this.coin || !this.trajectory) return planDuration;
-    return Math.min(planDuration, this.trajectory.delay + this.trajectory.coinDuration);
+    return planDuration;
   }
 
   dispose(): void {
     this.texture.dispose();
     this.material.dispose();
-    for (const geometry of this.coin?.geometries ?? []) geometry.dispose();
-    for (const material of this.coin?.materials ?? []) material.dispose();
-    for (const texture of this.coin?.textures ?? []) texture.dispose();
+    for (const geometry of this.threeDimensional?.geometries ?? []) geometry.dispose();
+    for (const material of this.threeDimensional?.materials ?? []) material.dispose();
+    for (const texture of this.threeDimensional?.textures ?? []) texture.dispose();
     this.shadowMaterial.dispose();
   }
-}
-
-function visualScale(kind: DraftrollFallbackKind): THREE.Vector2 {
-  if (kind === 'card') return new THREE.Vector2(2.15, 1.48);
-  if (kind === 'token') return new THREE.Vector2(1.95, 1.28);
-  if (kind === 'fate') return new THREE.Vector2(1.55, 1.55);
-  return new THREE.Vector2(1.62, 1.16);
 }
