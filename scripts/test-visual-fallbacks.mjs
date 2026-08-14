@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-const [renderer, engine, visuals, visualBase, polyhedra, html] = await Promise.all([
+const [renderer, engine, visuals, generatedVisuals, visualBase, polyhedra, html] = await Promise.all([
   readFile(new URL('../packages/renderer/src/index.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/main.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/fallback-visuals.ts', import.meta.url), 'utf8'),
+  readFile(new URL('../src/generated-die-visuals.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/fallback-visuals-base.ts', import.meta.url), 'utf8'),
   readFile(new URL('../packages/renderer/src/polyhedra.ts', import.meta.url), 'utf8'),
   readFile(new URL('../index.html', import.meta.url), 'utf8'),
@@ -23,24 +24,30 @@ assert.match(engine, /collectOrderedVisualResults/);
 assert.match(engine, /visual\.update\(fallbackProgress, plan\.duration\)/);
 assert.match(engine, /fallbacks:\s*activeFallbackSpecs/);
 
-// Generated numeric dice route through the wrapper's real convex-body simulation.
+// Exact generated dice use real convex-body physics, while very high representative dice
+// keep the existing lightweight presentation path.
+assert.match(visuals, /MAXIMUM_EXACT_GENERATED_SIDES = 256/);
+assert.match(visuals, /GeneratedFallbackVisualInstance/);
 assert.match(visuals, /BaseFallbackVisualInstance/);
-assert.match(visuals, /isGenerated/);
-assert.match(visuals, /import \* as CANNON/);
-assert.match(visuals, /new CANNON\.ConvexPolyhedron/);
-assert.match(visuals, /new CANNON\.World/);
-assert.match(visuals, /new CANNON\.SAPBroadphase/);
-assert.match(visuals, /world\.step\(1 \/ 120\)/);
-assert.match(visuals, /landedOutcome/);
-assert.match(visuals, /applyRequestedResult/);
-assert.match(visuals, /sample\(this\.trajectory/);
-assert.match(visuals, /secondaryAnchor/);
-assert.match(visuals, /covered\.has\(faceIndex\)/);
-assert.match(visuals, /labelMaterials/);
-assert.doesNotMatch(visuals, /settledRotation/);
-assert.doesNotMatch(visuals, /resultOutcome\.settledUp/);
+assert.match(visuals, /usesGeneratedPhysics/);
+assert.match(visuals, /sides <= MAXIMUM_EXACT_GENERATED_SIDES/);
 
-// The established renderer still owns cards, coins, and symbolic fallback visuals.
+assert.match(generatedVisuals, /import \* as CANNON/);
+assert.match(generatedVisuals, /new CANNON\.ConvexPolyhedron/);
+assert.match(generatedVisuals, /new CANNON\.World/);
+assert.match(generatedVisuals, /new CANNON\.SAPBroadphase/);
+assert.match(generatedVisuals, /solver\.iterations = 32/);
+assert.match(generatedVisuals, /world\.step\(1 \/ 120\)/);
+assert.match(generatedVisuals, /landedOutcome/);
+assert.match(generatedVisuals, /applyRequestedResult/);
+assert.match(generatedVisuals, /sample\(this\.trajectory/);
+assert.match(generatedVisuals, /secondaryAnchor/);
+assert.match(generatedVisuals, /covered\.has\(faceIndex\)/);
+assert.match(generatedVisuals, /labelMaterials/);
+assert.doesNotMatch(generatedVisuals, /settledRotation/);
+assert.doesNotMatch(generatedVisuals, /resultOutcome\.settledUp/);
+
+// The established renderer still owns cards, coins, symbolic visuals, and representative dN.
 assert.match(visualBase, /createGeneratedDieVisual/);
 assert.match(visualBase, /triangulateTexturedShape/);
 assert.match(visualBase, /createDieSurfaceTexture/);
@@ -87,6 +94,7 @@ console.log(JSON.stringify({
   generatedFaceLabelCoverage: true,
   naturalGeneratedPhysics: true,
   noLateGeneratedCorrection: true,
+  representativeHighCountFallback: true,
   roundedCardGeometry: true,
   collisionFreeCardLayout: true,
   cardDealAnimation: true,
