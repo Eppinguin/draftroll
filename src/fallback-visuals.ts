@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { FallbackVisualInstance as BaseFallbackVisualInstance } from './fallback-visuals-base';
-import { FallbackVisualInstance as GeneratedFallbackVisualInstance } from './generated-die-visuals';
+import { PhysicalDieVisualInstance, usesPhysicalDieModel } from './physical-die-visuals';
 import type { DraftrollFallbackVisual } from '../packages/renderer/src/index';
 
 export interface FallbackVisualBounds {
@@ -8,18 +8,15 @@ export interface FallbackVisualBounds {
   z: number;
 }
 
-const MAXIMUM_EXACT_GENERATED_SIDES = 256;
+type VisualImplementation = BaseFallbackVisualInstance | PhysicalDieVisualInstance;
 
-function usesGeneratedPhysics(spec: DraftrollFallbackVisual): boolean {
-  if (spec.kind !== 'spinner') return false;
-  const explicitSides = Number.isSafeInteger(spec.sides) ? spec.sides : undefined;
-  const match = explicitSides === undefined ? /^d(\d+)$/i.exec(spec.type) : null;
-  const sides = explicitSides ?? (match ? Number(match[1]) : NaN);
-  return Number.isSafeInteger(sides) && sides >= 1 && sides <= MAXIMUM_EXACT_GENERATED_SIDES;
-}
-
-type VisualImplementation = BaseFallbackVisualInstance | GeneratedFallbackVisualInstance;
-
+/**
+ * Non-die visual router.
+ *
+ * Numeric spinner entries are legacy renderer inputs, but exact dN values are promoted immediately
+ * into the first-class physical-die model. Cards, tokens, Fate, percentile, and representative
+ * high-count visuals remain true fallbacks.
+ */
 export class FallbackVisualInstance {
   readonly group: THREE.Group;
   readonly spec: DraftrollFallbackVisual;
@@ -27,8 +24,8 @@ export class FallbackVisualInstance {
 
   constructor(spec: DraftrollFallbackVisual) {
     this.spec = spec;
-    this.implementation = usesGeneratedPhysics(spec)
-      ? new GeneratedFallbackVisualInstance(spec)
+    this.implementation = usesPhysicalDieModel(spec)
+      ? new PhysicalDieVisualInstance(spec)
       : new BaseFallbackVisualInstance(spec);
     this.group = this.implementation.group;
   }
