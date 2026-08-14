@@ -17,23 +17,27 @@ export type PhysicalDieGeometrySource = 'canonical' | 'generated' | 'theme';
  * How an authoritative result is made visible without changing the recorded physical trajectory.
  *
  * - symmetry: rotate/reindex using an exact symmetry of the solid.
- * - relabel: keep the body trajectory and move logical face content between equivalent outcome slots.
+ * - relabel: keep the body trajectory and move logical face content between outcome slots.
  * - fixed: artwork is permanently attached to the mesh and must be targeted before simulation.
  */
 export type PhysicalDieTargetingMode = 'symmetry' | 'relabel' | 'fixed';
 
 /** Renderer-agnostic content that can be painted into an outcome slot. */
 export type PhysicalDieFaceContent =
-  | { kind: 'number'; value: number }
+  | { kind: 'number'; value: number; label?: string }
   | { kind: 'text'; text: string }
   | { kind: 'icon'; icon: string; label?: string }
   | { kind: 'texture'; asset: string; label?: string };
 
 export interface PhysicalDieOutcomeSlot {
-  /** Stable logical slot index, independent of what is painted on it. */
+  /** Stable physical/logical slot index, independent of what is painted on it. */
   index: number;
-  /** Default numeric value for ordinary numbered dice. */
+  /** Default numeric ordinal used by ordinary numbered dice and legacy callers. */
   value: number;
+  /** Optional system-agnostic authoritative result associated with this slot. */
+  result?: number | string;
+  /** Optional numeric contribution when result is symbolic. */
+  numericValue?: number;
   /** One or more outward local-space normals that represent this outcome resting on the table. */
   supportNormals: PolyhedronVertex[];
   /** Face/edge/tip anchors used by the presentation layer. */
@@ -64,6 +68,7 @@ export type SerializedPhysicalCollider =
  * the same outcome slots without changing collision geometry.
  */
 export interface PhysicalDieDefinition {
+  /** Stable geometry identity. Theme/custom callers should include their version in this ID. */
   id: string;
   sides: number;
   geometrySource: PhysicalDieGeometrySource;
@@ -77,6 +82,7 @@ export interface PhysicalDieDefinition {
 }
 
 export interface PhysicalDiePresentation {
+  /** One entry for each definition outcome slot. */
   contents: PhysicalDieFaceContent[];
 }
 
@@ -89,6 +95,22 @@ export interface PhysicalDiePhysicsOptions {
   sizeScale?: number;
   mass?: number;
   inertiaScale?: number;
+}
+
+/** Serializable input for a theme or host that supplies its own physical die geometry. */
+export interface CustomPhysicalDieDefinitionInput {
+  id: string;
+  sides: number;
+  targeting?: PhysicalDieTargetingMode;
+  radius: number;
+  collisionScale?: number;
+  collider: SerializedPhysicalCollider;
+  outcomes: Array<{
+    result?: number | string;
+    numericValue?: number;
+    supportNormals: PolyhedronVertex[];
+    labelAnchors?: PolyhedronLabelAnchor[];
+  }>;
 }
 
 export const CANONICAL_DIE_RADIUS: Record<CanonicalDieKind, number> = {
@@ -131,10 +153,27 @@ function dot(a: PolyhedronVertex, b: PolyhedronVertex): number {
   return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 }
 
+function magnitude(value: PolyhedronVertex): number {
+  return Math.hypot(value[0], value[1], value[2]);
+}
+
 function normalize(value: PolyhedronVertex): [number, number, number] {
-  const length = Math.hypot(value[0], value[1], value[2]);
+  const length = magnitude(value);
   if (length < 1e-9) return [0, 1, 0];
   return [value[0] / length, value[1] / length, value[2] / length];
+}
+
+function cloneVertex(value: PolyhedronVertex): PolyhedronVertex {
+  return [value[0], value[1], value[2]];
+}
+
+function cloneAnchor(anchor: PolyhedronLabelAnchor): PolyhedronLabelAnchor {
+  return {
+    ...anchor,
+    position: cloneVertex(anchor.position),
+    normal: cloneVertex(anchor.normal),
+    up: cloneVertex(anchor.up),
+  };
 }
 
 function faceNormal(
@@ -166,14 +205,23 @@ function outcomesFromReadableShape(shape: ReadablePolyhedron): PhysicalDieOutcom
   return shape.outcomes.map((outcome, index) => ({
     index,
     value: outcome.value,
+    result: outcome.value,
+    numericValue: outcome.value,
     supportNormals: generatedSupportFaces(shape, index).map((faceIndex) => normals[faceIndex]),
-    labelAnchors: outcome.labels.map((anchor) => ({
-      ...anchor,
-      position: [...anchor.position] as PolyhedronVertex,
-      normal: [...anchor.normal] as PolyhedronVertex,
-      up: [...anchor.up] as PolyhedronVertex,
-    })),
+    labelAnchors: outcome.labels.map(cloneAnchor),
   }));
+}
+
+function cloneCollider(collider: SerializedPhysicalCollider): SerializedPhysicalCollider {
+  if (collider.kind === 'box') {
+    return { kind: 'box', halfExtents: cloneVertex(collider.halfExtents) };
+  }
+  if (collider.kind === 'cylinder') return { ...collider };
+  return {
+    kind: 'convex',
+    vertices: collider.vertices.map(cloneVertex),
+    faces: collider.faces.map((face) => [...face]),
+  };
 }
 
 function convexCollider(
@@ -182,12 +230,14 @@ function convexCollider(
 ): SerializedPhysicalCollider {
   return {
     kind: 'convex',
-    vertices: vertices.map((vertex) => [...vertex] as PolyhedronVertex),
+    vertices: vertices.map(cloneVertex),
     faces: faces.map((face) => [...face]),
   };
 }
 
-function canonicalConvexDefinition(kind: Exclude<CanonicalDieKind, 'coin' | 'd6'>): PhysicalDieDefinition {
+function canonicalConvexDefinition(
+  kind: Exclude<CanonicalDieKind, 'coin' | 'd6'>,
+): PhysicalDieDefinition {
   const data = COLLIDER_DATA[kind];
   const normals = data.faces.map((face) => faceNormal(data.vertices, face));
   return {
@@ -201,13 +251,15 @@ function canonicalConvexDefinition(kind: Exclude<CanonicalDieKind, 'coin' | 'd6'
     outcomes: normals.map((normal, index) => ({
       index,
       value: index + 1,
+      result: index + 1,
+      numericValue: index + 1,
       supportNormals: [normal],
       labelAnchors: [],
     })),
   };
 }
 
-/** Returns the canonical definition used by the existing standard dice. */
+/** Returns the canonical definition used by the established standard dice. */
 export function createCanonicalPhysicalDieDefinition(kind: CanonicalDieKind): PhysicalDieDefinition {
   const cached = canonicalDefinitionCache.get(kind);
   if (cached) return cached;
@@ -229,15 +281,34 @@ export function createCanonicalPhysicalDieDefinition(kind: CanonicalDieKind): Ph
         segments: 32,
       },
       outcomes: [
-        { index: 0, value: 1, supportNormals: [[0, 1, 0]], labelAnchors: [] },
-        { index: 1, value: 2, supportNormals: [[0, -1, 0]], labelAnchors: [] },
+        {
+          index: 0,
+          value: 1,
+          result: 1,
+          numericValue: 1,
+          supportNormals: [[0, 1, 0]],
+          labelAnchors: [],
+        },
+        {
+          index: 1,
+          value: 2,
+          result: 2,
+          numericValue: 2,
+          supportNormals: [[0, -1, 0]],
+          labelAnchors: [],
+        },
       ],
     };
   } else if (kind === 'd6') {
     const radius = CANONICAL_DIE_RADIUS.d6;
     const half = radius * 0.86;
     const normals: PolyhedronVertex[] = [
-      [1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1],
+      [1, 0, 0],
+      [-1, 0, 0],
+      [0, 1, 0],
+      [0, -1, 0],
+      [0, 0, 1],
+      [0, 0, -1],
     ];
     definition = {
       id: kind,
@@ -250,6 +321,8 @@ export function createCanonicalPhysicalDieDefinition(kind: CanonicalDieKind): Ph
       outcomes: normals.map((normal, index) => ({
         index,
         value: index + 1,
+        result: index + 1,
+        numericValue: index + 1,
         supportNormals: [normal],
         labelAnchors: [],
       })),
@@ -273,10 +346,7 @@ export function createGeneratedPhysicalDieDefinition(sides: number): PhysicalDie
   if (!shape.exact) {
     throw new Error(`d${sides} exceeds the exact generated physical-die budget`);
   }
-  const radius = Math.max(
-    0.01,
-    ...shape.vertices.map(([x, y, z]) => Math.hypot(x, y, z)),
-  );
+  const radius = Math.max(0.01, ...shape.vertices.map(magnitude));
   const definition: PhysicalDieDefinition = {
     id: `generated:d${sides}`,
     sides,
@@ -292,12 +362,90 @@ export function createGeneratedPhysicalDieDefinition(sides: number): PhysicalDie
   return definition;
 }
 
+/**
+ * Validates and clones host/theme supplied physical geometry into the same definition contract.
+ * A custom mesh may use relabel targeting for dynamic content, symmetry when exact rotations are
+ * known by the presentation layer, or fixed when artwork is baked permanently into the mesh.
+ */
+export function createCustomPhysicalDieDefinition(
+  input: CustomPhysicalDieDefinitionInput,
+): PhysicalDieDefinition {
+  if (!input.id.trim()) throw new Error('Physical die definition requires an id');
+  if (!Number.isSafeInteger(input.sides) || input.sides < 1 || input.sides > 10_000) {
+    throw new Error('Physical die side count must be an integer from 1 to 10000');
+  }
+  if (!Number.isFinite(input.radius) || input.radius <= 0) {
+    throw new Error('Physical die radius must be positive');
+  }
+  if (input.outcomes.length !== input.sides) {
+    throw new Error('Physical die outcomes must match its logical side count');
+  }
+  const collisionScale = input.collisionScale ?? GENERATED_COLLISION_SCALE;
+  if (!Number.isFinite(collisionScale) || collisionScale <= 0.9 || collisionScale > 1.2) {
+    throw new Error('Physical die collision scale must be greater than 0.9 and at most 1.2');
+  }
+  if (input.collider.kind === 'convex') {
+    if (input.collider.vertices.length < 4 || input.collider.faces.length < 4) {
+      throw new Error('Convex physical dice require at least four vertices and four faces');
+    }
+    for (const face of input.collider.faces) {
+      if (
+        face.length < 3 ||
+        face.some(
+          (index) =>
+            !Number.isSafeInteger(index) || index < 0 || index >= input.collider.vertices.length,
+        )
+      ) {
+        throw new Error('Physical die collider contains an invalid face');
+      }
+    }
+  }
+  const outcomes = input.outcomes.map((outcome, index): PhysicalDieOutcomeSlot => {
+    if (outcome.supportNormals.length === 0) {
+      throw new Error(`Physical die outcome ${index + 1} requires a support normal`);
+    }
+    return {
+      index,
+      value: index + 1,
+      result: outcome.result ?? index + 1,
+      numericValue: outcome.numericValue,
+      supportNormals: outcome.supportNormals.map((normal) => normalize(normal)),
+      labelAnchors: (outcome.labelAnchors ?? []).map(cloneAnchor),
+    };
+  });
+  return {
+    id: input.id,
+    sides: input.sides,
+    geometrySource: 'theme',
+    targeting: input.targeting ?? 'fixed',
+    radius: input.radius,
+    collisionScale,
+    collider: cloneCollider(input.collider),
+    outcomes,
+  };
+}
+
 export function createDefaultPhysicalDiePresentation(
   definition: PhysicalDieDefinition,
 ): PhysicalDiePresentation {
   return {
-    contents: definition.outcomes.map((outcome) => ({ kind: 'number', value: outcome.value })),
+    contents: definition.outcomes.map((outcome) => ({
+      kind: 'number',
+      value: outcome.value,
+      ...(outcome.result !== outcome.value ? { label: String(outcome.result) } : {}),
+    })),
   };
+}
+
+/** Validates presentation content independently from geometry and physics. */
+export function createPhysicalDiePresentation(
+  definition: PhysicalDieDefinition,
+  contents: readonly PhysicalDieFaceContent[],
+): PhysicalDiePresentation {
+  if (contents.length !== definition.outcomes.length) {
+    throw new Error('Physical die presentation must provide one content entry per outcome slot');
+  }
+  return { contents: contents.map((content) => ({ ...content })) };
 }
 
 /** Builds the Cannon shape for any physical die definition. */
@@ -377,31 +525,67 @@ export function resolveLandedPhysicalOutcome(
 }
 
 /**
- * Reorders presentation content so a relabel-targeted die shows the requested logical result on
- * the support state selected by natural physics. The geometry and recorded transform never change.
+ * Reorders presentation content by physical outcome slot. This is the primitive relabel operation
+ * used by numeric, symbolic, icon, and texture dice alike.
  */
+export function remapPhysicalDiePresentationToOutcome(
+  definition: PhysicalDieDefinition,
+  presentation: PhysicalDiePresentation,
+  requestedOutcomeIndex: number,
+  landedOutcomeIndex: number,
+): PhysicalDiePresentation {
+  if (definition.targeting !== 'relabel') return { contents: [...presentation.contents] };
+  if (
+    requestedOutcomeIndex < 0 ||
+    requestedOutcomeIndex >= presentation.contents.length ||
+    landedOutcomeIndex < 0 ||
+    landedOutcomeIndex >= presentation.contents.length ||
+    requestedOutcomeIndex === landedOutcomeIndex
+  ) {
+    return { contents: [...presentation.contents] };
+  }
+  const contents = [...presentation.contents];
+  [contents[requestedOutcomeIndex], contents[landedOutcomeIndex]] = [
+    contents[landedOutcomeIndex],
+    contents[requestedOutcomeIndex],
+  ];
+  return { contents };
+}
+
+/** Numeric convenience wrapper for ordinary dN presentation. */
 export function remapPhysicalDiePresentation(
   definition: PhysicalDieDefinition,
   presentation: PhysicalDiePresentation,
   requestedValue: number,
   landedOutcomeIndex: number,
 ): PhysicalDiePresentation {
-  if (definition.targeting !== 'relabel') return { contents: [...presentation.contents] };
-  const sourceIndex = definition.outcomes.findIndex((outcome) => outcome.value === requestedValue);
-  if (
-    sourceIndex < 0 ||
-    landedOutcomeIndex < 0 ||
-    landedOutcomeIndex >= presentation.contents.length ||
-    sourceIndex === landedOutcomeIndex
-  ) {
-    return { contents: [...presentation.contents] };
+  const sourceIndex = definition.outcomes.findIndex(
+    (outcome) => outcome.value === requestedValue || outcome.result === requestedValue,
+  );
+  return remapPhysicalDiePresentationToOutcome(
+    definition,
+    presentation,
+    sourceIndex,
+    landedOutcomeIndex,
+  );
+}
+
+/** Resolves an arbitrary authoritative result to a physical outcome slot. */
+export function findPhysicalOutcomeIndex(
+  definition: PhysicalDieDefinition,
+  result: number | string,
+  numericValue?: number,
+): number {
+  const exact = definition.outcomes.findIndex((outcome) => outcome.result === result);
+  if (exact >= 0) return exact;
+  if (numericValue !== undefined) {
+    const numeric = definition.outcomes.findIndex((outcome) => outcome.numericValue === numericValue);
+    if (numeric >= 0) return numeric;
   }
-  const contents = [...presentation.contents];
-  [contents[sourceIndex], contents[landedOutcomeIndex]] = [
-    contents[landedOutcomeIndex],
-    contents[sourceIndex],
-  ];
-  return { contents };
+  if (typeof result === 'number') {
+    return definition.outcomes.findIndex((outcome) => outcome.value === result);
+  }
+  return -1;
 }
 
 export function isCanonicalDieKind(value: unknown): value is CanonicalDieKind {
