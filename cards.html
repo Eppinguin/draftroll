@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#171410" />
+    <meta name="description" content="Draftroll system-agnostic card deck SDK demo." />
+    <title>Draftroll — Cards Demo</title>
+    <link rel="stylesheet" href="/src/cards-demo.css" />
+  </head>
+  <body>
+    <main class="cards-shell">
+      <header class="cards-header">
+        <div>
+          <p class="eyebrow">DRAFTROLL SDK DEMO</p>
+          <h1>Cards</h1>
+          <p class="lede">
+            A stateful deck using the same authoritative result and overlay pipeline as dice.
+            The SDK owns card state; game rules stay in the host application.
+          </p>
+        </div>
+        <nav class="demo-nav" aria-label="Demo pages">
+          <a href="/">Dice & rooms</a>
+          <a href="/cards.html" aria-current="page">Cards</a>
+        </nav>
+      </header>
+
+      <section class="table-panel" aria-label="Card deck controls">
+        <div class="deck-stage">
+          <button id="card-deck" class="deck-stack" type="button" aria-label="Draw cards">
+            <span class="deck-back">DR</span>
+            <span class="deck-shadow"></span>
+          </button>
+          <div class="pile-stat">
+            <span>Remaining</span>
+            <strong id="card-remaining">52</strong>
+          </div>
+          <div class="discard-stack" aria-hidden="true">
+            <span id="discard-top">—</span>
+          </div>
+          <div class="pile-stat">
+            <span>Discard</span>
+            <strong id="card-discarded">0</strong>
+          </div>
+        </div>
+
+        <div class="dealer-controls">
+          <label>
+            <span>Draw</span>
+            <select id="card-draw-count">
+              <option value="1">1 card</option>
+              <option value="2">2 cards</option>
+              <option value="3" selected>3 cards</option>
+              <option value="4">4 cards</option>
+              <option value="5">5 cards</option>
+              <option value="7">7 cards</option>
+            </select>
+          </label>
+          <label>
+            <span>Theme</span>
+            <select id="card-theme">
+              <option value="dragon">Wyrmfire</option>
+              <option value="celestial">Sunforged</option>
+              <option value="tempest">Stormbound</option>
+              <option value="frost">Glacier Heart</option>
+              <option value="nebula">Astral Void</option>
+              <option value="clockwork">Clockwork Brass</option>
+            </select>
+          </label>
+          <label class="check-control">
+            <input id="card-jokers" type="checkbox" />
+            <span>2 jokers</span>
+          </label>
+          <button id="card-draw" class="primary" type="button">Draw cards</button>
+          <button id="card-shuffle" type="button">Shuffle all</button>
+          <button id="card-reset" type="button">New deck</button>
+        </div>
+      </section>
+
+      <section class="hand-panel" aria-label="Current hand">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">CURRENT HAND</p>
+            <h2 id="hand-title">No cards drawn</h2>
+          </div>
+          <span id="card-status" aria-live="polite">Renderer loading…</span>
+        </div>
+        <div id="card-hand" class="card-hand">
+          <p class="empty-hand">Draw from the deck to deal cards onto the Draftroll table.</p>
+        </div>
+      </section>
+
+      <details class="sdk-details">
+        <summary>SDK shape</summary>
+        <pre><code>const deck = createStandardDeck();
+const draw = deck.draw(3);
+const response = draftroll.display(draw.toDisplayInput());
+await response.wait();
+deck.discard(draw.cards);</code></pre>
+      </details>
+    </main>
+    <script type="module" src="/src/cards-demo.ts"></script>
+  </body>
+</html>
