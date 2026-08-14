@@ -5,21 +5,26 @@ import { join, resolve } from 'node:path';
 const root = resolve(import.meta.dirname, '..');
 const main = await readFile(join(root, 'src/main.ts'), 'utf8');
 const worker = await readFile(join(root, 'src/roll-worker.ts'), 'utf8');
+const planner = await readFile(join(root, 'src/physical-roll-planner.ts'), 'utf8');
+const physicalDice = await readFile(join(root, 'src/physical-dice.ts'), 'utf8');
 const shapes = await readFile(join(root, 'src/physics-shapes.ts'), 'utf8');
 const workspace = await readFile(join(root, 'pnpm-workspace.yaml'), 'utf8');
 const wrangler = await readFile(join(root, 'apps/worker/wrangler.jsonc'), 'utf8');
 
 assert.match(main, /const PLANNER_STEP = 1 \/ 120/);
 assert.match(main, /const PLANNER_RECORD_EVERY = 1/);
-assert.match(worker, /const FIXED_STEP = 1 \/ 120/);
-assert.match(worker, /const RECORD_EVERY = 1/);
+assert.match(planner, /PHYSICAL_PLANNER_STEP = 1 \/ 120/);
+assert.match(planner, /world\.step\(PHYSICAL_PLANNER_STEP\)/);
 assert.match(main, /solver\.iterations = 32/);
-assert.match(worker, /solver\.iterations = 32/);
+assert.match(planner, /world\.solver instanceof CANNON\.GSSolver/);
+assert.match(planner, /world\.solver\.iterations = 32/);
 assert.match(main, /contactEquationStiffness: 4e7/);
-assert.match(worker, /contactEquationStiffness: 4e7/);
+assert.match(planner, /contactEquationStiffness: 4e7/);
+assert.match(worker, /PhysicalRollPlanner/);
+assert.doesNotMatch(worker, /new CANNON\.World/);
 assert.match(shapes, /export const DIE_COLLIDER_SCALE/);
-assert.match(shapes, /d20: 1\.026/);
-assert.match(shapes, /x \* scale, y \* scale, z \* scale/);
+assert.match(physicalDice, /d20: 1\.026/);
+assert.match(physicalDice, /x \* scale, y \* scale, z \* scale/);
 
 assert.match(main, /const largePool = count >= 12/);
 assert.match(main, /two-handed pour/);
@@ -30,9 +35,11 @@ assert.match(main, /activationDelays\?: Float32Array/);
 assert.match(main, /die\.group\.visible = time \+ plan\.step \* 0\.5 >= activationDelay/);
 assert.match(main, /setPhysicalDiceVisible\(false\)/);
 assert.match(main, /markUnobstructedTableDice/);
-assert.match(worker, /markUnobstructedTableDice/);
+assert.match(planner, /markUnobstructedTableDice/);
 assert.match(main, /lastUnstableReleaseTimes/);
-assert.match(worker, /lastUnstableReleaseTimes/);
+assert.match(planner, /lastUnstableReleaseTimes/);
+assert.match(planner, /minimumPhysicalRestingAlignment/);
+assert.match(planner, /releaseUnstableRestPose/);
 assert.match(main, /single[\s\S]*?committed trajectory/);
 assert.match(main, /applyPlanTransform\(plan, planTime\)[\s\S]*?requestRender\(\)/);
 assert.match(main, /setPhysicalDiceVisible\(true\)[\s\S]*?throw fallbackError/);
@@ -73,12 +80,13 @@ console.log(
         'planning failure visibility restoration',
         'no orphaned completion on planning failure',
         'large-pool staged pour release',
-        'pile-aware edge-balance correction with bounded release cadence',
+        'definition-driven edge-balance correction with bounded release cadence',
         'per-die activation visibility',
-        '120 Hz collision planning and recording',
+        '120 Hz shared physical planning and recording',
         'inflated visual-safe colliders',
         'high-iteration dice contact solving',
         'bounded trajectory memory',
+        'thin roll-worker adapter over the shared planner',
         'unchanged versions and deployment configuration',
       ],
     },
