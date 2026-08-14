@@ -16,8 +16,8 @@ export const DIE_RADIUS: Record<DieKind, number> = CANONICAL_DIE_RADIUS;
  * Narrows an untrusted string to a supported canonical die kind.
  *
  * @remarks
- * Arbitrary numeric dice are physical too, but they are represented by a
- * {@link PhysicalDieDefinition} rather than being added to this legacy canonical-kind union.
+ * Arbitrary numeric dice are physical too, but they are represented by the shared physical-die
+ * definition contract rather than being added to this legacy canonical-kind union.
  */
 export function isDieKind(value: unknown): value is DieKind {
   return isCanonicalDieKind(value);
