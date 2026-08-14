@@ -4,6 +4,12 @@ import {
   resolveLandedPhysicalOutcome,
   type PhysicalDieDefinition,
 } from './physical-dice';
+import {
+  markUnobstructedTableDice,
+  minimumPhysicalRestingAlignment,
+  readPhysicalRestingAlignment,
+  releaseUnstableRestPose,
+} from './resting-physics';
 
 export const PHYSICAL_PLANNER_STEP = 1 / 120;
 export const PHYSICAL_STATE_STRIDE = 14;
@@ -24,7 +30,7 @@ export interface PhysicalRollEntry {
   /** position(3), quaternion(4), velocity(3), angular velocity(3), release delay(1). */
   state: ArrayLike<number>;
   physics?: PhysicalRollPhysics;
-  /** Standard renderer dice request impact events; generated visual-only dice do not. */
+  /** Standard renderer dice request impact events; additional physical visuals do not. */
   captureImpacts?: boolean;
 }
 
@@ -64,6 +70,8 @@ interface PlannerCache {
   boundsZ: number;
   world: CANNON.World;
   bodies: CANNON.Body[];
+  floorBodyId: number;
+  bodyIndexes: Map<number, number>;
 }
 
 function finite(value: number | undefined, fallback: number): number {
@@ -96,34 +104,26 @@ export class PhysicalRollPlanner {
   simulate(request: PhysicalRollPlanRequest): PhysicalRollPlanResult {
     const startedAt = performance.now();
     const entries = request.entries;
-    if (entries.length === 0) {
-      return {
-        step: PHYSICAL_PLANNER_STEP,
-        frameCount: 1,
-        transforms: new Float32Array(),
-        impacts: new Float32Array(),
-        landings: new Int32Array(),
-        duration: 0,
-        settleReason: 'empty',
-        physicsSteps: 0,
-        finalAverageLinear: 0,
-        finalAverageAngular: 0,
-        planningMs: performance.now() - startedAt,
-      };
-    }
+    if (entries.length === 0) return this.emptyResult(startedAt);
 
     const planner = this.ensurePlanner(entries, request.boundsX, request.boundsZ);
     planner.world.gravity.set(0, -Math.abs(finite(request.gravity, 20.5)), 0);
     const lockedCount = Math.max(0, Math.min(entries.length, request.lockedCount ?? 0));
     const lockedMotion = this.validLockedMotion(request.lockedMotion, lockedCount);
     const { delays, maximumDelay } = this.resetBodies(planner, entries, lockedCount, lockedMotion);
-    const transforms: number[] = [];
-    this.updateLockedBodies(planner.bodies, lockedMotion, 0, 0);
-    this.appendTransforms(transforms, planner.bodies);
-
     const lockedDuration = lockedMotion
       ? (lockedMotion.frameCount - 1) * lockedMotion.step
       : 0;
+
+    const transforms: number[] = [];
+    const unobstructedTableDice = new Uint8Array(entries.length);
+    const restingAxes = entries.map(() => new CANNON.Vec3());
+    const lastUnstableReleaseTimes = new Float32Array(entries.length);
+    lastUnstableReleaseTimes.fill(Number.NEGATIVE_INFINITY);
+
+    this.updateLockedBodies(planner, lockedMotion, 0, PHYSICAL_PLANNER_STEP, false);
+    this.appendTransforms(transforms, planner.bodies);
+
     let stableTime = 0;
     let frameCount = 1;
     let settleReason = 'timeout';
@@ -134,25 +134,30 @@ export class PhysicalRollPlanner {
     for (this.currentStep = 1; this.currentStep <= MAX_STEPS; this.currentStep += 1) {
       physicsSteps = this.currentStep;
       const time = this.currentStep * PHYSICAL_PLANNER_STEP;
+      let activatedThisStep = false;
       for (let index = lockedCount; index < entries.length; index += 1) {
         if (!this.activeFlags[index] && time + 1e-6 >= delays[index]) {
           this.activateBody(planner.bodies[index], entries[index]);
           this.activeFlags[index] = true;
+          activatedThisStep = true;
         }
       }
+      if (activatedThisStep) stableTime = 0;
 
       this.updateLockedBodies(
-        planner.bodies,
+        planner,
         lockedMotion,
         time - PHYSICAL_PLANNER_STEP,
-        time,
+        PHYSICAL_PLANNER_STEP,
+        false,
       );
       planner.world.step(PHYSICAL_PLANNER_STEP);
       this.updateLockedBodies(
-        planner.bodies,
+        planner,
         lockedMotion,
         time - PHYSICAL_PLANNER_STEP,
-        time,
+        PHYSICAL_PLANNER_STEP,
+        true,
       );
       this.enforceBounds(
         planner.bodies,
@@ -161,34 +166,62 @@ export class PhysicalRollPlanner {
         request.boundsZ,
         time,
       );
+      markUnobstructedTableDice(
+        planner.world.contacts,
+        planner.bodyIndexes,
+        entries.length,
+        planner.floorBodyId,
+        unobstructedTableDice,
+      );
       this.appendTransforms(transforms, planner.bodies);
       frameCount += 1;
 
-      if (time < Math.max(maximumDelay + 0.3, lockedDuration + 0.15)) continue;
+      const afterLastActivation = time >= Math.max(maximumDelay + 0.3, lockedDuration + 0.15);
+      const allActive = this.activeFlags.slice(lockedCount).every(Boolean);
+      let allSlow = allActive;
+      let allWellSeated = allActive;
       let linear = 0;
       let angular = 0;
       let dynamicCount = 0;
-      let allSlow = true;
+
       for (let index = lockedCount; index < planner.bodies.length; index += 1) {
-        if (!this.activeFlags[index]) {
-          allSlow = false;
-          continue;
-        }
+        if (!this.activeFlags[index]) continue;
         const body = planner.bodies[index];
         const speed = body.velocity.length();
         const spin = body.angularVelocity.length();
         linear += speed;
         angular += spin;
         dynamicCount += 1;
-        if (!(body.sleepState === CANNON.Body.SLEEPING || (speed < 0.14 && spin < 0.23))) {
+        if (!(body.sleepState === CANNON.Body.SLEEPING || (speed < 0.2 && spin < 0.28))) {
           allSlow = false;
         }
+
+        if (unobstructedTableDice[index] === 0) continue;
+        const alignment = readPhysicalRestingAlignment(
+          entries[index].definition,
+          body.quaternion,
+          restingAxes[index],
+        );
+        const minimum = minimumPhysicalRestingAlignment(entries[index].definition);
+        if (alignment >= minimum) continue;
+        allWellSeated = false;
+        if (
+          afterLastActivation &&
+          time - lastUnstableReleaseTimes[index] >= 0.45 &&
+          releaseUnstableRestPose(body, restingAxes[index])
+        ) {
+          lastUnstableReleaseTimes[index] = time;
+          stableTime = 0;
+        }
       }
+
       finalAverageLinear = linear / Math.max(1, dynamicCount);
       finalAverageAngular = angular / Math.max(1, dynamicCount);
-      stableTime = allSlow ? stableTime + PHYSICAL_PLANNER_STEP : 0;
+      stableTime = afterLastActivation && allSlow && allWellSeated
+        ? stableTime + PHYSICAL_PLANNER_STEP
+        : 0;
       if (this.currentStep >= MIN_STEPS && stableTime > 0.5) {
-        settleReason = 'shared-contact-stable';
+        settleReason = 'shared-rest-stable';
         break;
       }
     }
@@ -213,6 +246,22 @@ export class PhysicalRollPlanner {
     };
   }
 
+  private emptyResult(startedAt: number): PhysicalRollPlanResult {
+    return {
+      step: PHYSICAL_PLANNER_STEP,
+      frameCount: 1,
+      transforms: new Float32Array(),
+      impacts: new Float32Array(),
+      landings: new Int32Array(),
+      duration: 0,
+      settleReason: 'empty',
+      physicsSteps: 0,
+      finalAverageLinear: 0,
+      finalAverageAngular: 0,
+      planningMs: performance.now() - startedAt,
+    };
+  }
+
   private ensurePlanner(
     entries: readonly PhysicalRollEntry[],
     boundsX: number,
@@ -230,7 +279,7 @@ export class PhysicalRollPlanner {
 
     const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -20.5, 0) });
     this.configureWorld(world);
-    this.addTable(world, boundsX, boundsZ);
+    const floor = this.addTable(world, boundsX, boundsZ);
     const bodies = entries.map((entry, index) => {
       const body = new CANNON.Body({
         mass: finite(entry.physics?.mass, DEFAULT_MASS),
@@ -247,7 +296,18 @@ export class PhysicalRollPlanner {
       world.addBody(body);
       return body;
     });
-    this.cache = { key, boundsX, boundsZ, world, bodies };
+    const bodyIndexes = new Map<number, number>();
+    bodies.forEach((body, index) => bodyIndexes.set(body.id, index));
+    bodyIndexes.set(floor.id, entries.length);
+    this.cache = {
+      key,
+      boundsX,
+      boundsZ,
+      world,
+      bodies,
+      floorBodyId: floor.id,
+      bodyIndexes,
+    };
     return this.cache;
   }
 
@@ -279,7 +339,7 @@ export class PhysicalRollPlanner {
     );
   }
 
-  private addTable(world: CANNON.World, boundsX: number, boundsZ: number): void {
+  private addTable(world: CANNON.World, boundsX: number, boundsZ: number): CANNON.Body {
     const floor = new CANNON.Body({
       mass: 0,
       material: this.tableMaterial,
@@ -316,6 +376,7 @@ export class PhysicalRollPlanner {
       new CANNON.Vec3(0, centerY, boundsZ + thickness),
       new CANNON.Vec3(boundsX + 1.6, halfHeight, thickness),
     );
+    return floor;
   }
 
   private resetBodies(
@@ -469,34 +530,53 @@ export class PhysicalRollPlanner {
   }
 
   private updateLockedBodies(
-    bodies: readonly CANNON.Body[],
+    planner: PlannerCache,
     motion: LockedPhysicalMotion | undefined,
-    previousTime: number,
-    nextTime: number,
+    fromTime: number,
+    step: number,
+    snapToEnd: boolean,
   ): void {
     if (!motion) return;
-    const previousPosition = new CANNON.Vec3();
-    const nextPosition = new CANNON.Vec3();
-    const previousQuaternion = new CANNON.Quaternion();
-    const nextQuaternion = new CANNON.Quaternion();
-    const dt = Math.max(1e-6, nextTime - previousTime);
+    const fromPosition = new CANNON.Vec3();
+    const toPosition = new CANNON.Vec3();
+    const fromQuaternion = new CANNON.Quaternion();
+    const toQuaternion = new CANNON.Quaternion();
+    const inverse = new CANNON.Quaternion();
+    const delta = new CANNON.Quaternion();
+    const toTime = fromTime + step;
     for (let index = 0; index < motion.count; index += 1) {
-      const body = bodies[index];
+      const body = planner.bodies[index];
       if (!body) continue;
-      this.sampleLocked(motion, index, previousTime, previousPosition, previousQuaternion);
-      this.sampleLocked(motion, index, nextTime, nextPosition, nextQuaternion);
-      body.position.copy(nextPosition);
-      body.quaternion.copy(nextQuaternion);
+      this.sampleLocked(motion, index, fromTime, fromPosition, fromQuaternion);
+      this.sampleLocked(motion, index, toTime, toPosition, toQuaternion);
+      body.position.copy(snapToEnd ? toPosition : fromPosition);
+      body.quaternion.copy(snapToEnd ? toQuaternion : fromQuaternion);
       body.velocity.set(
-        (nextPosition.x - previousPosition.x) / dt,
-        (nextPosition.y - previousPosition.y) / dt,
-        (nextPosition.z - previousPosition.z) / dt,
+        (toPosition.x - fromPosition.x) / step,
+        (toPosition.y - fromPosition.y) / step,
+        (toPosition.z - fromPosition.z) / step,
       );
-      body.angularVelocity.setZero();
-      body.previousPosition.copy(previousPosition);
-      body.previousQuaternion.copy(previousQuaternion);
+      fromQuaternion.inverse(inverse);
+      toQuaternion.mult(inverse, delta);
+      if (delta.w < 0) {
+        delta.x *= -1;
+        delta.y *= -1;
+        delta.z *= -1;
+        delta.w *= -1;
+      }
+      const angle = 2 * Math.acos(Math.max(-1, Math.min(1, delta.w)));
+      const denominator = Math.sqrt(Math.max(1e-10, 1 - delta.w * delta.w));
+      if (denominator > 1e-5 && angle > 1e-6) {
+        body.angularVelocity.set(
+          ((delta.x / denominator) * angle) / step,
+          ((delta.y / denominator) * angle) / step,
+          ((delta.z / denominator) * angle) / step,
+        );
+      } else body.angularVelocity.setZero();
       body.aabbNeedsUpdate = true;
+      body.wakeUp();
     }
+    planner.world.broadphase.dirty = true;
   }
 
   private enforceBounds(
@@ -553,6 +633,10 @@ export class PhysicalRollPlanner {
           const ramp = Math.max(0, Math.min(1, (simulationTime - 2.15) / 1.8)) * crowd;
           body.velocity.scale(1 - 0.024 * ramp, body.velocity);
           body.angularVelocity.scale(1 - 0.036 * ramp, body.angularVelocity);
+        }
+        if (simulationTime > 4.6 && speed < 0.22 && spin < 0.46) {
+          body.velocity.scale(0.72, body.velocity);
+          body.angularVelocity.scale(0.62, body.angularVelocity);
         }
       }
       body.velocity.y = Math.max(-maximumVertical, Math.min(maximumVertical, body.velocity.y));
