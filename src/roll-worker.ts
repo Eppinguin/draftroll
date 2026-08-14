@@ -1,5 +1,10 @@
-import { createCanonicalPhysicalDieDefinition } from './physical-dice';
 import {
+  createCanonicalPhysicalDieDefinition,
+  createGeneratedPhysicalDieDefinition,
+  type PhysicalDieDefinition,
+} from './physical-dice';
+import {
+  extractPhysicalTransforms,
   PHYSICAL_STATE_STRIDE,
   PhysicalRollPlanner,
   type LockedPhysicalMotion,
@@ -7,20 +12,29 @@ import {
 } from './physical-roll-planner';
 import type { DieKind } from './physics-shapes';
 
+interface AdditionalPhysicalPlanEntry {
+  /** Generated dice can send only sides; custom/theme geometry can send a full definition. */
+  sides?: number;
+  definition?: PhysicalDieDefinition;
+  state: number[];
+}
+
 interface PlanRequest {
   id: number;
-  /** Per-die physical kinds. Legacy callers may still provide kind/count. */
+  /** Per-die canonical kinds. Legacy callers may still provide kind/count. */
   kinds?: DieKind[];
   kind?: DieKind;
   count?: number;
   boundsX: number;
   boundsZ: number;
   states: ArrayBuffer;
-  /** Existing visible dice follow their previously verified trajectory. */
+  /** Existing visible canonical dice follow their previously verified trajectory. */
   lockedCount?: number;
   lockedTrajectory?: ArrayBuffer;
   lockedTrajectoryStep?: number;
   lockedTrajectoryFrameCount?: number;
+  /** First-class physical dice outside the legacy canonical-kind union. */
+  additional?: AdditionalPhysicalPlanEntry[];
 }
 
 const planner = new PhysicalRollPlanner();
@@ -33,6 +47,14 @@ function readLockedMotion(request: PlanRequest, lockedCount: number): LockedPhys
   const transforms = new Float32Array(request.lockedTrajectory);
   if (transforms.length !== frameCount * lockedCount * 7) return undefined;
   return { count: lockedCount, step, frameCount, transforms };
+}
+
+function resolveAdditionalDefinition(entry: AdditionalPhysicalPlanEntry): PhysicalDieDefinition {
+  if (entry.definition) return entry.definition;
+  if (Number.isSafeInteger(entry.sides) && (entry.sides ?? 0) >= 1) {
+    return createGeneratedPhysicalDieDefinition(entry.sides!);
+  }
+  throw new Error('Additional physical die requires sides or a physical definition.');
 }
 
 self.addEventListener('message', (event: MessageEvent<PlanRequest>) => {
@@ -52,6 +74,15 @@ self.addEventListener('message', (event: MessageEvent<PlanRequest>) => {
     ),
     captureImpacts: true,
   }));
+  const additional = request.additional ?? [];
+  additional.forEach((entry) => {
+    entries.push({
+      definition: resolveAdditionalDefinition(entry),
+      state: entry.state,
+      captureImpacts: false,
+    });
+  });
+
   const lockedCount = Math.max(0, Math.min(count, request.lockedCount ?? 0));
   const result = planner.simulate({
     entries,
@@ -60,7 +91,21 @@ self.addEventListener('message', (event: MessageEvent<PlanRequest>) => {
     lockedCount,
     lockedMotion: readLockedMotion(request, lockedCount),
   });
-  const transforms = result.transforms;
+  const transforms = extractPhysicalTransforms(
+    result.transforms,
+    result.frameCount,
+    entries.length,
+    0,
+    count,
+  );
+  const additionalTransforms = extractPhysicalTransforms(
+    result.transforms,
+    result.frameCount,
+    entries.length,
+    count,
+    additional.length,
+  );
+  const additionalLandings = result.landings.slice(count);
   const impacts = result.impacts;
   self.postMessage(
     {
@@ -73,6 +118,8 @@ self.addEventListener('message', (event: MessageEvent<PlanRequest>) => {
       duration: result.duration,
       settleReason: result.settleReason,
       physicsSteps: result.physicsSteps,
+      additionalTransforms: additionalTransforms.buffer,
+      additionalLandings: additionalLandings.buffer,
       diagnostics: {
         finalAverageLinear: result.finalAverageLinear,
         finalAverageAngular: result.finalAverageAngular,
@@ -87,6 +134,13 @@ self.addEventListener('message', (event: MessageEvent<PlanRequest>) => {
         lockedKinematicDice: lockedCount,
       },
     },
-    { transfer: [transforms.buffer, impacts.buffer] },
+    {
+      transfer: [
+        transforms.buffer,
+        impacts.buffer,
+        additionalTransforms.buffer,
+        additionalLandings.buffer,
+      ],
+    },
   );
 });
