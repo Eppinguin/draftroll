@@ -3,6 +3,7 @@ import { access, readFile } from 'node:fs/promises';
 
 const [
   renderer,
+  physicalContract,
   engine,
   visuals,
   physicalDice,
@@ -15,6 +16,7 @@ const [
   html,
 ] = await Promise.all([
   readFile(new URL('../packages/renderer/src/index.ts', import.meta.url), 'utf8'),
+  readFile(new URL('../packages/renderer/src/physical.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/main.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/fallback-visuals.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/physical-dice.ts', import.meta.url), 'utf8'),
@@ -40,22 +42,33 @@ assert.match(engine, /collectOrderedVisualResults/);
 assert.match(engine, /visual\.update\(fallbackProgress, plan\.duration\)/);
 assert.match(engine, /fallbacks:\s*activeFallbackSpecs/);
 
-// One physical model owns canonical, generated, and future theme/custom dice.
-assert.match(physicalDice, /interface PhysicalDieDefinition/);
-assert.match(physicalDice, /PhysicalDieGeometrySource = 'canonical' \| 'generated' \| 'theme'/);
-assert.match(physicalDice, /PhysicalDieTargetingMode = 'symmetry' \| 'relabel' \| 'fixed'/);
+// The serializable contract is public; runtime conversion/factories live in the browser engine.
+assert.match(physicalContract, /interface PhysicalDieDefinition/);
+assert.match(physicalContract, /PhysicalDieGeometrySource = 'canonical' \| 'generated' \| 'theme'/);
+assert.match(physicalContract, /PhysicalDieTargetingMode = 'symmetry' \| 'relabel' \| 'fixed'/);
 for (const content of ['number', 'text', 'icon', 'texture']) {
-  assert.match(physicalDice, new RegExp(`kind: '${content}'`), `physical face content ${content} missing`);
+  assert.match(
+    physicalContract,
+    new RegExp(`kind: '${content}'`),
+    `physical face content ${content} missing`,
+  );
 }
-assert.match(physicalDice, /interface PhysicalDieOutcomeSlot/);
-assert.match(physicalDice, /supportNormals/);
-assert.match(physicalDice, /labelAnchors/);
+assert.match(physicalContract, /interface PhysicalDieOutcomeSlot/);
+assert.match(physicalContract, /result\?: number \| string/);
+assert.match(physicalContract, /supportNormals/);
+assert.match(physicalContract, /labelAnchors/);
+assert.match(physicalContract, /interface CustomPhysicalDieDefinitionInput/);
+
+assert.match(physicalDice, /from '\.\.\/packages\/renderer\/src\/physical'/);
 assert.match(physicalDice, /createCanonicalPhysicalDieDefinition/);
 assert.match(physicalDice, /createGeneratedPhysicalDieDefinition/);
+assert.match(physicalDice, /createCustomPhysicalDieDefinition/);
+assert.match(physicalDice, /createPhysicalDiePresentation/);
 assert.match(physicalDice, /createPhysicalDieCollider/);
 assert.match(physicalDice, /physicalDieColliderRadius/);
 assert.match(physicalDice, /resolveLandedPhysicalOutcome/);
-assert.match(physicalDice, /remapPhysicalDiePresentation/);
+assert.match(physicalDice, /remapPhysicalDiePresentationToOutcome/);
+assert.match(physicalDice, /findPhysicalOutcomeIndex/);
 assert.match(physicalDice, /targeting: 'symmetry'/);
 assert.match(physicalDice, /targeting: 'relabel'/);
 
@@ -150,8 +163,10 @@ for (const legacy of ['../src/generated-die-visuals.ts', '../src/generated-roll-
 
 console.log(JSON.stringify({
   ok: true,
+  publicPhysicalDieContract: true,
   physicalDieArchitecture: true,
-  canonicalAndGeneratedDefinitions: true,
+  canonicalGeneratedAndCustomDefinitions: true,
+  systemAgnosticOutcomes: true,
   extensibleFaceContent: ['number', 'text', 'icon', 'texture'],
   targetingModes: ['symmetry', 'relabel', 'fixed'],
   sharedPhysicalPlanner: true,
