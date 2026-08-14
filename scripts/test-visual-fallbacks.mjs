@@ -34,38 +34,51 @@ assert.match(engine, /collectOrderedVisualResults/);
 assert.match(engine, /visual\.update\(fallbackProgress, plan\.duration\)/);
 assert.match(engine, /fallbacks:\s*activeFallbackSpecs/);
 
-// Exact generated dice use real convex-body physics, while very high representative dice
-// keep the existing lightweight presentation path.
 assert.match(visuals, /MAXIMUM_EXACT_GENERATED_SIDES = 256/);
 assert.match(visuals, /GeneratedFallbackVisualInstance/);
 assert.match(visuals, /BaseFallbackVisualInstance/);
 assert.match(visuals, /usesGeneratedPhysics/);
 assert.match(visuals, /sides <= MAXIMUM_EXACT_GENERATED_SIDES/);
 
-// Weird-dice-only pools share one local Cannon world instead of simulating each die alone.
+// Generated-only pools share one world. On additive fallback-only rolls, old dice enter
+// from their current visible state/momentum instead of being replayed from their old spawn.
 assert.match(generatedVisuals, /activeGeneratedDice/);
+assert.match(generatedVisuals, /pendingGeneratedDice/);
 assert.match(generatedVisuals, /simulateLocalBatch/);
+assert.match(generatedVisuals, /entries\.map\(\(entry\) => entry\.plannerState\(\)\)/);
+assert.match(generatedVisuals, /pendingGeneratedDice\.size > 0/);
 assert.match(generatedVisuals, /new CANNON\.ContactMaterial\(dieMaterial, dieMaterial/);
-assert.match(generatedVisuals, /entries\.map\(\(entry\) =>/);
-assert.match(generatedVisuals, /world\.step\(1 \/ 120\)/);
+assert.match(generatedVisuals, /world\.step\(GENERATED_STEP\)/);
 assert.match(generatedVisuals, /finalizeGeneratedFallbackBatch/);
+assert.match(generatedVisuals, /lastProgress/);
+assert.match(generatedVisuals, /angularX/);
+assert.match(generatedVisuals, /newlyIntroduced/);
 
-// Mixed standard/generated rolls intercept only the roll-plan postMessage and run a
-// dedicated worker containing both standard colliders and generated convex bodies.
+// Mixed and additive standard/generated rolls reuse one warm collision worker. The bridge
+// forwards the standard planner's locked trajectory so old normal dice keep the same
+// additive semantics while generated dice can still be hit and move naturally.
 assert.match(generatedVisuals, /installSharedWorkerBridge/);
 assert.match(generatedVisuals, /generated-roll-worker\.ts/);
+assert.match(generatedVisuals, /sharedPlannerWorker/);
+assert.match(generatedVisuals, /bridgePending/);
 assert.match(generatedVisuals, /splitGeneratedTrajectories/);
-assert.match(generatedVisuals, /nativePostMessage\.call\(\s*bridge/);
-assert.match(generatedVisuals, /owner\.dispatchEvent\(new MessageEvent\('message'/);
+assert.match(generatedVisuals, /message\.lockedTrajectory instanceof ArrayBuffer/);
+assert.match(generatedVisuals, /nativePostMessage\.call\(\s*planner/);
+assert.doesNotMatch(generatedVisuals, /\(message\.lockedCount \?\? 0\) > 0/);
+
 assert.match(generatedWorker, /createDiePhysicsShape/);
 assert.match(generatedWorker, /createReadablePolyhedron/);
+assert.match(generatedWorker, /generatedShapeCache/);
 assert.match(generatedWorker, /createGeneratedCollider/);
+assert.match(generatedWorker, /lockedTrajectory/);
+assert.match(generatedWorker, /sampleLocked/);
+assert.match(generatedWorker, /updateLockedBodies/);
+assert.match(generatedWorker, /configureLocked/);
 assert.match(generatedWorker, /const totalCount = standardCount \+ generatedShapes\.length/);
-assert.match(generatedWorker, /bodies\.push\(body\)/);
 assert.match(generatedWorker, /new CANNON\.ContactMaterial\(diceMaterial, diceMaterial/);
 assert.match(generatedWorker, /generatedTransforms/);
 assert.match(generatedWorker, /generatedLandings/);
-assert.match(generatedWorker, /shared-generated-collisions/);
+assert.match(generatedWorker, /shared-contact-stable/);
 
 assert.match(generatedVisuals, /landedOutcome/);
 assert.match(generatedVisuals, /applyRequestedResult/);
@@ -76,7 +89,6 @@ assert.match(generatedVisuals, /labelMaterials/);
 assert.doesNotMatch(generatedVisuals, /settledRotation/);
 assert.doesNotMatch(generatedVisuals, /resultOutcome\.settledUp/);
 
-// The established renderer still owns cards, coins, symbolic visuals, and representative dN.
 assert.match(visualBase, /createGeneratedDieVisual/);
 assert.match(visualBase, /triangulateTexturedShape/);
 assert.match(visualBase, /createDieSurfaceTexture/);
@@ -124,6 +136,9 @@ console.log(JSON.stringify({
   naturalGeneratedPhysics: true,
   generatedGeneratedCollisions: true,
   generatedStandardCollisions: true,
+  additiveGeneratedCollisions: true,
+  noAdditiveGeneratedRewind: true,
+  persistentGeneratedPlannerWorker: true,
   noLateGeneratedCorrection: true,
   representativeHighCountFallback: true,
   roundedCardGeometry: true,
