@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-const [renderer, engine, visuals, polyhedra, html] = await Promise.all([
+const [renderer, engine, visuals, visualBase, polyhedra, html] = await Promise.all([
   readFile(new URL('../packages/renderer/src/index.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/main.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/fallback-visuals.ts', import.meta.url), 'utf8'),
+  readFile(new URL('../src/fallback-visuals-base.ts', import.meta.url), 'utf8'),
   readFile(new URL('../packages/renderer/src/polyhedra.ts', import.meta.url), 'utf8'),
   readFile(new URL('../index.html', import.meta.url), 'utf8'),
 ]);
@@ -22,32 +23,45 @@ assert.match(engine, /collectOrderedVisualResults/);
 assert.match(engine, /visual\.update\(fallbackProgress, plan\.duration\)/);
 assert.match(engine, /fallbacks:\s*activeFallbackSpecs/);
 
-assert.match(visuals, /class FallbackVisualInstance/);
-assert.match(visuals, /createGeneratedDieVisual/);
-assert.match(visuals, /triangulateTexturedShape/);
-assert.match(visuals, /createDieSurfaceTexture/);
-assert.match(visuals, /PolyhedronLabelAnchor/);
-assert.match(visuals, /labelQuaternion/);
-assert.match(visuals, /outcome\.labels/);
-assert.match(visuals, /resultOutcome\.settledUp/);
-assert.match(visuals, /labelsForShape/);
-assert.match(visuals, /THREE\.DoubleSide/);
+// Generated numeric dice route through the wrapper's real convex-body simulation.
+assert.match(visuals, /BaseFallbackVisualInstance/);
+assert.match(visuals, /isGenerated/);
+assert.match(visuals, /import \* as CANNON/);
+assert.match(visuals, /new CANNON\.ConvexPolyhedron/);
+assert.match(visuals, /new CANNON\.World/);
+assert.match(visuals, /new CANNON\.SAPBroadphase/);
+assert.match(visuals, /world\.step\(1 \/ 120\)/);
+assert.match(visuals, /landedOutcome/);
+assert.match(visuals, /applyRequestedResult/);
+assert.match(visuals, /sample\(this\.trajectory/);
+assert.match(visuals, /secondaryAnchor/);
+assert.match(visuals, /covered\.has\(faceIndex\)/);
+assert.match(visuals, /labelMaterials/);
+assert.doesNotMatch(visuals, /settledRotation/);
+assert.doesNotMatch(visuals, /resultOutcome\.settledUp/);
 
-assert.match(visuals, /createCardVisual/);
-assert.match(visuals, /createCardFrontTexture/);
-assert.match(visuals, /createCardBackTexture/);
-assert.match(visuals, /createRoundedCardShape/);
-assert.match(visuals, /new THREE\.ExtrudeGeometry/);
-assert.match(visuals, /new THREE\.ShapeGeometry/);
-assert.match(visuals, /normalizeCardUvs/);
-assert.match(visuals, /cardSettledLayout/);
-assert.match(visuals, /CARD_WIDTH \* scale \+ CARD_GAP/);
-assert.match(visuals, /CARD_HEIGHT \* scale \+ CARD_ROW_GAP/);
-assert.match(visuals, /easeInOutCubic/);
-assert.match(visuals, /faceDown/);
-assert.match(visuals, /faceUp/);
-assert.match(visuals, /spec\.oppositeLabel/);
-assert.match(visuals, /getSettleTime/);
+// The established renderer still owns cards, coins, and symbolic fallback visuals.
+assert.match(visualBase, /createGeneratedDieVisual/);
+assert.match(visualBase, /triangulateTexturedShape/);
+assert.match(visualBase, /createDieSurfaceTexture/);
+assert.match(visualBase, /PolyhedronLabelAnchor/);
+assert.match(visualBase, /labelQuaternion/);
+assert.match(visualBase, /outcome\.labels/);
+assert.match(visualBase, /createCardVisual/);
+assert.match(visualBase, /createCardFrontTexture/);
+assert.match(visualBase, /createCardBackTexture/);
+assert.match(visualBase, /createRoundedCardShape/);
+assert.match(visualBase, /new THREE\.ExtrudeGeometry/);
+assert.match(visualBase, /new THREE\.ShapeGeometry/);
+assert.match(visualBase, /normalizeCardUvs/);
+assert.match(visualBase, /cardSettledLayout/);
+assert.match(visualBase, /CARD_WIDTH \* scale \+ CARD_GAP/);
+assert.match(visualBase, /CARD_HEIGHT \* scale \+ CARD_ROW_GAP/);
+assert.match(visualBase, /easeInOutCubic/);
+assert.match(visualBase, /faceDown/);
+assert.match(visualBase, /faceUp/);
+assert.match(visualBase, /spec\.oppositeLabel/);
+assert.match(visualBase, /getSettleTime/);
 
 assert.match(polyhedra, /function fibonacciPoints/);
 assert.match(polyhedra, /function convexHull/);
@@ -65,11 +79,14 @@ assert.match(html, /1d20\+1d2\+1dF\+1d9\+1d100/);
 
 console.log(JSON.stringify({
   ok: true,
-  fallbacks: ['physical coin', 'd10x/d100', 'dF', 'generated arbitrary dN', 'symbolic', 'rounded dealt cards'],
+  fallbacks: ['physical coin', 'd10x/d100', 'dF', 'natural generated dN', 'symbolic', 'rounded dealt cards'],
   mixedWithPhysical: true,
   arbitraryNumericSolid: true,
   generatedSupportStates: true,
   automaticFaceEdgeVertexLabels: true,
+  generatedFaceLabelCoverage: true,
+  naturalGeneratedPhysics: true,
+  noLateGeneratedCorrection: true,
   roundedCardGeometry: true,
   collisionFreeCardLayout: true,
   cardDealAnimation: true,
