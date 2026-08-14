@@ -140,7 +140,7 @@ function shuffleAll(): void {
   sweepCurrentHand();
   deck.reshuffleDiscard();
   currentHand = [];
-  draftroll.clear();
+  void draftroll.clearDice();
   renderHand();
   renderDeckState();
   status.textContent = 'Discard returned and deck shuffled';
@@ -150,7 +150,7 @@ function resetDeck(): void {
   if (busy) return;
   deck.reset({ shuffle: true });
   currentHand = [];
-  draftroll.clear();
+  void draftroll.clearDice();
   renderHand();
   renderDeckState();
   status.textContent = 'Fresh shuffled deck';
@@ -160,7 +160,7 @@ function rebuildDeck(): void {
   if (busy) return;
   deck = createStandardDeck('demo-standard-deck', { jokers: jokers.checked ? 2 : 0 });
   currentHand = [];
-  draftroll.clear();
+  void draftroll.clearDice();
   renderHand();
   renderDeckState();
   status.textContent = jokers.checked ? 'Fresh 54-card deck' : 'Fresh 52-card deck';
