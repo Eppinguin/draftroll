@@ -6,111 +6,33 @@ import {
   type PolyhedronVertex,
   type ReadablePolyhedron,
 } from '../packages/renderer/src/polyhedra';
+import type {
+  CustomPhysicalDieDefinitionInput,
+  PhysicalDieDefinition,
+  PhysicalDieFaceContent,
+  PhysicalDieOutcomeSlot,
+  PhysicalDiePresentation,
+  SerializedPhysicalCollider,
+} from '../packages/renderer/src/physical';
+export type {
+  CustomPhysicalDieDefinitionInput,
+  PhysicalDieDefinition,
+  PhysicalDieFaceContent,
+  PhysicalDieGeometrySource,
+  PhysicalDieModel,
+  PhysicalDieOutcomeSlot,
+  PhysicalDiePresentation,
+  PhysicalDieTargetingMode,
+  SerializedPhysicalCollider,
+} from '../packages/renderer/src/physical';
 
 /** Canonical physical dice with hand-authored, highly symmetric geometry. */
 export type CanonicalDieKind = 'coin' | 'd4' | 'd6' | 'd8' | 'd10' | 'd12' | 'd20';
-
-/** Where a physical die's geometry came from. */
-export type PhysicalDieGeometrySource = 'canonical' | 'generated' | 'theme';
-
-/**
- * How an authoritative result is made visible without changing the recorded physical trajectory.
- *
- * - symmetry: rotate/reindex using an exact symmetry of the solid.
- * - relabel: keep the body trajectory and move logical face content between outcome slots.
- * - fixed: artwork is permanently attached to the mesh and must be targeted before simulation.
- */
-export type PhysicalDieTargetingMode = 'symmetry' | 'relabel' | 'fixed';
-
-/** Renderer-agnostic content that can be painted into an outcome slot. */
-export type PhysicalDieFaceContent =
-  | { kind: 'number'; value: number; label?: string }
-  | { kind: 'text'; text: string }
-  | { kind: 'icon'; icon: string; label?: string }
-  | { kind: 'texture'; asset: string; label?: string };
-
-export interface PhysicalDieOutcomeSlot {
-  /** Stable physical/logical slot index, independent of what is painted on it. */
-  index: number;
-  /** Default numeric ordinal used by ordinary numbered dice and legacy callers. */
-  value: number;
-  /** Optional system-agnostic authoritative result associated with this slot. */
-  result?: number | string;
-  /** Optional numeric contribution when result is symbolic. */
-  numericValue?: number;
-  /** One or more outward local-space normals that represent this outcome resting on the table. */
-  supportNormals: PolyhedronVertex[];
-  /** Face/edge/tip anchors used by the presentation layer. */
-  labelAnchors: PolyhedronLabelAnchor[];
-}
-
-export type SerializedPhysicalCollider =
-  | {
-      kind: 'box';
-      halfExtents: PolyhedronVertex;
-    }
-  | {
-      kind: 'cylinder';
-      radiusTop: number;
-      radiusBottom: number;
-      height: number;
-      segments: number;
-    }
-  | {
-      kind: 'convex';
-      vertices: PolyhedronVertex[];
-      faces: number[][];
-    };
-
-/**
- * Geometry/physics contract shared by canonical, generated, and theme-supplied physical dice.
- * Presentation content is deliberately separate so numbers, text, icons, or textures can occupy
- * the same outcome slots without changing collision geometry.
- */
-export interface PhysicalDieDefinition {
-  /** Stable geometry identity. Theme/custom callers should include their version in this ID. */
-  id: string;
-  sides: number;
-  geometrySource: PhysicalDieGeometrySource;
-  targeting: PhysicalDieTargetingMode;
-  radius: number;
-  collisionScale: number;
-  collider: SerializedPhysicalCollider;
-  outcomes: PhysicalDieOutcomeSlot[];
-  /** Readable generated geometry when this definition owns arbitrary face/edge/tip anchors. */
-  readableShape?: ReadablePolyhedron;
-}
-
-export interface PhysicalDiePresentation {
-  /** One entry for each definition outcome slot. */
-  contents: PhysicalDieFaceContent[];
-}
-
-export interface PhysicalDieModel {
-  definition: PhysicalDieDefinition;
-  presentation: PhysicalDiePresentation;
-}
 
 export interface PhysicalDiePhysicsOptions {
   sizeScale?: number;
   mass?: number;
   inertiaScale?: number;
-}
-
-/** Serializable input for a theme or host that supplies its own physical die geometry. */
-export interface CustomPhysicalDieDefinitionInput {
-  id: string;
-  sides: number;
-  targeting?: PhysicalDieTargetingMode;
-  radius: number;
-  collisionScale?: number;
-  collider: SerializedPhysicalCollider;
-  outcomes: Array<{
-    result?: number | string;
-    numericValue?: number;
-    supportNormals: PolyhedronVertex[];
-    labelAnchors?: PolyhedronLabelAnchor[];
-  }>;
 }
 
 export const CANONICAL_DIE_RADIUS: Record<CanonicalDieKind, number> = {
