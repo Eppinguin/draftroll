@@ -47,12 +47,15 @@ assert.match(generatedVisuals, /pendingGeneratedDice/);
 assert.match(generatedVisuals, /simulateLocalBatch/);
 assert.match(generatedVisuals, /entries\.map\(\(entry\) => entry\.plannerState\(\)\)/);
 assert.match(generatedVisuals, /pendingGeneratedDice\.size > 0/);
+assert.match(generatedVisuals, /bridgePending\.size === 0/);
+assert.match(generatedVisuals, /bridgePending\.size > 0/);
 assert.match(generatedVisuals, /new CANNON\.ContactMaterial\(dieMaterial, dieMaterial/);
 assert.match(generatedVisuals, /world\.step\(GENERATED_STEP\)/);
 assert.match(generatedVisuals, /finalizeGeneratedFallbackBatch/);
 assert.match(generatedVisuals, /lastProgress/);
 assert.match(generatedVisuals, /angularX/);
 assert.match(generatedVisuals, /newlyIntroduced/);
+assert.match(generatedVisuals, /pendingGeneratedDice\.delete\(this\)/);
 
 // Mixed and additive standard/generated rolls reuse one warm collision worker. The bridge
 // forwards the standard planner's locked trajectory so old normal dice keep the same
@@ -138,6 +141,7 @@ console.log(JSON.stringify({
   generatedStandardCollisions: true,
   additiveGeneratedCollisions: true,
   noAdditiveGeneratedRewind: true,
+  noDuplicateAdditivePlanning: true,
   persistentGeneratedPlannerWorker: true,
   noLateGeneratedCorrection: true,
   representativeHighCountFallback: true,
