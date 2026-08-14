@@ -5,6 +5,8 @@ import type {
 } from '../packages/renderer/src/index';
 import {
   createReadablePolyhedron,
+  type PolyhedronLabelAnchor,
+  type PolyhedronOutcome,
   type ReadablePolyhedron,
 } from '../packages/renderer/src/polyhedra';
 import { THEMES, type ThemeName } from './themes';
@@ -36,16 +38,6 @@ interface ThreeDimensionalVisual {
   textures: THREE.Texture[];
 }
 
-interface FaceFrame {
-  center: THREE.Vector3;
-  normal: THREE.Vector3;
-  tangent: THREE.Vector3;
-  bitangent: THREE.Vector3;
-  width: number;
-  height: number;
-  quaternion: THREE.Quaternion;
-}
-
 interface CardLayout {
   position: THREE.Vector2;
   scale: number;
@@ -66,24 +58,6 @@ function normalizeTheme(theme: string): ThemeName {
 
 function cssColor(value: number): string {
   return `#${value.toString(16).padStart(6, '0')}`;
-}
-
-function getShadowTexture(): THREE.CanvasTexture {
-  if (shadowTexture) return shadowTexture;
-  const canvas = document.createElement('canvas');
-  canvas.width = 256;
-  canvas.height = 128;
-  const context = canvas.getContext('2d');
-  if (!context) throw new Error('Canvas 2D context unavailable.');
-  const gradient = context.createRadialGradient(128, 64, 4, 128, 64, 112);
-  gradient.addColorStop(0, 'rgba(0,0,0,.48)');
-  gradient.addColorStop(0.55, 'rgba(0,0,0,.18)');
-  gradient.addColorStop(1, 'rgba(0,0,0,0)');
-  context.fillStyle = gradient;
-  context.fillRect(0, 0, 256, 128);
-  shadowTexture = new THREE.CanvasTexture(canvas);
-  shadowTexture.colorSpace = THREE.SRGBColorSpace;
-  return shadowTexture;
 }
 
 function roundedRect(
@@ -108,6 +82,24 @@ function roundedRect(
   context.closePath();
 }
 
+function getShadowTexture(): THREE.CanvasTexture {
+  if (shadowTexture) return shadowTexture;
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 128;
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('Canvas 2D context unavailable.');
+  const gradient = context.createRadialGradient(128, 64, 4, 128, 64, 112);
+  gradient.addColorStop(0, 'rgba(0,0,0,.48)');
+  gradient.addColorStop(0.55, 'rgba(0,0,0,.18)');
+  gradient.addColorStop(1, 'rgba(0,0,0,0)');
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, 256, 128);
+  shadowTexture = new THREE.CanvasTexture(canvas);
+  shadowTexture.colorSpace = THREE.SRGBColorSpace;
+  return shadowTexture;
+}
+
 function createFallbackTexture(spec: DraftrollFallbackVisual): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
   canvas.width = 640;
@@ -115,6 +107,7 @@ function createFallbackTexture(spec: DraftrollFallbackVisual): THREE.CanvasTextu
   const context = canvas.getContext('2d');
   if (!context) throw new Error('Canvas 2D context unavailable.');
   const palette = THEMES[normalizeTheme(spec.theme)];
+
   roundedRect(context, 46, 36, 548, 368, 54);
   const fill = context.createLinearGradient(80, 40, 560, 400);
   fill.addColorStop(0, cssColor(palette.edge));
@@ -126,6 +119,7 @@ function createFallbackTexture(spec: DraftrollFallbackVisual): THREE.CanvasTextu
   context.lineWidth = 12;
   context.strokeStyle = cssColor(palette.edge);
   context.stroke();
+
   context.textAlign = 'center';
   context.textBaseline = 'middle';
   context.font = '800 138px system-ui, sans-serif';
@@ -137,6 +131,7 @@ function createFallbackTexture(spec: DraftrollFallbackVisual): THREE.CanvasTextu
   context.font = '600 30px system-ui, sans-serif';
   context.fillStyle = 'rgba(255,255,255,.86)';
   context.fillText(spec.title, 320, 354);
+
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = 8;
@@ -150,6 +145,7 @@ function createDieSurfaceTexture(spec: DraftrollFallbackVisual): THREE.CanvasTex
   const context = canvas.getContext('2d');
   if (!context) throw new Error('Canvas 2D context unavailable.');
   const palette = THEMES[normalizeTheme(spec.theme)];
+
   const gradient = context.createLinearGradient(0, 0, 512, 512);
   gradient.addColorStop(0, cssColor(palette.edge));
   gradient.addColorStop(0.12, cssColor(palette.base));
@@ -157,6 +153,7 @@ function createDieSurfaceTexture(spec: DraftrollFallbackVisual): THREE.CanvasTex
   gradient.addColorStop(1, cssColor(palette.shadow));
   context.fillStyle = gradient;
   context.fillRect(0, 0, 512, 512);
+
   context.globalAlpha = 0.1;
   context.strokeStyle = palette.label;
   context.lineWidth = 2;
@@ -176,6 +173,7 @@ function createDieSurfaceTexture(spec: DraftrollFallbackVisual): THREE.CanvasTex
     context.fill();
   }
   context.globalAlpha = 1;
+
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = 8;
@@ -193,10 +191,10 @@ function createCardFrontTexture(spec: DraftrollFallbackVisual): THREE.CanvasText
   canvas.height = 980;
   const context = canvas.getContext('2d');
   if (!context) throw new Error('Canvas 2D context unavailable.');
+
   const rank = metadataString(spec, 'rank') ?? (spec.metadata?.joker ? '★' : String(spec.label));
   const suit = metadataString(spec, 'suitSymbol') ?? (spec.metadata?.joker ? '✦' : '');
-  const red = spec.metadata?.color === 'red';
-  const ink = red ? '#b51e2e' : '#151515';
+  const ink = spec.metadata?.color === 'red' ? '#b51e2e' : '#151515';
 
   context.fillStyle = '#fbf9f2';
   context.fillRect(0, 0, canvas.width, canvas.height);
@@ -244,6 +242,7 @@ function createCardBackTexture(spec: DraftrollFallbackVisual): THREE.CanvasTextu
   const context = canvas.getContext('2d');
   if (!context) throw new Error('Canvas 2D context unavailable.');
   const palette = THEMES[normalizeTheme(spec.theme)];
+
   context.fillStyle = '#fbf9f2';
   context.fillRect(0, 0, canvas.width, canvas.height);
   roundedRect(context, 26, 26, 648, 928, 38);
@@ -253,6 +252,7 @@ function createCardBackTexture(spec: DraftrollFallbackVisual): THREE.CanvasTextu
   context.strokeStyle = cssColor(palette.edge);
   context.lineWidth = 7;
   context.stroke();
+
   context.save();
   roundedRect(context, 50, 50, 600, 880, 26);
   context.clip();
@@ -270,6 +270,7 @@ function createCardBackTexture(spec: DraftrollFallbackVisual): THREE.CanvasTextu
     context.stroke();
   }
   context.restore();
+
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = 16;
@@ -309,6 +310,7 @@ function triangulateTexturedShape(shape: ReadablePolyhedron): THREE.BufferGeomet
       0.06 + 0.88 * (value.u - minU) / spanU,
       0.06 + 0.88 * (value.v - minV) / spanV,
     ] as const);
+
     for (let index = 1; index + 1 < face.length; index += 1) {
       for (const localIndex of [0, index, index + 1]) {
         const vertex = shape.vertices[face[localIndex]];
@@ -317,6 +319,7 @@ function triangulateTexturedShape(shape: ReadablePolyhedron): THREE.BufferGeomet
       }
     }
   }
+
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
@@ -333,53 +336,16 @@ function parseNumericSides(spec: DraftrollFallbackVisual): number | null {
   return Number.isSafeInteger(sides) && sides >= 1 ? sides : null;
 }
 
-function faceFrame(shape: ReadablePolyhedron, faceIndex: number): FaceFrame {
-  const face = shape.faces[faceIndex];
-  const points = face.map((index) => new THREE.Vector3(...shape.vertices[index]));
-  const center = points
-    .reduce((sum, value) => sum.add(value), new THREE.Vector3())
-    .multiplyScalar(1 / points.length);
-  const normal = new THREE.Vector3()
-    .crossVectors(points[1].clone().sub(points[0]), points[2].clone().sub(points[0]))
-    .normalize();
-  if (normal.dot(center) < 0) normal.negate();
-
-  let tangent = points[1].clone().sub(points[0]);
-  for (let index = 0; index < points.length; index += 1) {
-    const edge = points[(index + 1) % points.length].clone().sub(points[index]);
-    if (edge.lengthSq() > tangent.lengthSq()) tangent = edge;
-  }
-  tangent.normalize();
-  const bitangent = new THREE.Vector3().crossVectors(normal, tangent).normalize();
-  tangent = new THREE.Vector3().crossVectors(bitangent, normal).normalize();
-
-  const projected = points.map((point) => {
-    const offset = point.clone().sub(center);
-    return { x: offset.dot(tangent), y: offset.dot(bitangent) };
-  });
-  const width = Math.max(...projected.map((value) => value.x)) - Math.min(...projected.map((value) => value.x));
-  const height = Math.max(...projected.map((value) => value.y)) - Math.min(...projected.map((value) => value.y));
-  const basis = new THREE.Matrix4().makeBasis(tangent, bitangent, normal);
-  const quaternion = new THREE.Quaternion().setFromRotationMatrix(basis);
-  return { center, normal, tangent, bitangent, width, height, quaternion };
-}
-
 function logicalResultValue(spec: DraftrollFallbackVisual, sides: number): number {
   const numeric = typeof spec.result === 'number' ? spec.result : Number(spec.numericValue);
   if (!Number.isFinite(numeric)) return 1;
   return THREE.MathUtils.clamp(Math.round(numeric), 1, Math.max(1, sides));
 }
 
-function logicalFaceValues(shape: ReadablePolyhedron, sides: number): number[] {
-  if (sides === 1) return shape.landingFaces.map(() => 1);
-  if (sides === 3 && shape.landingFaces.length === 6) return [1, 1, 2, 2, 3, 3];
-  if (shape.exact && shape.landingFaces.length === sides) {
-    return shape.landingFaces.map((_face, index) => index + 1);
-  }
-  return shape.landingFaces.map((_face, index) => index + 1);
-}
-
-function createNumberTexture(spec: DraftrollFallbackVisual, value: number | string): THREE.CanvasTexture {
+function createNumberTexture(
+  spec: DraftrollFallbackVisual,
+  value: number | string,
+): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
   canvas.width = 256;
   canvas.height = 256;
@@ -388,6 +354,7 @@ function createNumberTexture(spec: DraftrollFallbackVisual, value: number | stri
   const palette = THEMES[normalizeTheme(spec.theme)];
   const label = String(value);
   const length = label.length;
+
   context.textAlign = 'center';
   context.textBaseline = 'middle';
   context.lineJoin = 'round';
@@ -405,15 +372,36 @@ function createNumberTexture(spec: DraftrollFallbackVisual, value: number | stri
     context.lineTo(163, 202);
     context.stroke();
   }
+
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = 8;
   return texture;
 }
 
+function labelQuaternion(anchor: PolyhedronLabelAnchor): THREE.Quaternion {
+  const normal = new THREE.Vector3(...anchor.normal).normalize();
+  const up = new THREE.Vector3(...anchor.up).projectOnPlane(normal).normalize();
+  const right = new THREE.Vector3().crossVectors(up, normal).normalize();
+  const basis = new THREE.Matrix4().makeBasis(right, up, normal);
+  return new THREE.Quaternion().setFromRotationMatrix(basis);
+}
+
+function labelsForShape(
+  shape: ReadablePolyhedron,
+  result: number,
+): Array<{ outcome: PolyhedronOutcome; value: number }> {
+  if (shape.exact) {
+    return shape.outcomes.map((outcome) => ({ outcome, value: outcome.value }));
+  }
+  const outcome = shape.outcomes[(result - 1) % Math.max(1, shape.outcomes.length)];
+  return outcome ? [{ outcome, value: result }] : [];
+}
+
 function createGeneratedDieVisual(spec: DraftrollFallbackVisual): ThreeDimensionalVisual | null {
   const sides = parseNumericSides(spec);
   if (spec.kind !== 'spinner' || sides === null) return null;
+
   const shape = createReadablePolyhedron(sides);
   const palette = THEMES[normalizeTheme(spec.theme)];
   const group = new THREE.Group();
@@ -450,53 +438,50 @@ function createGeneratedDieVisual(spec: DraftrollFallbackVisual): ThreeDimension
   const geometries: THREE.BufferGeometry[] = [geometry, edgeGeometry];
   const materials: THREE.Material[] = [material, edgeMaterial];
   const result = logicalResultValue(spec, sides);
-  const faceValues = logicalFaceValues(shape, sides);
-  let resultNormal: THREE.Vector3 | null = null;
+  const resultOutcome =
+    shape.outcomes.find((outcome) => outcome.value === result) ??
+    shape.outcomes[(result - 1) % Math.max(1, shape.outcomes.length)];
 
-  const facesToLabel = shape.exact
-    ? shape.landingFaces.map((faceIndex, index) => ({
-        faceIndex,
-        value: faceValues[index] ?? index + 1,
-      }))
-    : [{
-        faceIndex: shape.landingFaces[(result - 1) % Math.max(1, shape.landingFaces.length)] ?? 0,
-        value: result,
-      }];
+  const materialByValue = new Map<number, THREE.MeshBasicMaterial>();
+  for (const { outcome, value } of labelsForShape(shape, result)) {
+    let labelMaterial = materialByValue.get(value);
+    if (!labelMaterial) {
+      const texture = createNumberTexture(spec, value);
+      labelMaterial = new THREE.MeshBasicMaterial({
+        map: texture,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        toneMapped: false,
+        side: THREE.DoubleSide,
+      });
+      materialByValue.set(value, labelMaterial);
+      textures.push(texture);
+      materials.push(labelMaterial);
+    }
 
-  for (const { faceIndex, value } of facesToLabel) {
-    const frame = faceFrame(shape, faceIndex);
-    if (value === result && resultNormal === null) resultNormal = frame.normal.clone();
-    const texture = createNumberTexture(spec, value);
-    const labelMaterial = new THREE.MeshBasicMaterial({
-      map: texture,
-      transparent: true,
-      opacity: 0,
-      depthWrite: false,
-      toneMapped: false,
-      side: THREE.DoubleSide,
-    });
-    const smallestSpan = Math.max(0.2, Math.min(frame.width, frame.height));
-    const labelSize = THREE.MathUtils.clamp(smallestSpan * 0.5, 0.22, 0.58);
-    const labelGeometry = new THREE.PlaneGeometry(labelSize, labelSize);
-    const label = new THREE.Mesh(labelGeometry, labelMaterial);
-    label.position.copy(frame.center).addScaledVector(frame.normal, 0.014);
-    label.quaternion.copy(frame.quaternion);
-    label.renderOrder = 7;
-    group.add(label);
-    textures.push(texture);
-    geometries.push(labelGeometry);
-    materials.push(labelMaterial);
+    for (const anchor of outcome.labels) {
+      const labelGeometry = new THREE.PlaneGeometry(anchor.scale, anchor.scale);
+      const normal = new THREE.Vector3(...anchor.normal).normalize();
+      const label = new THREE.Mesh(labelGeometry, labelMaterial);
+      label.position.fromArray(anchor.position).addScaledVector(normal, 0.014);
+      label.quaternion.copy(labelQuaternion(anchor));
+      label.renderOrder = 7;
+      group.add(label);
+      geometries.push(labelGeometry);
+    }
   }
 
-  if (resultNormal === null) {
-    const fallbackFace = shape.landingFaces[(result - 1) % Math.max(1, shape.landingFaces.length)] ?? 0;
-    resultNormal = faceFrame(shape, fallbackFace).normal;
+  if (resultOutcome) {
+    const settledUp = new THREE.Vector3(...resultOutcome.settledUp).normalize();
+    group.userData.settledRotation = new THREE.Quaternion().setFromUnitVectors(settledUp, UP);
+    group.userData.labelKind = resultOutcome.labelKind;
   }
-  group.userData.settledRotation = new THREE.Quaternion().setFromUnitVectors(resultNormal, UP);
 
-  if (shape.family === 'd1-cylinder') group.scale.set(0.9, 0.9, 1.04);
-  else if (shape.family === 'drum' || shape.family === 'representative') {
-    group.scale.set(1.08, 0.92, 1.08);
+  if (shape.family === 'd1-cylinder' || shape.family === 'd2-coin') {
+    group.scale.set(0.9, 0.9, 1.04);
+  } else if (shape.family === 'representative') {
+    group.scale.set(1.08, 0.94, 1.08);
   }
 
   return { mode: 'die', group, geometries, materials, textures };
@@ -530,6 +515,7 @@ function createCoinVisual(
     transparent: true,
     opacity: 0,
   });
+
   cropCoinTexture(texture);
   const faceMaterial = new THREE.MeshBasicMaterial({
     map: texture,
@@ -549,18 +535,22 @@ function createCoinVisual(
     toneMapped: false,
     side: THREE.DoubleSide,
   });
+
   const body = new THREE.Mesh(bodyGeometry, [edgeMaterial, capMaterial, capMaterial]);
   body.castShadow = true;
   body.receiveShadow = true;
   group.add(body);
+
   const face = new THREE.Mesh(faceGeometry, faceMaterial);
   face.rotation.x = -Math.PI / 2;
   face.position.y = 0.072;
   group.add(face);
+
   const back = new THREE.Mesh(faceGeometry, backMaterial);
   back.rotation.x = Math.PI / 2;
   back.position.y = -0.072;
   group.add(back);
+
   return {
     mode: 'coin',
     group,
@@ -600,8 +590,7 @@ function normalizeCardUvs(geometry: THREE.BufferGeometry, width: number, height:
 function createCardVisual(spec: DraftrollFallbackVisual): ThreeDimensionalVisual {
   const group = new THREE.Group();
   const thickness = 0.048;
-  const radius = 0.115;
-  const shape = createRoundedCardShape(CARD_WIDTH, CARD_HEIGHT, radius);
+  const shape = createRoundedCardShape(CARD_WIDTH, CARD_HEIGHT, 0.115);
   const bodyGeometry = new THREE.ExtrudeGeometry(shape, {
     depth: thickness,
     steps: 1,
@@ -617,6 +606,7 @@ function createCardVisual(spec: DraftrollFallbackVisual): ThreeDimensionalVisual
     thickness / 2,
     bodyGeometry.boundingBox?.max.z ?? thickness / 2,
   ) + 0.0015;
+
   const frontGeometry = new THREE.ShapeGeometry(shape, 18);
   normalizeCardUvs(frontGeometry, CARD_WIDTH, CARD_HEIGHT);
   const backGeometry = frontGeometry.clone();
@@ -645,6 +635,7 @@ function createCardVisual(spec: DraftrollFallbackVisual): ThreeDimensionalVisual
     toneMapped: false,
     side: THREE.FrontSide,
   });
+
   const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
   body.castShadow = true;
   body.receiveShadow = true;
@@ -658,6 +649,7 @@ function createCardVisual(spec: DraftrollFallbackVisual): ThreeDimensionalVisual
   back.rotation.y = Math.PI;
   back.renderOrder = 6;
   group.add(back);
+
   return {
     mode: 'card',
     group,
@@ -699,6 +691,7 @@ function randomSettledPosition(
   const candidate = new THREE.Vector2();
   const best = new THREE.Vector2();
   let bestDistance = -1;
+
   for (let attempt = 0; attempt < 80; attempt += 1) {
     candidate.set((random() * 2 - 1) * rangeX, (random() * 2 - 1) * rangeZ);
     const nearest = occupied.reduce(
@@ -781,6 +774,7 @@ export class FallbackVisualInstance {
     const scale = visualScale(spec.kind);
     this.sprite.scale.set(scale.x, scale.y, 1);
     this.sprite.renderOrder = 5;
+
     this.threeDimensional = spec.kind === 'coin'
       ? createCoinVisual(this.texture, spec)
       : spec.kind === 'card'
@@ -821,6 +815,7 @@ export class FallbackVisualInstance {
     const end = cardLayout?.position ?? randomSettledPosition(count, bounds, occupied, random);
     occupied.push(end.clone());
     const fromLeft = index % 2 === 0;
+
     this.trajectory = {
       start: isCard
         ? new THREE.Vector3(-bounds.x + 0.86, 1.02 + index * 0.012, bounds.z - 0.88)
@@ -839,13 +834,16 @@ export class FallbackVisualInstance {
           ),
       end: new THREE.Vector3(end.x, isCard ? 0.045 : 0.72, end.y),
       arcHeight: isCard ? 0.5 + Math.min(0.3, count * 0.022) : 1.8 + random() * 1.45,
-      delay: isCard ? Math.min(0.52, index * 0.078) : Math.min(0.2, index * 0.025 + random() * 0.04),
+      delay: isCard
+        ? Math.min(0.52, index * 0.078)
+        : Math.min(0.2, index * 0.025 + random() * 0.04),
       spinX: isCard ? 0 : (fromLeft ? 1 : -1) * (Math.PI * 4 + random() * Math.PI * 4),
       spinY: isCard ? Math.PI : (random() - 0.5) * Math.PI * 8,
       spinZ: isCard ? (random() - 0.5) * 0.1 : (random() - 0.5) * Math.PI * 6,
       finalYaw: cardLayout?.yaw ?? random() * Math.PI * 2,
       finalScale: cardLayout?.scale ?? 1,
     };
+
     this.settled = false;
     this.group.position.copy(this.trajectory.start);
     this.group.quaternion.identity();
@@ -870,6 +868,7 @@ export class FallbackVisualInstance {
     );
     this.group.visible = normalized > 0;
     if (normalized <= 0) return;
+
     const mode = this.threeDimensional?.mode ?? 'sprite';
     const opacity = THREE.MathUtils.clamp(normalized * 7, 0, 1);
 
@@ -884,11 +883,10 @@ export class FallbackVisualInstance {
         .setFromAxisAngle(UP, trajectory.finalYaw)
         .multiply(flatFaceUp);
       const faceDown = faceUp.clone().multiply(
-        new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI),
+        new THREE.Quaternion().setFromAxisAngle(UP, Math.PI),
       );
       this.threeDimensional.group.quaternion.copy(faceDown).slerp(faceUp, flip);
-      const bank = trajectory.spinZ * Math.sin(normalized * Math.PI);
-      this.threeDimensional.group.rotateZ(bank);
+      this.threeDimensional.group.rotateZ(trajectory.spinZ * Math.sin(normalized * Math.PI));
 
       const settle = THREE.MathUtils.smoothstep(normalized, 0.84, 1);
       this.group.position.y += Math.sin(settle * Math.PI) * 0.026;
@@ -904,6 +902,7 @@ export class FallbackVisualInstance {
         ? Math.sin((normalized - 0.72) * Math.PI * 7) * (1 - normalized) * 0.28
         : 0;
       this.group.position.y = trajectory.end.y + arc + settleBounce;
+
       if (this.threeDimensional) {
         const spin = 1 - (1 - normalized) ** 2.35;
         const moving = new THREE.Quaternion().setFromEuler(
@@ -918,11 +917,11 @@ export class FallbackVisualInstance {
           new THREE.Euler(0.12, trajectory.finalYaw, -0.06),
         );
         if (mode === 'die') {
-          const faceUp = this.threeDimensional.group.userData.settledRotation;
-          if (faceUp instanceof THREE.Quaternion) {
+          const generatedRotation = this.threeDimensional.group.userData.settledRotation;
+          if (generatedRotation instanceof THREE.Quaternion) {
             settledRotation = new THREE.Quaternion()
               .setFromAxisAngle(UP, trajectory.finalYaw)
-              .multiply(faceUp);
+              .multiply(generatedRotation);
           }
         }
         this.threeDimensional.group.quaternion
@@ -934,7 +933,9 @@ export class FallbackVisualInstance {
       } else {
         this.material.rotation += trajectory.spinZ / 180 * (1 - normalized);
         this.material.opacity = opacity;
-        this.group.scale.setScalar(Math.max(0.2, easeOutBack(Math.min(1, normalized * 1.45))));
+        this.group.scale.setScalar(
+          Math.max(0.2, easeOutBack(Math.min(1, normalized * 1.45))),
+        );
       }
     }
 
