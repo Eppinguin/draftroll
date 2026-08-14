@@ -822,7 +822,9 @@ class NaturalGeneratedDie {
 
   update(progress: number, _duration = 1): void {
     if (this.settled) return;
-    if (pendingGeneratedDice.size > 0) finalizeGeneratedFallbackBatch();
+    if (pendingGeneratedDice.size > 0 && bridgePending.size === 0) {
+      finalizeGeneratedFallbackBatch();
+    }
     if (!this.trajectory) return;
     const normalized = THREE.MathUtils.clamp(progress, 0, 1);
     this.lastProgress = normalized;
@@ -876,7 +878,7 @@ class NaturalGeneratedDie {
  * current pose/momentum and only launching newly configured dice from the hand.
  */
 export function finalizeGeneratedFallbackBatch(): void {
-  if (pendingGeneratedDice.size === 0) return;
+  if (pendingGeneratedDice.size === 0 || bridgePending.size > 0) return;
   const entries = configuredGeneratedDice();
   if (entries.length === 0) return;
   simulateLocalBatch(entries);
