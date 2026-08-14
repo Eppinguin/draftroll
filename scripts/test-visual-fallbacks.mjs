@@ -1,11 +1,21 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-const [renderer, engine, visuals, generatedVisuals, visualBase, polyhedra, html] = await Promise.all([
+const [
+  renderer,
+  engine,
+  visuals,
+  generatedVisuals,
+  generatedWorker,
+  visualBase,
+  polyhedra,
+  html,
+] = await Promise.all([
   readFile(new URL('../packages/renderer/src/index.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/main.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/fallback-visuals.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/generated-die-visuals.ts', import.meta.url), 'utf8'),
+  readFile(new URL('../src/generated-roll-worker.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/fallback-visuals-base.ts', import.meta.url), 'utf8'),
   readFile(new URL('../packages/renderer/src/polyhedra.ts', import.meta.url), 'utf8'),
   readFile(new URL('../index.html', import.meta.url), 'utf8'),
@@ -32,15 +42,34 @@ assert.match(visuals, /BaseFallbackVisualInstance/);
 assert.match(visuals, /usesGeneratedPhysics/);
 assert.match(visuals, /sides <= MAXIMUM_EXACT_GENERATED_SIDES/);
 
-assert.match(generatedVisuals, /import \* as CANNON/);
-assert.match(generatedVisuals, /new CANNON\.ConvexPolyhedron/);
-assert.match(generatedVisuals, /new CANNON\.World/);
-assert.match(generatedVisuals, /new CANNON\.SAPBroadphase/);
-assert.match(generatedVisuals, /solver\.iterations = 32/);
+// Weird-dice-only pools share one local Cannon world instead of simulating each die alone.
+assert.match(generatedVisuals, /activeGeneratedDice/);
+assert.match(generatedVisuals, /simulateLocalBatch/);
+assert.match(generatedVisuals, /new CANNON\.ContactMaterial\(dieMaterial, dieMaterial/);
+assert.match(generatedVisuals, /entries\.map\(\(entry\) =>/);
 assert.match(generatedVisuals, /world\.step\(1 \/ 120\)/);
+assert.match(generatedVisuals, /finalizeGeneratedFallbackBatch/);
+
+// Mixed standard/generated rolls intercept only the roll-plan postMessage and run a
+// dedicated worker containing both standard colliders and generated convex bodies.
+assert.match(generatedVisuals, /installSharedWorkerBridge/);
+assert.match(generatedVisuals, /generated-roll-worker\.ts/);
+assert.match(generatedVisuals, /splitGeneratedTrajectories/);
+assert.match(generatedVisuals, /nativePostMessage\.call\(\s*bridge/);
+assert.match(generatedVisuals, /owner\.dispatchEvent\(new MessageEvent\('message'/);
+assert.match(generatedWorker, /createDiePhysicsShape/);
+assert.match(generatedWorker, /createReadablePolyhedron/);
+assert.match(generatedWorker, /createGeneratedCollider/);
+assert.match(generatedWorker, /const totalCount = standardCount \+ generatedShapes\.length/);
+assert.match(generatedWorker, /bodies\.push\(body\)/);
+assert.match(generatedWorker, /new CANNON\.ContactMaterial\(diceMaterial, diceMaterial/);
+assert.match(generatedWorker, /generatedTransforms/);
+assert.match(generatedWorker, /generatedLandings/);
+assert.match(generatedWorker, /shared-generated-collisions/);
+
 assert.match(generatedVisuals, /landedOutcome/);
 assert.match(generatedVisuals, /applyRequestedResult/);
-assert.match(generatedVisuals, /sample\(this\.trajectory/);
+assert.match(generatedVisuals, /originalLabelMaps/);
 assert.match(generatedVisuals, /secondaryAnchor/);
 assert.match(generatedVisuals, /covered\.has\(faceIndex\)/);
 assert.match(generatedVisuals, /labelMaterials/);
@@ -93,6 +122,8 @@ console.log(JSON.stringify({
   automaticFaceEdgeVertexLabels: true,
   generatedFaceLabelCoverage: true,
   naturalGeneratedPhysics: true,
+  generatedGeneratedCollisions: true,
+  generatedStandardCollisions: true,
   noLateGeneratedCorrection: true,
   representativeHighCountFallback: true,
   roundedCardGeometry: true,
