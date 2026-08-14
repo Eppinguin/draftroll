@@ -15,51 +15,46 @@ for (const kind of ['coin', 'percentile', 'fate', 'spinner', 'token', 'card']) {
 assert.match(renderer, /DraftrollFallbackVisual/);
 assert.match(renderer, /visualOrder/);
 assert.match(renderer, /normalizeFallbackKind/);
-assert.match(renderer, /die\.customDiceId/);
-assert.match(renderer, /typeof die\.result === 'string'/);
 
 assert.match(engine, /spawnFallbackVisuals/);
 assert.match(engine, /createFallbackOnlyPlan/);
 assert.match(engine, /collectOrderedVisualResults/);
 assert.match(engine, /visual\.update\(fallbackProgress, plan\.duration\)/);
-assert.match(engine, /visual\.update\(fallbackProgress, fallbackPlanDuration\)/);
 assert.match(engine, /fallbacks:\s*activeFallbackSpecs/);
 
 assert.match(visuals, /class FallbackVisualInstance/);
-assert.match(visuals, /configureTrajectory/);
-assert.match(visuals, /easeOutBack/);
-assert.match(visuals, /new THREE\.CylinderGeometry/);
 assert.match(visuals, /createGeneratedDieVisual/);
-assert.match(visuals, /createReadablePolyhedron/);
-assert.match(visuals, /new THREE\.MeshPhysicalMaterial/);
-assert.match(visuals, /new THREE\.EdgesGeometry/);
-assert.match(visuals, /createResultLabelTexture/);
-assert.match(visuals, /smoothstep\(normalized, 0\.72, 0\.94\)/);
-assert.match(visuals, /randomSettledPosition/);
-assert.match(visuals, /minimumSeparation/);
-assert.match(visuals, /occupied\.push/);
+assert.match(visuals, /triangulateTexturedShape/);
+assert.match(visuals, /createDieSurfaceTexture/);
+assert.match(visuals, /createFaceLabelTexture/);
+assert.match(visuals, /faceCenterAndNormal/);
+assert.match(visuals, /settledRotation/);
+assert.match(visuals, /THREE\.DoubleSide/);
+assert.match(visuals, /createCardVisual/);
+assert.match(visuals, /createCardFrontTexture/);
+assert.match(visuals, /createCardBackTexture/);
+assert.match(visuals, /new RoundedBoxGeometry/);
+assert.match(visuals, /cardSettledPosition/);
+assert.match(visuals, /easeInOutCubic/);
+assert.match(visuals, /Math\.PI, trajectory\.finalYaw/);
 assert.match(visuals, /spec\.oppositeLabel/);
 assert.match(visuals, /getSettleTime/);
 
 assert.match(polyhedra, /function d1Cylinder/);
-assert.match(polyhedra, /function d3Cube/);
+assert.match(polyhedra, /function cube/);
 assert.match(polyhedra, /function triangularPrism/);
+assert.match(polyhedra, /function bipyramid/);
 assert.match(polyhedra, /function prismBarrel/);
+assert.match(polyhedra, /function drum/);
 assert.match(polyhedra, /landingFaces/);
-assert.match(polyhedra, /presentation geometry/);
+assert.match(polyhedra, /Presentation geometry only/);
 assert.match(html, /1d20\+1d2\+1dF\+1d9\+1d100/);
 
-console.log(
-  JSON.stringify(
-    {
-      ok: true,
-      fallbacks: ['physical coin', 'd10x/d100', 'dF', '3d arbitrary dN', 'symbolic', 'cards'],
-      mixedWithPhysical: true,
-      fallbackOnly: true,
-      arbitraryNumericSolid: true,
-      settleTimeResultLabel: true,
-    },
-    null,
-    2,
-  ),
-);
+console.log(JSON.stringify({
+  ok: true,
+  fallbacks: ['physical coin', 'd10x/d100', 'dF', 'textured arbitrary dN', 'symbolic', 'dealt 3d cards'],
+  mixedWithPhysical: true,
+  arbitraryNumericSolid: true,
+  faceBoundResultLabel: true,
+  cardDealAnimation: true,
+}, null, 2));
