@@ -489,16 +489,21 @@ function splitGeneratedTrajectories(
 
 function installSharedWorkerBridge(): void {
   if (typeof Worker === 'undefined') return;
-  const prototype = Worker.prototype as Worker['prototype'] & {
+  const prototype = Worker.prototype as Worker & {
     __draftrollGeneratedDiceBridge?: boolean;
   };
   if (prototype.__draftrollGeneratedDiceBridge) return;
   prototype.__draftrollGeneratedDiceBridge = true;
 
-  const nativePostMessage = Worker.prototype.postMessage;
+  const nativePostMessage = Worker.prototype.postMessage as unknown as (
+    this: Worker,
+    message: unknown,
+    transferOrOptions?: Transferable[] | StructuredSerializeOptions,
+  ) => void;
   const nativeTerminate = Worker.prototype.terminate;
 
   Worker.prototype.postMessage = function postMessage(
+    this: Worker,
     message: unknown,
     transferOrOptions?: Transferable[] | StructuredSerializeOptions,
   ): void {
@@ -508,8 +513,7 @@ function installSharedWorkerBridge(): void {
       !isPlannerRequest(message) ||
       (message.lockedCount ?? 0) > 0
     ) {
-      if (transferOrOptions === undefined) nativePostMessage.call(this, message);
-      else nativePostMessage.call(this, message, transferOrOptions);
+      nativePostMessage.call(this, message, transferOrOptions);
       return;
     }
 
@@ -574,7 +578,7 @@ function installSharedWorkerBridge(): void {
     );
   } as Worker['postMessage'];
 
-  Worker.prototype.terminate = function terminate(): void {
+  Worker.prototype.terminate = function terminate(this: Worker): void {
     bridgedWorkers.get(this)?.terminate();
     bridgedWorkers.delete(this);
     nativeTerminate.call(this);
@@ -650,6 +654,10 @@ class NaturalGeneratedDie {
       this.extraGeometries.push(geometry);
     }
     activeGeneratedDice.add(this);
+  }
+
+  get hasTrajectory(): boolean {
+    return this.trajectory !== null;
   }
 
   private applyRequestedResult(landed: number): void {
@@ -761,7 +769,7 @@ class NaturalGeneratedDie {
  */
 export function finalizeGeneratedFallbackBatch(): void {
   const entries = configuredGeneratedDice();
-  if (entries.length === 0 || entries.every((entry) => entry['trajectory'] !== null)) return;
+  if (entries.length === 0 || entries.every((entry) => entry.hasTrajectory)) return;
   simulateLocalBatch(entries);
 }
 
