@@ -25,7 +25,18 @@ interface SharedPlanRequest {
   boundsX: number;
   boundsZ: number;
   states: ArrayBuffer;
+  lockedCount?: number;
+  lockedTrajectory?: ArrayBuffer;
+  lockedTrajectoryStep?: number;
+  lockedTrajectoryFrameCount?: number;
   generated: GeneratedPlanEntry[];
+}
+
+interface LockedMotion {
+  count: number;
+  step: number;
+  frameCount: number;
+  transforms: Float32Array;
 }
 
 interface SharedPlanResponse {
@@ -40,10 +51,33 @@ interface SharedPlanResponse {
   physicsSteps: number;
   generatedTransforms: ArrayBuffer;
   generatedLandings: ArrayBuffer;
+  diagnostics: {
+    finalAverageLinear: number;
+    finalAverageAngular: number;
+    candidateAttempts: number;
+    candidateSearchMs: number;
+    naturalTrajectory: true;
+    naturalMatches: number;
+    assistedDice: number[];
+    maximumAssistAngle: number;
+    finalTargetDots: number[];
+    targetSuccess: true;
+    lockedKinematicDice: number;
+  };
 }
 
 const diceMaterial = new CANNON.Material('planner-dice');
 const tableMaterial = new CANNON.Material('planner-table');
+const generatedShapeCache = new Map<number, ReadablePolyhedron>();
+
+function shapeForSides(sides: number): ReadablePolyhedron {
+  let shape = generatedShapeCache.get(sides);
+  if (!shape) {
+    shape = createReadablePolyhedron(sides);
+    generatedShapeCache.set(sides, shape);
+  }
+  return shape;
+}
 
 function configureWorld(world: CANNON.World): void {
   world.allowSleep = true;
@@ -91,7 +125,6 @@ function addTable(world: CANNON.World, boundsX: number, boundsZ: number): void {
   const floor = new CANNON.Body({ mass: 0, material: tableMaterial, shape: new CANNON.Plane() });
   floor.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
   world.addBody(floor);
-
   const thickness = 1.1;
   const halfHeight = 5.5;
   const centerY = halfHeight - 0.05;
@@ -121,10 +154,7 @@ function subtract(a: PolyhedronVertex, b: PolyhedronVertex): [number, number, nu
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 }
 
-function cross(
-  a: PolyhedronVertex,
-  b: PolyhedronVertex,
-): [number, number, number] {
+function cross(a: PolyhedronVertex, b: PolyhedronVertex): [number, number, number] {
   return [
     a[1] * b[2] - a[2] * b[1],
     a[2] * b[0] - a[0] * b[2],
@@ -151,7 +181,7 @@ function faceNormal(shape: ReadablePolyhedron, faceIndex: number): CANNON.Vec3 {
     center[1] += vertex[1] / face.length;
     center[2] += vertex[2] / face.length;
   }
-  if (dot([normal.x, normal.y, normal.z], center) < 0) normal.negate(normal);
+  if (dot([normal.x, normal.y, normal.z], center) < 0) normal.scale(-1, normal);
   return normal;
 }
 
@@ -216,6 +246,7 @@ function park(body: CANNON.Body): void {
   body.force.setZero();
   body.torque.setZero();
   body.wakeUp();
+  body.aabbNeedsUpdate = true;
 }
 
 function activate(body: CANNON.Body, velocity: Float32Array, offset: number): void {
@@ -231,8 +262,86 @@ function activate(body: CANNON.Body, velocity: Float32Array, offset: number): vo
   body.aabbNeedsUpdate = true;
 }
 
+function configureLocked(body: CANNON.Body): void {
+  body.type = CANNON.Body.KINEMATIC;
+  body.mass = 0;
+  body.updateMassProperties();
+  body.collisionResponse = true;
+  body.force.setZero();
+  body.torque.setZero();
+  body.wakeUp();
+  body.aabbNeedsUpdate = true;
+}
+
+function sampleLocked(
+  motion: LockedMotion,
+  dieIndex: number,
+  time: number,
+  position: CANNON.Vec3,
+  quaternion: CANNON.Quaternion,
+): void {
+  const frame = Math.max(0, Math.min(motion.frameCount - 1, time / motion.step));
+  const first = Math.floor(frame);
+  const second = Math.min(motion.frameCount - 1, first + 1);
+  const alpha = frame - first;
+  const stride = motion.count * 7;
+  const a = first * stride + dieIndex * 7;
+  const b = second * stride + dieIndex * 7;
+  position.set(
+    motion.transforms[a] + (motion.transforms[b] - motion.transforms[a]) * alpha,
+    motion.transforms[a + 1] + (motion.transforms[b + 1] - motion.transforms[a + 1]) * alpha,
+    motion.transforms[a + 2] + (motion.transforms[b + 2] - motion.transforms[a + 2]) * alpha,
+  );
+  const qa = new CANNON.Quaternion(
+    motion.transforms[a + 3],
+    motion.transforms[a + 4],
+    motion.transforms[a + 5],
+    motion.transforms[a + 6],
+  );
+  const qb = new CANNON.Quaternion(
+    motion.transforms[b + 3],
+    motion.transforms[b + 4],
+    motion.transforms[b + 5],
+    motion.transforms[b + 6],
+  );
+  qa.slerp(qb, alpha, quaternion);
+  quaternion.normalize();
+}
+
+function updateLockedBodies(
+  standardBodies: readonly CANNON.Body[],
+  motion: LockedMotion | undefined,
+  previousTime: number,
+  nextTime: number,
+): void {
+  if (!motion) return;
+  const previousPosition = new CANNON.Vec3();
+  const nextPosition = new CANNON.Vec3();
+  const previousQuaternion = new CANNON.Quaternion();
+  const nextQuaternion = new CANNON.Quaternion();
+  const dt = Math.max(1e-6, nextTime - previousTime);
+  for (let index = 0; index < motion.count; index += 1) {
+    const body = standardBodies[index];
+    if (!body) continue;
+    sampleLocked(motion, index, previousTime, previousPosition, previousQuaternion);
+    sampleLocked(motion, index, nextTime, nextPosition, nextQuaternion);
+    body.position.copy(nextPosition);
+    body.quaternion.copy(nextQuaternion);
+    body.velocity.set(
+      (nextPosition.x - previousPosition.x) / dt,
+      (nextPosition.y - previousPosition.y) / dt,
+      (nextPosition.z - previousPosition.z) / dt,
+    );
+    body.angularVelocity.setZero();
+    body.previousPosition.copy(previousPosition);
+    body.previousQuaternion.copy(previousQuaternion);
+    body.aabbNeedsUpdate = true;
+  }
+}
+
 function enforceBounds(
   bodies: readonly CANNON.Body[],
+  lockedStandardCount: number,
   boundsX: number,
   boundsZ: number,
   simulationTime: number,
@@ -242,8 +351,8 @@ function enforceBounds(
   const maxLinear = 12 - crowd * 2.2;
   const maxVertical = 7.5 - crowd * 1.4;
   const maxAngular = 28 - crowd * 4;
-
-  for (const body of bodies) {
+  bodies.forEach((body, index) => {
+    if (index < lockedStandardCount) return;
     const minX = -boundsX + margin;
     const maxX = boundsX - margin;
     const minZ = -boundsZ + margin;
@@ -291,19 +400,58 @@ function enforceBounds(
     if (linearSpeed > maxLinear) body.velocity.scale(maxLinear / linearSpeed, body.velocity);
     const angularSpeed = body.angularVelocity.length();
     if (angularSpeed > maxAngular) body.angularVelocity.scale(maxAngular / angularSpeed, body.angularVelocity);
+  });
+}
+
+function appendTransforms(target: number[], bodies: readonly CANNON.Body[]): void {
+  for (const body of bodies) {
+    target.push(
+      body.position.x,
+      body.position.y,
+      body.position.z,
+      body.quaternion.x,
+      body.quaternion.y,
+      body.quaternion.z,
+      body.quaternion.w,
+    );
   }
 }
 
 function simulate(request: SharedPlanRequest): SharedPlanResponse {
-  const kinds = request.kinds ?? Array.from({ length: request.count ?? 0 }, () => request.kind ?? 'd20');
+  const startedAt = performance.now();
+  const kinds =
+    request.kinds ?? Array.from({ length: request.count ?? 0 }, () => request.kind ?? 'd20');
   const standardCount = kinds.length;
-  const generatedShapes = request.generated.map((entry) => createReadablePolyhedron(entry.sides));
+  const lockedCount = Math.max(0, Math.min(standardCount, request.lockedCount ?? 0));
+  const lockedFrameCount = Math.max(0, Math.floor(request.lockedTrajectoryFrameCount ?? 0));
+  const lockedStep = Number(request.lockedTrajectoryStep);
+  const lockedTransforms = request.lockedTrajectory
+    ? new Float32Array(request.lockedTrajectory)
+    : null;
+  const lockedMotion =
+    lockedCount > 0 &&
+    lockedTransforms &&
+    lockedFrameCount >= 2 &&
+    Number.isFinite(lockedStep) &&
+    lockedStep > 0 &&
+    lockedTransforms.length === lockedFrameCount * lockedCount * 7
+      ? {
+          count: lockedCount,
+          step: lockedStep,
+          frameCount: lockedFrameCount,
+          transforms: lockedTransforms,
+        }
+      : undefined;
+
+  const generatedShapes = request.generated.map((entry) => shapeForSides(entry.sides));
   const totalCount = standardCount + generatedShapes.length;
   const crowd = Math.max(0, Math.min(1, (totalCount - 8) / 22));
   const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -20.5, 0) });
   configureWorld(world);
   addTable(world, request.boundsX, request.boundsZ);
 
+  const standardBodies: CANNON.Body[] = [];
+  const generatedBodies: CANNON.Body[] = [];
   const bodies: CANNON.Body[] = [];
   const delays = new Float32Array(totalCount);
   const launch = new Float32Array(totalCount * 6);
@@ -325,6 +473,13 @@ function simulate(request: SharedPlanRequest): SharedPlanResponse {
     body.allowSleep = true;
     body.sleepSpeedLimit = 0.09 + crowd * 0.015;
     body.sleepTimeLimit = 0.72;
+    if (index < lockedCount && lockedMotion) {
+      configureLocked(body);
+      active[index] = true;
+    } else if (delays[index] <= 0) activate(body, launch, index * 6);
+    else park(body);
+    world.addBody(body);
+    standardBodies.push(body);
     bodies.push(body);
   }
 
@@ -344,124 +499,126 @@ function simulate(request: SharedPlanRequest): SharedPlanResponse {
     body.allowSleep = true;
     body.sleepSpeedLimit = 0.09 + crowd * 0.015;
     body.sleepTimeLimit = 0.72;
+    if (delays[bodyIndex] <= 0) activate(body, launch, bodyIndex * 6);
+    else park(body);
+    world.addBody(body);
+    generatedBodies.push(body);
     bodies.push(body);
   });
 
-  const impacts: number[] = [];
   let currentStep = 0;
-  bodies.forEach((body, bodyIndex) => {
-    if (bodyIndex < standardCount) {
-      body.addEventListener('collide', (event: { contact: CANNON.ContactEquation }) => {
-        if (!active[bodyIndex]) return;
-        const strength = Math.abs(event.contact.getImpactVelocityAlongNormal());
-        if (strength > 1.5) impacts.push(currentStep * FIXED_STEP, bodyIndex, strength);
-      });
-    }
-    world.addBody(body);
-    park(body);
-    if (delays[bodyIndex] <= 0) {
-      activate(body, launch, bodyIndex * 6);
-      active[bodyIndex] = true;
-    }
+  const impacts: number[] = [];
+  standardBodies.forEach((body, index) => {
+    body.addEventListener('collide', (event: { contact: CANNON.ContactEquation }) => {
+      if (!active[index]) return;
+      const strength = Math.abs(event.contact.getImpactVelocityAlongNormal());
+      if (strength > 1.5) impacts.push(currentStep * FIXED_STEP, index, strength);
+    });
   });
 
-  const standardFrames: number[] = [];
-  const generatedFrames: number[] = [];
-  const record = (): void => {
-    for (let index = 0; index < standardCount; index += 1) {
-      const body = bodies[index];
-      standardFrames.push(
-        body.position.x,
-        body.position.y,
-        body.position.z,
-        body.quaternion.x,
-        body.quaternion.y,
-        body.quaternion.z,
-        body.quaternion.w,
-      );
-    }
-    for (let index = standardCount; index < bodies.length; index += 1) {
-      const body = bodies[index];
-      generatedFrames.push(
-        body.position.x,
-        body.position.y,
-        body.position.z,
-        body.quaternion.x,
-        body.quaternion.y,
-        body.quaternion.z,
-        body.quaternion.w,
-      );
-    }
-  };
+  const standardTransforms: number[] = [];
+  const generatedTransforms: number[] = [];
+  updateLockedBodies(standardBodies, lockedMotion, 0, 0);
+  appendTransforms(standardTransforms, standardBodies);
+  appendTransforms(generatedTransforms, generatedBodies);
 
-  record();
-  let frameCount = 1;
-  let stableTime = 0;
   const maximumDelay = Math.max(0, ...delays);
+  const lockedDuration = lockedMotion
+    ? (lockedMotion.frameCount - 1) * lockedMotion.step
+    : 0;
+  let stableTime = 0;
+  let frameCount = 1;
   let settleReason = 'timeout';
+  let finalAverageLinear = 0;
+  let finalAverageAngular = 0;
 
   for (currentStep = 1; currentStep <= MAX_STEPS; currentStep += 1) {
-    const simulationTime = currentStep * FIXED_STEP;
-    bodies.forEach((body, bodyIndex) => {
-      if (!active[bodyIndex] && simulationTime + 1e-6 >= delays[bodyIndex]) {
-        activate(body, launch, bodyIndex * 6);
-        active[bodyIndex] = true;
+    const time = currentStep * FIXED_STEP;
+    for (let index = lockedCount; index < totalCount; index += 1) {
+      if (!active[index] && time + 1e-6 >= delays[index]) {
+        activate(bodies[index], launch, index * 6);
+        active[index] = true;
       }
-    });
+    }
+    updateLockedBodies(standardBodies, lockedMotion, time - FIXED_STEP, time);
     world.step(FIXED_STEP);
-    enforceBounds(bodies, request.boundsX, request.boundsZ, simulationTime);
-    record();
+    updateLockedBodies(standardBodies, lockedMotion, time - FIXED_STEP, time);
+    enforceBounds(bodies, lockedCount, request.boundsX, request.boundsZ, time);
+    appendTransforms(standardTransforms, standardBodies);
+    appendTransforms(generatedTransforms, generatedBodies);
     frameCount += 1;
 
-    if (simulationTime < maximumDelay + 0.3 || !active.every(Boolean)) {
-      stableTime = 0;
-      continue;
+    if (time < Math.max(maximumDelay + 0.3, lockedDuration + 0.15)) continue;
+    let linear = 0;
+    let angular = 0;
+    let dynamicCount = 0;
+    let allSlow = true;
+    for (let index = lockedCount; index < bodies.length; index += 1) {
+      if (!active[index]) {
+        allSlow = false;
+        continue;
+      }
+      const body = bodies[index];
+      const speed = body.velocity.length();
+      const spin = body.angularVelocity.length();
+      linear += speed;
+      angular += spin;
+      dynamicCount += 1;
+      if (!(body.sleepState === CANNON.Body.SLEEPING || (speed < 0.14 && spin < 0.23))) {
+        allSlow = false;
+      }
     }
-    const settled = bodies.every((body) => {
-      if (body.sleepState === CANNON.Body.SLEEPING) return true;
-      return body.velocity.length() < 0.13 && body.angularVelocity.length() < 0.22;
-    });
-    stableTime = settled ? stableTime + FIXED_STEP : 0;
+    finalAverageLinear = linear / Math.max(1, dynamicCount);
+    finalAverageAngular = angular / Math.max(1, dynamicCount);
+    stableTime = allSlow ? stableTime + FIXED_STEP : 0;
     if (currentStep >= MIN_STEPS && stableTime > 0.5) {
-      settleReason = 'shared-generated-collisions';
+      settleReason = 'shared-contact-stable';
       break;
     }
   }
 
-  const generatedLandings = new Int32Array(generatedShapes.length);
-  generatedShapes.forEach((shape, generatedIndex) => {
-    generatedLandings[generatedIndex] = landedOutcome(shape, bodies[standardCount + generatedIndex].quaternion);
-  });
-  const transforms = Float32Array.from(standardFrames);
-  const generatedTransforms = Float32Array.from(generatedFrames);
+  const generatedLandings = Int32Array.from(
+    generatedBodies.map((body, index) => landedOutcome(generatedShapes[index], body.quaternion)),
+  );
+  const standardBuffer = Float32Array.from(standardTransforms);
+  const generatedBuffer = Float32Array.from(generatedTransforms);
   const impactBuffer = Float32Array.from(impacts);
   return {
     id: request.id,
     step: FIXED_STEP,
     frameCount,
     dieCount: standardCount,
-    transforms: transforms.buffer,
+    transforms: standardBuffer.buffer,
     impacts: impactBuffer.buffer,
     duration: (frameCount - 1) * FIXED_STEP,
     settleReason,
     physicsSteps: currentStep,
-    generatedTransforms: generatedTransforms.buffer,
+    generatedTransforms: generatedBuffer.buffer,
     generatedLandings: generatedLandings.buffer,
+    diagnostics: {
+      finalAverageLinear,
+      finalAverageAngular,
+      candidateAttempts: 1,
+      candidateSearchMs: performance.now() - startedAt,
+      naturalTrajectory: true,
+      naturalMatches: standardCount,
+      assistedDice: [],
+      maximumAssistAngle: 0,
+      finalTargetDots: [],
+      targetSuccess: true,
+      lockedKinematicDice: lockedCount,
+    },
   };
 }
 
 self.addEventListener('message', (event: MessageEvent<SharedPlanRequest>) => {
-  try {
-    const response = simulate(event.data);
-    self.postMessage(response, {
-      transfer: [
-        response.transforms,
-        response.impacts,
-        response.generatedTransforms,
-        response.generatedLandings,
-      ],
-    });
-  } catch (error) {
-    throw error instanceof Error ? error : new Error(String(error));
-  }
+  const response = simulate(event.data);
+  self.postMessage(response, {
+    transfer: [
+      response.transforms,
+      response.impacts,
+      response.generatedTransforms,
+      response.generatedLandings,
+    ],
+  });
 });
