@@ -198,8 +198,6 @@ function createCardFrontTexture(spec: DraftrollFallbackVisual): THREE.CanvasText
   const red = spec.metadata?.color === 'red';
   const ink = red ? '#b51e2e' : '#151515';
 
-  // The mesh itself supplies the rounded silhouette. Painting to the edge avoids
-  // the old rectangular-looking frame around an otherwise rounded card.
   context.fillStyle = '#fbf9f2';
   context.fillRect(0, 0, canvas.width, canvas.height);
   const wash = context.createLinearGradient(0, 0, canvas.width, canvas.height);
@@ -455,12 +453,11 @@ function createGeneratedDieVisual(spec: DraftrollFallbackVisual): ThreeDimension
   const faceValues = logicalFaceValues(shape, sides);
   let resultNormal: THREE.Vector3 | null = null;
 
-  // Exact solids are numbered on every legal result surface. This makes d5/d7/etc.
-  // read like actual dice instead of blank polyhedra with one late result sticker.
-  // Representative high-count solids only label the authoritative face because
-  // their geometry intentionally has fewer landing surfaces than logical values.
   const facesToLabel = shape.exact
-    ? shape.landingFaces.map((faceIndex, index) => ({ faceIndex, value: faceValues[index] ?? index + 1 }))
+    ? shape.landingFaces.map((faceIndex, index) => ({
+        faceIndex,
+        value: faceValues[index] ?? index + 1,
+      }))
     : [{
         faceIndex: shape.landingFaces[(result - 1) % Math.max(1, shape.landingFaces.length)] ?? 0,
         value: result,
@@ -616,7 +613,10 @@ function createCardVisual(spec: DraftrollFallbackVisual): ThreeDimensionalVisual
   });
   bodyGeometry.center();
   bodyGeometry.computeBoundingBox();
-  const surfaceZ = Math.max(thickness / 2, bodyGeometry.boundingBox?.max.z ?? thickness / 2) + 0.0015;
+  const surfaceZ = Math.max(
+    thickness / 2,
+    bodyGeometry.boundingBox?.max.z ?? thickness / 2,
+  ) + 0.0015;
   const frontGeometry = new THREE.ShapeGeometry(shape, 18);
   normalizeCardUvs(frontGeometry, CARD_WIDTH, CARD_HEIGHT);
   const backGeometry = frontGeometry.clone();
@@ -746,7 +746,11 @@ function cardSettledLayout(
   const zStep = CARD_HEIGHT * scale + CARD_ROW_GAP;
   const x = (column - (rowCount - 1) / 2) * xStep;
   const z = (row - (rows - 1) / 2) * zStep;
-  const yaw = THREE.MathUtils.clamp((column - (rowCount - 1) / 2) * 0.018, -0.045, 0.045);
+  const yaw = THREE.MathUtils.clamp(
+    (column - (rowCount - 1) / 2) * 0.018,
+    -0.045,
+    0.045,
+  );
   return { position: new THREE.Vector2(x, z), scale, yaw };
 }
 
@@ -850,7 +854,9 @@ export class FallbackVisualInstance {
       if ('opacity' in material) material.opacity = 0;
     }
     this.shadowMaterial.opacity = 0;
-    this.group.scale.setScalar(isCard ? this.trajectory.finalScale : this.threeDimensional ? 1 : 0.55);
+    this.group.scale.setScalar(
+      isCard ? this.trajectory.finalScale : this.threeDimensional ? 1 : 0.55,
+    );
     this.group.visible = false;
   }
 
@@ -873,9 +879,10 @@ export class FallbackVisualInstance {
       this.group.position.y += Math.sin(normalized * Math.PI) * trajectory.arcHeight;
 
       const flip = THREE.MathUtils.smoothstep(normalized, 0.2, 0.82);
+      const flatFaceUp = new THREE.Quaternion().setFromUnitVectors(FORWARD, UP);
       const faceUp = new THREE.Quaternion()
         .setFromAxisAngle(UP, trajectory.finalYaw)
-        .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2));
+        .multiply(flatFaceUp);
       const faceDown = faceUp.clone().multiply(
         new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI),
       );
