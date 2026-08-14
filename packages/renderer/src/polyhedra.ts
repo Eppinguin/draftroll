@@ -3,9 +3,8 @@ export type PolyhedronVertex = readonly [number, number, number];
 export interface ReadablePolyhedron {
   vertices: PolyhedronVertex[];
   faces: number[][];
-  /** Faces that are meaningful resting/result surfaces. Decorative faces may be omitted. */
+  /** Faces that may carry a logical outcome. Decorative faces are excluded. */
   landingFaces: number[];
-  /** Optional semantic classification for renderers that style result and decorative faces differently. */
   faceKinds?: Array<'landing' | 'cap' | 'rim' | 'decorative'>;
   requestedFacets: number;
   displayFacets: number;
@@ -15,7 +14,7 @@ export interface ReadablePolyhedron {
     | 'cube'
     | 'tetrahedron'
     | 'triangular-prism'
-    | 'trapezohedron'
+    | 'bipyramid'
     | 'prism-barrel'
     | 'drum'
     | 'representative';
@@ -39,134 +38,121 @@ function finish(
     faceKinds?: ReadablePolyhedron['faceKinds'];
   } = {},
 ): ReadablePolyhedron {
-  const radius = Math.max(1, ...vertices.map((vertex) => Math.hypot(vertex[0], vertex[1], vertex[2])));
+  const radius = Math.max(...vertices.map((vertex) => Math.hypot(...vertex)), 1e-6);
+  const normalized = vertices.map((vertex) =>
+    [vertex[0] / radius, vertex[1] / radius, vertex[2] / radius] as PolyhedronVertex,
+  );
   const landingFaces = options.landingFaces ?? faces.map((_face, index) => index);
   return {
-    requestedFacets,
-    displayFacets: landingFaces.length,
-    exact: (options.exact ?? true) && landingFaces.length === requestedFacets,
-    family,
-    vertices: vertices.map((vertex) => [vertex[0] / radius, vertex[1] / radius, vertex[2] / radius]),
+    vertices: normalized,
     faces: faces.map((face) => [...face]),
     landingFaces: [...landingFaces],
     faceKinds: options.faceKinds ? [...options.faceKinds] : undefined,
+    requestedFacets,
+    displayFacets: landingFaces.length,
+    exact: (options.exact ?? true) && requestedFacets === landingFaces.length,
+    family,
   };
+}
+
+function cube(requestedFacets = 6): ReadablePolyhedron {
+  const vertices: number[][] = [
+    [-1, -1, -1], [1, -1, -1], [1, 1, -1], [-1, 1, -1],
+    [-1, -1, 1], [1, -1, 1], [1, 1, 1], [-1, 1, 1],
+  ];
+  const faces = [
+    [0, 3, 2, 1], [4, 5, 6, 7], [0, 4, 7, 3],
+    [1, 2, 6, 5], [3, 7, 6, 2], [0, 1, 5, 4],
+  ];
+  return finish(requestedFacets, vertices, faces, 'cube', {
+    landingFaces: faces.map((_face, index) => index),
+    faceKinds: faces.map(() => 'landing'),
+  });
 }
 
 function tetrahedron(): ReadablePolyhedron {
   return finish(
     4,
     [[1, 1, 1], [1, -1, -1], [-1, 1, -1], [-1, -1, 1]],
-    [[0, 1, 2], [0, 3, 1], [0, 2, 3], [1, 3, 2]],
+    [[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]],
     'tetrahedron',
   );
 }
 
-/** d3 uses a cube with opposite faces sharing the same logical result. */
-function d3Cube(): ReadablePolyhedron {
+/** A thick, deliberately tangible d1 with two equivalent result caps. */
+function d1Cylinder(segments = 18): ReadablePolyhedron {
   const vertices: number[][] = [];
-  for (const x of [-1, 1]) for (const y of [-1, 1]) for (const z of [-1, 1]) vertices.push([x, y, z]);
-  const faces = [[0, 1, 3, 2], [4, 6, 7, 5], [0, 4, 5, 1], [2, 3, 7, 6], [0, 2, 6, 4], [1, 5, 7, 3]];
-  return finish(3, vertices, faces, 'cube', {
-    exact: true,
-    landingFaces: faces.map((_face, index) => index),
-    faceKinds: faces.map(() => 'landing'),
-  });
-}
-
-function cube(): ReadablePolyhedron {
-  const vertices: number[][] = [];
-  for (const x of [-1, 1]) for (const y of [-1, 1]) for (const z of [-1, 1]) vertices.push([x, y, z]);
-  return finish(6, vertices, [[0, 1, 3, 2], [4, 6, 7, 5], [0, 4, 5, 1], [2, 3, 7, 6], [0, 2, 6, 4], [1, 5, 7, 3]], 'cube');
-}
-
-/**
- * A deliberately over-defined d1 body: two large caps are the only legal result surfaces,
- * while the rim exists only to make a tangible object that can visibly tumble.
- */
-function d1Cylinder(segments = 16): ReadablePolyhedron {
-  const vertices: number[][] = [];
-  const half = 0.52;
-  const skew = 0.32;
-  for (let index = 0; index < segments; index += 1) {
-    const angle = (index / segments) * TAU;
-    vertices.push([Math.cos(angle), half + Math.cos(angle) * skew, Math.sin(angle)]);
-  }
-  for (let index = 0; index < segments; index += 1) {
-    const angle = (index / segments) * TAU;
-    vertices.push([Math.cos(angle), -half + Math.cos(angle) * skew, Math.sin(angle)]);
+  const half = 0.78;
+  const radius = 0.58;
+  for (const z of [-half, half]) {
+    for (let index = 0; index < segments; index += 1) {
+      const angle = index / segments * TAU;
+      vertices.push([Math.cos(angle) * radius, Math.sin(angle) * radius, z]);
+    }
   }
   const faces: number[][] = [
-    Array.from({ length: segments }, (_entry, index) => index),
-    Array.from({ length: segments }, (_entry, index) => segments * 2 - 1 - index),
+    Array.from({ length: segments }, (_entry, index) => segments - 1 - index),
+    Array.from({ length: segments }, (_entry, index) => segments + index),
   ];
   for (let index = 0; index < segments; index += 1) {
     const next = (index + 1) % segments;
     faces.push([index, next, segments + next, segments + index]);
   }
   return finish(1, vertices, faces, 'd1-cylinder', {
-    exact: true,
     landingFaces: [0, 1],
     faceKinds: faces.map((_face, index) => index < 2 ? 'cap' : 'rim'),
   });
 }
 
 function triangularPrism(): ReadablePolyhedron {
-  const half = 0.76;
   const vertices: number[][] = [];
-  for (const z of [half, -half]) {
+  const half = 0.72;
+  for (const z of [-half, half]) {
     for (let index = 0; index < 3; index += 1) {
-      const angle = -Math.PI / 2 + (index / 3) * TAU;
+      const angle = -Math.PI / 2 + index / 3 * TAU;
       vertices.push([Math.cos(angle), Math.sin(angle), z]);
     }
   }
   const faces = [
-    [2, 1, 0],
-    [3, 4, 5],
-    [0, 1, 4, 3],
-    [1, 2, 5, 4],
-    [2, 0, 3, 5],
+    [0, 2, 1], [3, 4, 5],
+    [0, 1, 4, 3], [1, 2, 5, 4], [2, 0, 3, 5],
   ];
   return finish(5, vertices, faces, 'triangular-prism');
 }
 
-function trapezohedron(facets: number): ReadablePolyhedron {
+/**
+ * Robust even-sided die: a regular n-gonal bipyramid gives exactly 2n congruent
+ * triangular result faces. It is convex, has stable winding, and remains readable
+ * for the side counts where pointed dice still look like physical dice.
+ */
+function bipyramid(facets: number): ReadablePolyhedron {
   const ring = facets / 2;
-  const rawHeight = 2 / (1 - Math.cos(Math.PI / ring)) - 1;
-  const squash = (1 / rawHeight) * (ring > 6 ? 1.35 : 1);
-  const vertices: number[][] = [[0, rawHeight * squash, 0], [0, -rawHeight * squash, 0]];
+  const vertices: number[][] = [[0, 1.08, 0], [0, -1.08, 0]];
   for (let index = 0; index < ring; index += 1) {
-    const angle = (index / ring) * TAU;
-    vertices.push([Math.cos(angle), squash, Math.sin(angle)]);
+    const angle = index / ring * TAU;
+    vertices.push([Math.cos(angle), 0, Math.sin(angle)]);
   }
-  for (let index = 0; index < ring; index += 1) {
-    const angle = ((index + 0.5) / ring) * TAU;
-    vertices.push([Math.cos(angle), -squash, Math.sin(angle)]);
-  }
-  const top = (index: number) => 2 + ((index % ring) + ring) % ring;
-  const bottom = (index: number) => 2 + ring + (((index % ring) + ring) % ring);
+  const ringVertex = (index: number) => 2 + ((index % ring) + ring) % ring;
   const faces: number[][] = [];
   for (let index = 0; index < ring; index += 1) {
-    faces.push([0, top(index), bottom(index), top(index + 1)]);
-    faces.push([1, bottom(index - 1), top(index), bottom(index)]);
+    faces.push([0, ringVertex(index + 1), ringVertex(index)]);
+    faces.push([1, ringVertex(index), ringVertex(index + 1)]);
   }
-  return finish(facets, vertices, faces, 'trapezohedron');
+  return finish(facets, vertices, faces, 'bipyramid');
 }
 
-/** One rectangular result face per side, with pointed decorative caps. */
+/** Odd-sided barrel: one clear rectangular result face per outcome, tapered caps decorative. */
 function prismBarrel(facets: number): ReadablePolyhedron {
-  const half = 0.58;
+  const half = 0.54;
   const vertices: number[][] = [];
-  for (let index = 0; index < facets; index += 1) {
-    const angle = (index / facets) * TAU;
-    vertices.push([Math.cos(angle), half, Math.sin(angle)]);
+  for (const y of [half, -half]) {
+    for (let index = 0; index < facets; index += 1) {
+      const angle = index / facets * TAU;
+      vertices.push([Math.cos(angle), y, Math.sin(angle)]);
+    }
   }
-  for (let index = 0; index < facets; index += 1) {
-    const angle = (index / facets) * TAU;
-    vertices.push([Math.cos(angle), -half, Math.sin(angle)]);
-  }
-  const top = vertices.push([0, half + 0.52, 0]) - 1;
-  const bottom = vertices.push([0, -half - 0.52, 0]) - 1;
+  const top = vertices.push([0, half + 0.48, 0]) - 1;
+  const bottom = vertices.push([0, -half - 0.48, 0]) - 1;
   const faces: number[][] = [];
   for (let index = 0; index < facets; index += 1) {
     const next = (index + 1) % facets;
@@ -183,13 +169,14 @@ function prismBarrel(facets: number): ReadablePolyhedron {
   });
 }
 
+/** High-count visual drum. Caps are decorative; the vertical facets are outcomes. */
 function drum(facets: number, family: 'drum' | 'representative', exact = true): ReadablePolyhedron {
-  const ring = Math.max(6, facets);
-  const height = 0.64;
+  const ring = facets;
+  const half = 0.42;
   const vertices: number[][] = [];
-  for (const y of [height, -height]) {
+  for (const y of [half, -half]) {
     for (let index = 0; index < ring; index += 1) {
-      const angle = (index / ring) * TAU;
+      const angle = index / ring * TAU;
       vertices.push([Math.cos(angle), y, Math.sin(angle)]);
     }
   }
@@ -198,7 +185,7 @@ function drum(facets: number, family: 'drum' | 'representative', exact = true): 
     const next = (index + 1) % ring;
     faces.push([index, next, ring + next, ring + index]);
   }
-  faces.push(Array.from({ length: ring }, (_entry, index) => index).reverse());
+  faces.push(Array.from({ length: ring }, (_entry, index) => ring - 1 - index));
   faces.push(Array.from({ length: ring }, (_entry, index) => ring + index));
   return finish(facets, vertices, faces, family, {
     exact,
@@ -207,15 +194,7 @@ function drum(facets: number, family: 'drum' | 'representative', exact = true): 
   });
 }
 
-/**
- * Builds a readable, convex presentation solid for a numeric randomizer.
- *
- * @remarks
- * This is intentionally presentation geometry. It never chooses the authoritative result.
- * Small and recognizable counts use dedicated solids; odd counts use a barrel so they have one
- * clear landing surface per logical value; large counts cap visual complexity while retaining the
- * requested side count in `requestedFacets`.
- */
+/** Presentation geometry only; authoritative outcomes are always supplied by Draftroll. */
 export function createReadablePolyhedron(
   facets: number,
   options: ReadablePolyhedronOptions = {},
@@ -224,13 +203,13 @@ export function createReadablePolyhedron(
     throw new Error('Facet count must be an integer from 1 to 10000');
   }
   const pointedLimit = Math.max(8, Math.round(options.pointedLimit ?? 30));
-  const maximumFacets = Math.max(12, Math.round(options.maximumFacets ?? 96));
+  const maximumFacets = Math.max(16, Math.round(options.maximumFacets ?? 72));
   if (facets === 1) return d1Cylinder();
-  if (facets === 3) return d3Cube();
+  if (facets === 3) return cube(3);
   if (facets === 4) return tetrahedron();
   if (facets === 5) return triangularPrism();
   if (facets === 6) return cube();
-  if (facets <= pointedLimit && facets % 2 === 0) return trapezohedron(facets);
+  if (facets <= pointedLimit && facets % 2 === 0) return bipyramid(facets);
   if (facets <= pointedLimit) return prismBarrel(facets);
   if (facets <= maximumFacets) return drum(facets, 'drum');
   const representative = drum(maximumFacets, 'representative', false);
