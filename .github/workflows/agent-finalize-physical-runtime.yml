@@ -54,6 +54,7 @@ jobs:
           src/physical-die-visuals.ts
           src/physical-die-mesh.ts
           src/roll-worker.ts
+          scripts/test-mixed-renderer.mjs
           scripts/test-visual-fallbacks.mjs
           tests/browser/specs/overlay.spec.ts
 
