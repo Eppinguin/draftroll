@@ -1,204 +1,227 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { mkdtemp, readFile } from 'node:fs/promises';
+import { runTsc } from './lib/load-typescript.mjs';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const projectRoot = resolve(import.meta.dirname, '..');
-const outputDirectory = await mkdtemp(join(tmpdir(), 'draftroll-late-events-'));
-const tsconfigPath = join(outputDirectory, 'tsconfig.json');
-const sourcePath = join(projectRoot, 'packages/client/src/index.ts');
-const protocolPath = join(projectRoot, 'packages/protocol/src/index.ts');
-const corePath = join(projectRoot, 'packages/core/src/index.ts');
+const projectRoot = resolve(new URL('..', import.meta.url).pathname);
+const tempRoot = await mkdtemp(join(tmpdir(), 'draftroll-late-events-'));
+const outDir = join(tempRoot, 'build');
+const configPath = join(tempRoot, 'tsconfig.json');
 
-await Bun.write(
-  tsconfigPath,
-  JSON.stringify({
-    compilerOptions: {
-      target: 'ES2023',
-      module: 'ES2022',
-      moduleResolution: 'Bundler',
-      outDir: outputDirectory,
-      rootDir: projectRoot,
-      skipLibCheck: true,
-      strict: true,
-      noEmitOnError: true,
-      types: ['node'],
-    },
-    include: [sourcePath, protocolPath, corePath],
-  }),
-);
+try {
+  await writeFile(
+    configPath,
+    JSON.stringify(
+      {
+        compilerOptions: {
+          target: 'ES2022',
+          module: 'CommonJS',
+          moduleResolution: 'Node',
+          rootDir: join(projectRoot, 'packages'),
+          outDir,
+          strict: true,
+          skipLibCheck: true,
+          esModuleInterop: true,
+          lib: ['ES2023', 'DOM', 'DOM.Iterable'],
+        },
+        include: [join(projectRoot, 'packages/**/*.ts')],
+      },
+      null,
+      2,
+    ),
+  );
 
-execFileSync('pnpm', ['exec', 'tsc', '-p', tsconfigPath], {
-  cwd: projectRoot,
-  stdio: 'inherit',
-});
+  const compile = runTsc(['-p', configPath], { cwd: projectRoot });
+  if (compile.status !== 0) {
+    process.stderr.write(compile.stdout);
+    process.stderr.write(compile.stderr);
+    throw new Error('TypeScript compilation failed');
+  }
+  await writeFile(join(outDir, 'package.json'), '{"type":"commonjs"}\n');
 
-const protocolModule = await import(
-  `${pathToFileURL(join(outputDirectory, 'packages/protocol/src/index.js')).href}?${Date.now()}`
-);
-const clientModule = await import(
-  `${pathToFileURL(join(outputDirectory, 'packages/client/src/index.js')).href}?${Date.now()}`
-);
+  const rendererModule = await import(pathToFileURL(join(outDir, 'renderer/src/index.js')).href);
+  const clientModule = await import(pathToFileURL(join(outDir, 'client/src/index.js')).href);
+  const protocolModule = await import(pathToFileURL(join(outDir, 'protocol/src/index.js')).href);
+  const { resolveLateEventPresentation, DraftrollRenderer } = rendererModule;
+  const { synchronizeRoomEvent } = clientModule;
+  const { decodeClientToServerEvent, decodeServerToClientEvent } = protocolModule;
 
-const { decodeServerToClientEvent } = protocolModule;
-const {
-  calculateAnimationStartBufferMs,
-  calculateClockSynchronisation,
-  calculateLateEventPresentation,
-  createSynchronizedEvent,
-  DEFAULT_LATE_EVENT_POLICY,
-} = clientModule;
-
-assert.equal(typeof calculateAnimationStartBufferMs, 'function');
-assert.equal(typeof calculateClockSynchronisation, 'function');
-assert.equal(typeof calculateLateEventPresentation, 'function');
-assert.equal(typeof createSynchronizedEvent, 'function');
-
-assert.equal(calculateAnimationStartBufferMs({ roundTripMs: 0, uncertaintyMs: 0 }), 80);
-assert.equal(calculateAnimationStartBufferMs({ roundTripMs: 300, uncertaintyMs: 20 }), 250);
-assert.equal(calculateAnimationStartBufferMs({ roundTripMs: 2_000, uncertaintyMs: 500 }), 500);
-
-const clock = calculateClockSynchronisation({
-  sentAtMs: 1_000,
-  receivedAtMs: 1_100,
-  serverTimeMs: 1_075,
-});
-assert.equal(clock.roundTripMs, 100);
-assert.equal(clock.offsetMs, 25);
-assert.equal(clock.uncertaintyMs, 50);
-
-const active = calculateLateEventPresentation({
-  nowMs: 2_000,
-  eventServerTimeMs: 1_750,
-  clockOffsetMs: 0,
-  animationStartBufferMs: 100,
-  animationDurationMs: 1_000,
-  policy: DEFAULT_LATE_EVENT_POLICY,
-});
-assert.equal(active.settleImmediately, false);
-assert.equal(active.seekToMs, 150);
-assert.equal(active.animationProgress, 0.15);
-
-const settled = calculateLateEventPresentation({
-  nowMs: 4_000,
-  eventServerTimeMs: 1_000,
-  clockOffsetMs: 0,
-  animationStartBufferMs: 100,
-  animationDurationMs: 1_000,
-  policy: DEFAULT_LATE_EVENT_POLICY,
-});
-assert.equal(settled.settleImmediately, true);
-assert.equal(settled.seekToMs, 1_000);
-assert.equal(settled.animationProgress, 1);
-
-const forcedAnimation = calculateLateEventPresentation({
-  nowMs: 4_000,
-  eventServerTimeMs: 1_000,
-  clockOffsetMs: 0,
-  animationStartBufferMs: 100,
-  animationDurationMs: 1_000,
-  policy: {
-    ...DEFAULT_LATE_EVENT_POLICY,
-    mode: 'animate',
-  },
-});
-assert.equal(forcedAnimation.settleImmediately, false);
-assert.ok(forcedAnimation.seekToMs < 1_000);
-
-const forcedSettle = calculateLateEventPresentation({
-  nowMs: 1_050,
-  eventServerTimeMs: 1_000,
-  clockOffsetMs: 0,
-  animationStartBufferMs: 100,
-  animationDurationMs: 1_000,
-  policy: {
-    ...DEFAULT_LATE_EVENT_POLICY,
-    mode: 'settle',
-  },
-});
-assert.equal(forcedSettle.settleImmediately, true);
-
-const synchronized = createSynchronizedEvent(
-  {
-    type: 'roll_result',
-    sequence: 7,
-    serverTimeMs: 10_000,
-    roomId: 'room',
-    result: {
-      id: 'roll',
-      formula: '1d20',
-      total: 11,
-      results: [11],
-      createdAt: '2026-01-01T00:00:00.000Z',
-      visibility: 'public',
-      metadata: {},
-    },
-  },
-  {
-    nowMs: 10_400,
-    clockOffsetMs: 0,
-    animationStartBufferMs: 100,
-    animationDurationMs: 1_000,
-    policy: DEFAULT_LATE_EVENT_POLICY,
-  },
-);
-assert.equal(synchronized.settleImmediately, false);
-assert.equal(synchronized.seekToMs, 300);
-assert.equal(synchronized.animationProgress, 0.3);
-
-const {
-  startLatenessMs: _startLatenessMs,
-  seekToMs: _seekToMs,
-  settleImmediately: _settleImmediately,
-  animationProgress: _animationProgress,
-  ...wireEvent
-} = synchronized;
-const decodedWire = decodeServerToClientEvent(
-  {
-    ...wireEvent,
-    replayed: false,
-  },
-  { allowLegacyResults: true },
-);
-assert.equal(decodedWire.success, true);
-
-const rendererSource = await readFile(join(projectRoot, 'src/main.ts'), 'utf8');
-assert.match(rendererSource, /function updatePlanVisuals/);
-assert.match(rendererSource, /const scale = planDisplayScale\(plan\)/);
-assert.match(rendererSource, /applyPlanTransform\(plan, time, scale\.x, scale\.z\)/);
-assert.match(
-  rendererSource,
-  /genericPhysicalVisuals\.forEach\(\(visual\) => visual\.update\(time, scale\.x, scale\.z\)\)/,
-);
-assert.match(rendererSource, /updatePlanVisuals\(plan, planTime\)/);
-assert.match(rendererSource, /impact\.time > planTime/);
-assert.match(rendererSource, /startLatenessMs/);
-assert.match(rendererSource, /Presenting settled result/);
-
-const workerSource = await readFile(join(projectRoot, 'apps/worker/src/index.ts'), 'utf8');
-assert.match(workerSource, /calculateAnimationStartBufferMs/);
-assert.match(workerSource, /roundTripMs \/ 2 \+ uncertaintyMs/);
-assert.match(workerSource, /MAX_ANIMATION_START_BUFFER_MS/);
-assert.doesNotMatch(workerSource, /serverStartTimeMs: Date\.now\(\) \+ 225/);
-
-console.log(
-  JSON.stringify(
+  assert.deepEqual(resolveLateEventPresentation({ elapsedMs: 0, animationDurationMs: 2800 }), {
+    seekToMs: 0,
+    settleImmediately: false,
+    mode: 'auto',
+  });
+  assert.deepEqual(resolveLateEventPresentation({ elapsedMs: 700, animationDurationMs: 2800 }), {
+    seekToMs: 700,
+    settleImmediately: false,
+    mode: 'seek',
+  });
+  assert.deepEqual(resolveLateEventPresentation({ elapsedMs: 2300, animationDurationMs: 2800 }), {
+    seekToMs: 2800,
+    settleImmediately: true,
+    mode: 'settled',
+  });
+  assert.deepEqual(
+    resolveLateEventPresentation({
+      elapsedMs: 2600,
+      animationDurationMs: 2800,
+      lateEvent: { mode: 'seek' },
+    }),
     {
-      ok: true,
-      tested: [
-        'clock synchronization offset and uncertainty',
-        'RTT-aware animation start buffer',
-        'late-event catch-up seeking',
-        'very-late settled presentation',
-        'explicit animate/settle policies',
-        'synchronized event wrapper',
-        'shared canonical/generated replay scaling',
-        'worker start-time policy',
-      ],
+      seekToMs: 2600,
+      settleImmediately: false,
+      mode: 'seek',
     },
-    null,
-    2,
-  ),
-);
+  );
+  assert.deepEqual(
+    resolveLateEventPresentation({
+      elapsedMs: 2600,
+      animationDurationMs: 2800,
+      lateEvent: { mode: 'replay' },
+    }),
+    {
+      seekToMs: 0,
+      settleImmediately: false,
+      mode: 'replay',
+    },
+  );
+
+  const calls = [];
+  const bridge = {
+    async roll(request) {
+      calls.push(request);
+      return {
+        results: (request.physical ?? []).map((visual) => visual.result),
+        total: 17,
+        replay: null,
+      };
+    },
+    getThemes() {
+      return [{ id: 'dragon', name: 'Wyrmfire' }];
+    },
+  };
+  const renderer = new DraftrollRenderer({ bridge });
+  const result = {
+    authority: 'server',
+    rollId: 'roll-late',
+    sequence: 1,
+    revision: 0,
+    expression: '1d20',
+    total: 17,
+    dice: [{ id: 'die-1', type: 'd20', sides: 20, result: 17, kept: true }],
+    operations: [],
+    createdAt: new Date(0).toISOString(),
+  };
+  await renderer.playRoll(result, { elapsedMs: 900, animationDurationMs: 2800 });
+  assert.equal(calls[0].seekToMs, 900);
+  assert.equal(calls[0].settleImmediately, false);
+  assert.equal(calls[0].lateMode, 'seek');
+  await renderer.playRoll(result, { elapsedMs: 2500, animationDurationMs: 2800 });
+  assert.equal(calls[1].seekToMs, 2800);
+  assert.equal(calls[1].settleImmediately, true);
+  assert.equal(calls[1].lateMode, 'settled');
+
+  const now = 10_000;
+  const synchronized = synchronizeRoomEvent(
+    {
+      type: 'roll_start',
+      protocolVersion: 2,
+      roomId: 'table',
+      eventSequence: 1,
+      rollId: 'roll-late',
+      sequence: 1,
+      actor: { participantId: 'p', sessionId: 's', name: 'Player', roles: [] },
+      visibility: { type: 'public' },
+      hidden: false,
+      summary: {
+        rollId: 'roll-late',
+        sequence: 1,
+        revision: 0,
+        actor: { participantId: 'p', sessionId: 's', name: 'Player', roles: [] },
+        createdAt: new Date(0).toISOString(),
+      },
+      result,
+      serverStartTimeMs: 8_700,
+      animationDurationMs: 2_800,
+      startBufferMs: 475,
+    },
+    200,
+    now,
+  );
+  assert.equal(synchronized.localStartTimeMs, 8_500);
+  assert.equal(synchronized.elapsedMs, 1_500);
+  assert.equal(synchronized.animationProgress, 1_500 / 2_800);
+
+  assert.equal(
+    decodeClientToServerEvent({
+      type: 'client_ready',
+      rendererReady: true,
+      themesReady: true,
+      roundTripMs: 120,
+      clockUncertaintyMs: 18,
+    }).success,
+    true,
+  );
+  const {
+    localStartTimeMs: _localStartTimeMs,
+    elapsedMs: _elapsedMs,
+    animationProgress: _animationProgress,
+    ...wireEvent
+  } = synchronized;
+  const decodedWire = decodeServerToClientEvent(
+    {
+      ...wireEvent,
+      replayed: false,
+    },
+    { allowLegacyResults: true },
+  );
+  assert.equal(decodedWire.success, true);
+
+  const rendererSource = await readFile(join(projectRoot, 'src/main.ts'), 'utf8');
+  assert.match(rendererSource, /function updatePlanVisuals/);
+  assert.match(rendererSource, /const scale = planDisplayScale\(plan\)/);
+  assert.match(rendererSource, /applyPlanTransform\(plan, time, scale\.x, scale\.z\)/);
+  assert.match(
+    rendererSource,
+    /genericPhysicalVisuals\.forEach\(\(visual\) => visual\.update\(time, scale\.x, scale\.z\)\)/,
+  );
+  assert.match(rendererSource, /updatePlanVisuals\(plan, planTime\)/);
+  assert.match(rendererSource, /impact\.time > planTime/);
+  assert.match(rendererSource, /startLatenessMs/);
+  assert.match(rendererSource, /Presenting settled result/);
+
+  const workerSource = await readFile(join(projectRoot, 'apps/worker/src/index.ts'), 'utf8');
+  assert.match(workerSource, /calculateAnimationStartBufferMs/);
+  assert.match(workerSource, /roundTripMs \/ 2 \+ uncertaintyMs/);
+  assert.match(workerSource, /MAX_ANIMATION_START_BUFFER_MS/);
+  assert.doesNotMatch(workerSource, /serverStartTimeMs: Date\.now\(\) \+ 225/);
+
+  const rootPackage = JSON.parse(await readFile(join(projectRoot, 'package.json'), 'utf8'));
+  assert.equal(rootPackage.version, '0.1.0');
+  assert.equal(protocolModule.DRAFTROLL_PROTOCOL_VERSION, 2);
+
+  console.log(
+    JSON.stringify(
+      {
+        ok: true,
+        tested: [
+          'clock-offset elapsed calculation',
+          'moderately late replay seeking',
+          'adaptive settled presentation',
+          'forced full replay and forced seek modes',
+          'bridge seek propagation',
+          'client timing diagnostics',
+          'shared canonical/generated replay scaling',
+          'adaptive Durable Object start buffers',
+          'no package or protocol version bump',
+        ],
+      },
+      null,
+      2,
+    ),
+  );
+} finally {
+  await rm(tempRoot, { recursive: true, force: true });
+}
