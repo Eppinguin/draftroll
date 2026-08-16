@@ -45,6 +45,23 @@ new_source_assert = """  assert.doesNotMatch(rendererSource, /bridge\\.setDie|br
 if modifier.count(old_source_assert) != 1:
     raise SystemExit(f'modifier stale setter source assertion: expected one match, found {modifier.count(old_source_assert)}')
 modifier = modifier.replace(old_source_assert, new_source_assert, 1)
+old_empty_assert = """  assert.match(
+    browserHostSource,
+    /dice\\.length === 0 && activeFallbackSpecs\\.length === 0/,
+    'fallback-only modifier chains must remain appendable',
+  );"""
+new_empty_assert = """  assert.match(
+    browserHostSource,
+    /dice\\.length === 0 && genericPhysicalVisuals\\.length === 0 && fallbackVisuals\\.length === 0/,
+    'table emptiness must account for canonical, generated/custom physical, and fallback visuals',
+  );"""
+if modifier.count(old_empty_assert) != 1:
+    raise SystemExit(f'modifier table-empty assertion: expected one match, found {modifier.count(old_empty_assert)}')
+modifier = modifier.replace(old_empty_assert, new_empty_assert, 1)
+modifier = modifier.replace(
+    "'fallback-only follow-up waves must keep prior visuals static'",
+    "'non-physical follow-up waves must keep prior visuals static'",
+)
 modifier = modifier.replace(
     "'hosts can opt into the legacy simultaneous presentation'",
     "'hosts can opt into a single simultaneous presentation'",
