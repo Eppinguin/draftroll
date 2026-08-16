@@ -17,4 +17,44 @@ replace_once(
     'table-draw non-physical render hint',
 )
 
+replace_once(
+    'scripts/test-coin-physics.mjs',
+    """          target: 'ES2022',
+          module: 'CommonJS',
+          moduleResolution: 'Node',
+          rootDir: join(projectRoot, 'src'),
+          outDir,
+          strict: true,
+          skipLibCheck: true,
+          esModuleInterop: true,""",
+    """          target: 'ES2023',
+          lib: ['ES2023', 'DOM'],
+          module: 'CommonJS',
+          moduleResolution: 'Node',
+          rootDir: projectRoot,
+          outDir,
+          strict: true,
+          skipLibCheck: true,
+          esModuleInterop: true,""",
+    'coin physics compiler root/lib',
+)
+replace_once(
+    'scripts/test-coin-physics.mjs',
+    """  const { createDiePhysicsShape } = require(join(outDir, 'physics-shapes.js'));
+  const {
+    markUnobstructedTableDice,
+    minimumRestingAlignment,
+    readRestingAlignment,
+    releaseUnstableRestPose,
+  } = require(join(outDir, 'resting-physics.js'));""",
+    """  const { createDiePhysicsShape } = require(join(outDir, 'src/physics-shapes.js'));
+  const {
+    markUnobstructedTableDice,
+    minimumRestingAlignment,
+    readRestingAlignment,
+    releaseUnstableRestPose,
+  } = require(join(outDir, 'src/resting-physics.js'));""",
+    'coin physics compiled module paths',
+)
+
 print('Remaining core test expectations migrated.')
