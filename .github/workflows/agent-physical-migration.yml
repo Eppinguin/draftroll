@@ -52,6 +52,12 @@ jobs:
               '    const face = source.slice();',
               'convex face copy',
           )
+          replace(
+              'src/physical-dice.ts',
+              '''  if (input.collider.kind === 'convex') {\n    if (input.collider.vertices.length < 4 || input.collider.faces.length < 4) {\n      throw new Error('Convex physical dice require at least four vertices and four faces');\n    }\n    for (const face of input.collider.faces) {\n      if (\n        face.length < 3 ||\n        face.some(\n          (index) =>\n            !Number.isSafeInteger(index) || index < 0 || index >= input.collider.vertices.length,\n        )\n      ) {\n        throw new Error('Physical die collider contains an invalid face');\n      }\n    }\n  }''',
+              '''  if (input.collider.kind === 'convex') {\n    const collider = input.collider;\n    if (collider.vertices.length < 4 || collider.faces.length < 4) {\n      throw new Error('Convex physical dice require at least four vertices and four faces');\n    }\n    for (const face of collider.faces) {\n      if (\n        face.length < 3 ||\n        face.some(\n          (index) => !Number.isSafeInteger(index) || index < 0 || index >= collider.vertices.length,\n        )\n      ) {\n        throw new Error('Physical die collider contains an invalid face');\n      }\n    }\n  }''',
+              'custom convex collider narrowing',
+          )
 
           replace(
               'packages/sdk/src/deck.ts',
