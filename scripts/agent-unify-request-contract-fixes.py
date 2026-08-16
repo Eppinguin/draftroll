@@ -128,6 +128,22 @@ if late.count(setters) != 1:
     raise SystemExit(f'late-event bridge setters: expected one match, found {late.count(setters)}')
 late_path.write_text(late.replace(setters, '', 1))
 
+# Common-dice helpers use physical geometry hints for die-like randomizers. Fate is a physical d6;
+# percentile is a physical d100. Only token/card helpers are non-physical fallbacks.
+common_path = Path('scripts/test-common-dice-helpers.mjs')
+common = common_path.read_text()
+if common.count("  assert.equal(fate.renderAs, 'fate');") != 1:
+    raise SystemExit('Fate common-die render hint assertion missing')
+common = common.replace("  assert.equal(fate.renderAs, 'fate');", "  assert.equal(fate.renderAs, 'd6');", 1)
+if common.count("  assert.equal(percentile.renderAs, 'percentile');") != 1:
+    raise SystemExit('percentile common-die render hint assertion missing')
+common = common.replace(
+    "  assert.equal(percentile.renderAs, 'percentile');",
+    "  assert.equal(percentile.renderAs, 'd100');",
+    1,
+)
+common_path.write_text(common)
+
 # Remove old wording from the public renderer options as well.
 renderer_path = Path('packages/renderer/src/index.ts')
 renderer = renderer_path.read_text()
