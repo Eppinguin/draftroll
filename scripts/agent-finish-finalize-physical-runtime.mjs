@@ -61,6 +61,18 @@ function replaceOnce(source, search, replacement, label) {
 }
 
 {
+  const path = 'scripts/test-character-client.mjs';
+  let source = await readFile(path, 'utf8');
+  source = replaceOnce(
+    source,
+    `assert.match(worker, /definition:\\s*entry\\.definition/);`,
+    `assert.match(worker, /definitionKey:\\s*string/);\nassert.match(worker, /definitions = new Map<string, PhysicalDieDefinition>/);\nassert.match(worker, /definitions\\.get\\(entry\\.definitionKey\\)/);`,
+    'worker definition registry regression',
+  );
+  await writeFile(path, source);
+}
+
+{
   const path = 'tests/browser/specs/overlay.spec.ts';
   let source = await readFile(path, 'utf8');
   source = replaceOnce(
