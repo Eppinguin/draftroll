@@ -47,7 +47,7 @@ jobs:
               path.write_text(source.replace(before, after, 1))
 
           replace(
-              'src/physical-dices.ts',
+              'src/physical-dice.ts',
               '    const face = [...source];',
               '    const face = source.slice();',
               'convex face copy',
@@ -127,7 +127,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Format changed sources
-        run: pnpm exec oxfmt src/main.ts src/physical-die-visuals.ts src/physical-dices.ts packages/sdk/src/deck.ts src/fallback-visuals-base.ts src/cards-demo.ts scripts/test-visual-fallbacks.mjs
+        run: pnpm exec oxfmt src/main.ts src/physical-die-visuals.ts src/physical-dice.ts packages/sdk/src/deck.ts src/fallback-visuals-base.ts src/cards-demo.ts scripts/test-visual-fallbacks.mjs
       - name: Lint
         run: env -u GITHUB_ACTIONS pnpm lint
       - name: Typecheck packages
