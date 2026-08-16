@@ -1,0 +1,62 @@
+name: Agent physical theme API migration
+
+on:
+  push:
+    branches:
+      - agent/dicebox-learnings-cards
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/dicebox-learnings-cards
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.14.0'
+      - name: Check migration syntax
+        run: node --check scripts/agent-physical-theme-api.mjs
+      - name: Apply guarded migration
+        run: node scripts/agent-physical-theme-api.mjs
+      - name: Remove one-time migration files
+        run: rm -f scripts/agent-physical-theme-api.mjs .github/workflows/agent-physical-theme-api.yml .agent-physical-theme-api-trigger
+      - name: Install pnpm
+        run: npm install --global pnpm@11.17.0
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Format changed sources
+        run: pnpm exec oxfmt packages/themes/src/index.ts packages/renderer/src/index.ts src/runtime-themes.ts src/physical-die-visuals.ts src/physical-die-mesh.ts src/main.ts scripts/test-runtime-themes.mjs scripts/test-visual-fallbacks.mjs
+      - name: Lint
+        run: env -u GITHUB_ACTIONS pnpm lint
+      - name: Package typecheck
+        run: pnpm check:packages
+      - name: Browser engine typecheck
+        run: pnpm exec tsc --noEmit
+      - name: TSDoc check
+        run: pnpm check:docs
+      - name: Runtime theme regression
+        run: pnpm test:themes
+      - name: Physical architecture smoke
+        run: pnpm test:visual-fallbacks
+      - name: Mixed renderer regression
+        run: pnpm test:mixed-renderer
+      - name: Performance source regression
+        run: pnpm test:performance
+      - name: Commit validated API migration
+        run: |
+          if git diff --quiet; then
+            echo "No migration changes produced"
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "make physical dice the modern renderer theme API"
+          git push origin HEAD:agent/dicebox-learnings-cards
