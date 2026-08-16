@@ -1,4 +1,4 @@
-name: Agent physical theme API migration
+name: Agent clean physical renderer migration
 
 on:
   push:
@@ -12,7 +12,7 @@ jobs:
   migrate:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
         with:
@@ -21,42 +21,21 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22.14.0'
-      - name: Fix guarded regex helper
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          path = Path('scripts/agent-physical-theme-api.mjs')
-          source = path.read_text()
-          before = """async function replaceRegex(path, pattern, replacement, label) {
-            const source = await readFile(path, 'utf8');
-            const matches = [...source.matchAll(pattern)];
-            if (matches.length !== 1) throw new Error(`${label}: expected one match, found ${matches.length}`);
-            await writeFile(path, source.replace(pattern, replacement));
-          }"""
-          after = """async function replaceRegex(path, pattern, replacement, label) {
-            const source = await readFile(path, 'utf8');
-            const match = source.match(pattern);
-            if (!match) throw new Error(`${label}: expected one match, found 0`);
-            const remainder = source.slice((match.index ?? 0) + match[0].length);
-            if (remainder.match(pattern)) throw new Error(`${label}: expected one match, found more than 1`);
-            await writeFile(path, source.replace(pattern, replacement));
-          }"""
-          if source.count(before) != 1:
-              raise SystemExit(f'regex helper: expected one match, found {source.count(before)}')
-          path.write_text(source.replace(before, after, 1))
-          PY
-      - name: Check migration syntax
-        run: node --check scripts/agent-physical-theme-api.mjs
-      - name: Apply guarded migration
-        run: node scripts/agent-physical-theme-api.mjs
+      - name: Apply breaking pre-release migration
+        run: python scripts/agent-clean-physical-api.py
       - name: Remove one-time migration files
-        run: rm -f scripts/agent-physical-theme-api.mjs .github/workflows/agent-physical-theme-api.yml .agent-physical-theme-api-trigger
+        run: rm -f scripts/agent-clean-physical-api.py scripts/agent-physical-theme-api.mjs .github/workflows/agent-physical-theme-api.yml .agent-physical-theme-api-trigger
       - name: Install pnpm
         run: npm install --global pnpm@11.17.0
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Format changed sources
-        run: pnpm exec oxfmt packages/themes/src/index.ts packages/renderer/src/index.ts src/runtime-themes.ts src/physical-die-visuals.ts src/physical-die-mesh.ts src/main.ts scripts/test-runtime-themes.mjs scripts/test-visual-fallbacks.mjs
+        run: pnpm exec oxfmt packages/themes/src/index.ts packages/renderer/src/index.ts packages/sdk/src/builders.ts src/runtime-themes.ts src/physical-die-visuals.ts src/physical-die-mesh.ts src/fallback-visuals.ts src/dice.ts src/main.ts scripts/test-runtime-themes.mjs scripts/test-visual-fallbacks.mjs scripts/test-mixed-renderer.mjs
+      - name: Reject legacy physical adapters
+        run: |
+          ! grep -R "spinner" packages/renderer/src src/fallback-visuals.ts src/physical-die-visuals.ts
+          ! grep -R "PhysicalFallback" src/physical-die-visuals.ts src/main.ts
+          ! grep -R "physicalFallbackReplay" src/main.ts
       - name: Lint
         run: env -u GITHUB_ACTIONS pnpm lint
       - name: Package typecheck
@@ -71,9 +50,13 @@ jobs:
         run: pnpm test:visual-fallbacks
       - name: Mixed renderer regression
         run: pnpm test:mixed-renderer
+      - name: Generated polyhedra regression
+        run: pnpm test:generated-polyhedra
+      - name: Cards regression
+        run: pnpm test:cards-demo
       - name: Performance source regression
         run: pnpm test:performance
-      - name: Commit validated API migration
+      - name: Commit validated clean architecture
         run: |
           if git diff --quiet; then
             echo "No migration changes produced"
@@ -82,5 +65,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "make physical dice the modern renderer theme API"
+          git commit -m "make physical dice the only die renderer path"
           git push origin HEAD:agent/dicebox-learnings-cards
