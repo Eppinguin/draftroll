@@ -23,17 +23,27 @@ jobs:
         with:
           node-version: 22.14.0
 
-      - name: Allow follow-up recovery migration
+      - name: Normalize one-time migration guards
         run: |
           python3 - <<'PY'
           from pathlib import Path
           path = Path('scripts/agent-streamline-physical-runtime.mjs')
           text = path.read_text()
-          old = "if (/buildRollPlanSync|cloneDynamicBody|contactSimilarity|enforceBodiesBounds/.test(main)) {"
-          new = "if (/cloneDynamicBody|contactSimilarity|enforceBodiesBounds/.test(main)) {"
-          if text.count(old) != 1:
-              raise SystemExit(f'planner guard expected once, found {text.count(old)}')
-          path.write_text(text.replace(old, new))
+
+          old_guard = "if (/buildRollPlanSync|cloneDynamicBody|contactSimilarity|enforceBodiesBounds/.test(main)) {"
+          new_guard = "if (/cloneDynamicBody|contactSimilarity/.test(main)) {"
+          if text.count(old_guard) != 1:
+              raise SystemExit(f'planner guard expected once, found {text.count(old_guard)}')
+          text = text.replace(old_guard, new_guard)
+
+          start_marker = "main = replaceRegexOnce(\n  main,\n  /function enforceBodiesBounds"
+          end_marker = "main = replaceRegexOnce(\n  main,\n  /function spawnGenericPhysicalVisuals"
+          start = text.find(start_marker)
+          end = text.find(end_marker, start + 1)
+          if start < 0 or end < 0:
+              raise SystemExit(f'live-world bounds removal block not found: start={start}, end={end}')
+          text = text[:start] + text[end:]
+          path.write_text(text)
           PY
 
       - name: Apply physical runtime cleanup
