@@ -29,6 +29,12 @@ function replaceOnce(source, search, replacement, label) {
   );
   source = replaceOnce(
     source,
+    `    targetingMethod: activeTargeting.length === 1 ? activeTargeting[0][0] : 'mixed',`,
+    `    targetingMethod: activeTargeting.length === 1 ? activeTargeting[0] : 'mixed',`,
+    'targeting strategy scalar',
+  );
+  source = replaceOnce(
+    source,
     `        physicalIndex: number;\n        implementation: 'canonical' | 'generated' | 'custom';`,
     `        physicalIndex: number;\n        sides: number;\n        implementation: 'canonical' | 'generated' | 'custom';`,
     'snapshot sides type',
