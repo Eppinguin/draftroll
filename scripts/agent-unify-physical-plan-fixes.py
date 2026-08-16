@@ -16,7 +16,11 @@ renderer_path.write_text(renderer.replace(block, '', 1))
 
 main_path = Path('src/main.ts')
 main = main_path.read_text()
+main = main.replace("from './physical-dices';", "from './physical-dice';")
 main = main.replace('clearAdditionalPhysicalVisuals', 'clearGenericPhysicalVisuals')
 main_path.write_text(main)
 
+lines = main.splitlines()
+for index in range(2618, min(len(lines), 2632)):
+    print(f'{index + 1}: {lines[index]}')
 print('Unified-plan follow-up cleanup applied.')
