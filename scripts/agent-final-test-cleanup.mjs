@@ -19,6 +19,18 @@ function replaceOnce(source, search, replacement, label) {
 }
 
 {
+  const path = 'scripts/test-natural-target-physics.mjs';
+  let source = await readFile(path, 'utf8');
+  source = replaceOnce(
+    source,
+    `assert.match(main, /targetingMethod: 'shape-symmetry'/);`,
+    `assert.match(main, /targetingMethod: activeTargeting\\.length === 1/);\nassert.match(main, /targetingCounts/);\nassert.match(main, /'symmetry', 'relabel', 'fixed'/);\nassert.doesNotMatch(main, /targetingMethod: 'shape-symmetry'/);`,
+    'targeting diagnostics strategy regression',
+  );
+  await writeFile(path, source);
+}
+
+{
   const path = 'scripts/test-mixed-renderer.mjs';
   let source = await readFile(path, 'utf8');
   source = replaceOnce(
