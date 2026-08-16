@@ -64,5 +64,16 @@ count = source.split(replayBlockOld).length - 1;
 if (count !== 1) throw new Error(`replay migration block expected once, found ${count}`);
 source = source.replace(replayBlockOld, replayBlockNew);
 
+const effectBlock = `  source = replaceAllExact(
+    source,
+    \`const canonicalIndex = activeCanonicalPhysicalIndexes.indexOf(physicalIndex);\`,
+    \`const canonicalIndex = physicalTable.canonicalIndex(physicalIndex);\`,
+    1,
+    'remaining effect canonical registry lookup',
+  );\n`;
+count = source.split(effectBlock).length - 1;
+if (count !== 1) throw new Error(`redundant effect migration block expected once, found ${count}`);
+source = source.replace(effectBlock, '');
+
 await writeFile(path, source);
 console.log('final physical migration guards normalized');
