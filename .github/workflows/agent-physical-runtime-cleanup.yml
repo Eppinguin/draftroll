@@ -49,16 +49,25 @@ jobs:
         run: node --check scripts/agent-physical-runtime-cleanup.mjs
       - name: Apply guarded migration
         run: node scripts/agent-physical-runtime-cleanup.mjs
-      - name: Apply runtime cleanup lint fix
+      - name: Apply runtime cleanup source fixes
         run: |
           python - <<'PY'
           from pathlib import Path
+
           path = Path('src/physical-launch.ts')
           source = path.read_text()
           before = 'angularVelocity: angularVelocity as [number, number, number],'
           after = 'angularVelocity: [angularVelocity[0], angularVelocity[1], angularVelocity[2]],'
           if source.count(before) != 1:
               raise SystemExit(f'angular velocity tuple: expected one match, found {source.count(before)}')
+          path.write_text(source.replace(before, after, 1))
+
+          path = Path('src/physical-die-mesh.ts')
+          source = path.read_text()
+          before = 'score: normal.dot(new THREE.Vector3(...outcome.settledUp)),'
+          after = '''score: Math.max(\n          ...outcome.supportNormals.map((support) =>\n            -normal.dot(new THREE.Vector3(...support)),\n          ),\n        ),'''
+          if source.count(before) != 1:
+              raise SystemExit(f'support-state score: expected one match, found {source.count(before)}')
           path.write_text(source.replace(before, after, 1))
           PY
       - name: Remove one-time migration files
