@@ -102,6 +102,13 @@ old_launch = "  assert.match(mainSource, /createLaunchStatesForGroup/);"
 new_launch = "  assert.match(mainSource, /createMixedPhysicalLaunchStates/);"
 if concurrent.count(old_launch) != 1:
     raise SystemExit(f'concurrent launch assertion: expected one match, found {concurrent.count(old_launch)}')
-concurrent_path.write_text(concurrent.replace(old_launch, new_launch, 1))
+concurrent = concurrent.replace(old_launch, new_launch, 1)
+old_locked = "  assert.match(workerSource, /updateLockedBodies/);"
+new_locked = """  assert.match(workerSource, /lockedMotion: readLockedMotion\\(request, lockedCount\\)/);
+  const plannerSource = await readFile(join(projectRoot, 'src/physical-roll-planner.ts'), 'utf8');
+  assert.match(plannerSource, /updateLockedBodies/);"""
+if concurrent.count(old_locked) != 1:
+    raise SystemExit(f'locked-body ownership assertion: expected one match, found {concurrent.count(old_locked)}')
+concurrent_path.write_text(concurrent.replace(old_locked, new_locked, 1))
 
 print('Unified-plan follow-up cleanup applied.')
