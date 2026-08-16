@@ -34,6 +34,21 @@ new_fate = """    explosionCalls.map((request) => request.physical.map((visual) 
 if modifier.count(old_fate) != 1:
     raise SystemExit(f'Fate physical sequencing assertion: expected one match, found {modifier.count(old_fate)}')
 modifier = modifier.replace(old_fate, new_fate, 1)
+old_source_assert = """  assert.match(
+    rendererSource,
+    /numericResults\\.length > 0 && presentationMode === 'replace'/,
+    'additive stages must bypass bridge setters that rebuild the table',
+  );"""
+new_source_assert = """  assert.doesNotMatch(rendererSource, /bridge\\.setDie|bridge\\.setQuantity|bridge\\.setTheme/);
+  assert.match(rendererSource, /this\\.bridge\\.roll\\(\\{/);
+  assert.match(rendererSource, /presentationMode/);"""
+if modifier.count(old_source_assert) != 1:
+    raise SystemExit(f'modifier stale setter source assertion: expected one match, found {modifier.count(old_source_assert)}')
+modifier = modifier.replace(old_source_assert, new_source_assert, 1)
+modifier = modifier.replace(
+    "'hosts can opt into the legacy simultaneous presentation'",
+    "'hosts can opt into a single simultaneous presentation'",
+)
 if re.search(r'[A-Za-z_]\w*Calls(?:\[\d+\])?\.results', modifier):
     raise SystemExit('modifier sequencing still inspects removed bridge request.results')
 modifier_path.write_text(modifier)
@@ -87,5 +102,14 @@ setters = """    setDie() {},
 if late.count(setters) != 1:
     raise SystemExit(f'late-event bridge setters: expected one match, found {late.count(setters)}')
 late_path.write_text(late.replace(setters, '', 1))
+
+# Remove old wording from the public renderer options as well.
+renderer_path = Path('packages/renderer/src/index.ts')
+renderer = renderer_path.read_text()
+renderer = renderer.replace(
+    '   * Defaults to staged; simultaneous preserves the legacy one-throw behavior.\n',
+    '   * Defaults to staged; simultaneous presents all modifier stages in one throw.\n',
+)
+renderer_path.write_text(renderer)
 
 print('Remaining request-contract tests migrated.')
