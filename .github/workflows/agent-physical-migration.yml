@@ -21,10 +21,21 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22.12.0'
+      - name: Remove obsolete migration guard
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/agent-physical-main-migration.mjs')
+          source = path.read_text()
+          block = """main = replaceOnce(\n  main,\n  `  diagnostics?: RollPlanDiagnostics;\\n}`,\n  `  diagnostics?: RollPlanDiagnostics;\\n}`,\n  'roll plan stable anchor',\n);\n"""
+          if block not in source:
+              raise SystemExit('obsolete migration guard not found')
+          path.write_text(source.replace(block, '', 1))
+          PY
       - name: Apply guarded migration
         run: node scripts/agent-physical-main-migration.mjs
       - name: Remove one-time migration files
-        run: rm -f scripts/agent-physical-main-migration.mjs .github/workflows/agent-physical-migration.yml
+        run: rm -f scripts/agent-physical-main-migration.mjs .github/workflows/agent-physical-migration.yml .agent-physical-migration-trigger
       - name: Install pnpm
         run: corepack enable && corepack prepare pnpm@11.17.0 --activate
       - name: Install dependencies
