@@ -37,4 +37,22 @@ targeted = "\n".join([
     "",
 ])
 source = source[:start] + targeted + source[end:]
+
+start_marker = "replace_once(\n    'src/main.ts',\n    \"\"\"            physicalCount: activeOutcomes.length,\"\"\""
+end_marker = "    'result summary physical count',\n)\n"
+start = source.find(start_marker)
+end = source.find(end_marker, start)
+if start < 0 or end < 0:
+    raise SystemExit('physical-count codemod block not found')
+end += len(end_marker)
+targeted = "\n".join([
+    "replace_all(",
+    "    'src/main.ts',",
+    "    '            physicalCount: activeOutcomes.length,',",
+    "    '            physicalCount: activePhysicalSpecs.length,',",
+    ")",
+    "",
+])
+source = source[:start] + targeted + source[end:]
+
 path.write_text(source)
