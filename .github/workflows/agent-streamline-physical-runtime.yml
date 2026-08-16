@@ -23,12 +23,29 @@ jobs:
         with:
           node-version: 22.14.0
 
+      - name: Allow follow-up recovery migration
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/agent-streamline-physical-runtime.mjs')
+          text = path.read_text()
+          old = "if (/buildRollPlanSync|cloneDynamicBody|contactSimilarity|enforceBodiesBounds/.test(main)) {"
+          new = "if (/cloneDynamicBody|contactSimilarity|enforceBodiesBounds/.test(main)) {"
+          if text.count(old) != 1:
+              raise SystemExit(f'planner guard expected once, found {text.count(old)}')
+          path.write_text(text.replace(old, new))
+          PY
+
       - name: Apply physical runtime cleanup
         run: node scripts/agent-streamline-physical-runtime.mjs
+
+      - name: Finish shared planner recovery path
+        run: node scripts/agent-finish-physical-runtime.mjs
 
       - name: Remove one-time migration files
         run: |
           rm scripts/agent-streamline-physical-runtime.mjs
+          rm scripts/agent-finish-physical-runtime.mjs
           rm .github/workflows/agent-streamline-physical-runtime.yml
           rm .agent-streamline-physical-runtime-trigger
 
