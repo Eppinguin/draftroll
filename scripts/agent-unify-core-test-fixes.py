@@ -57,4 +57,20 @@ replace_once(
     'coin physics compiled module paths',
 )
 
+replace_once(
+    'scripts/test-character-client.mjs',
+    "assert.match(renderer, /kinds:\\s*physicalKinds/);",
+    """assert.match(renderer, /physical,\\s*fallbacks,/);
+assert.doesNotMatch(renderer, /kinds:\\s*physicalKinds|results:\\s*numericResults/);""",
+    'character client unified physical bridge assertion',
+)
+replace_once(
+    'scripts/test-character-client.mjs',
+    "assert.match(worker, /createDiePhysicsShape\\(kinds\\[index\\]\\)/);",
+    """assert.match(worker, /entries:\\s*PlanEntry\\[\\]/);
+assert.match(worker, /definition:\\s*entry\\.definition/);
+assert.doesNotMatch(worker, /createDiePhysicsShape\\(kinds\\[index\\]\\)/);""",
+    'character client unified worker assertion',
+)
+
 print('Remaining core test expectations migrated.')
