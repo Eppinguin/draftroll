@@ -36,14 +36,16 @@ jobs:
         run: python scripts/agent-unify-physical-plan.py
       - name: Apply follow-up cleanup
         run: python scripts/agent-unify-physical-plan-fixes.py
+      - name: Migrate remaining request-contract tests
+        run: python scripts/agent-unify-request-contract-fixes.py
       - name: Remove one-time migration files
-        run: rm -f scripts/agent-unify-physical-plan.py scripts/agent-unify-physical-plan-fixes.py .github/workflows/agent-unify-physical-plan.yml .agent-unify-physical-plan-trigger
+        run: rm -f scripts/agent-unify-physical-plan.py scripts/agent-unify-physical-plan-fixes.py scripts/agent-unify-request-contract-fixes.py .github/workflows/agent-unify-physical-plan.yml .agent-unify-physical-plan-trigger
       - name: Install pnpm
         run: npm install --global pnpm@11.17.0
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Format migrated sources
-        run: pnpm exec oxfmt src/main.ts src/roll-worker.ts src/physical-die-visuals.ts src/physical-roll-planner.ts packages/renderer/src/index.ts scripts/test-visual-fallbacks.mjs scripts/test-natural-target-physics.mjs scripts/test-concurrent-table-rolls.mjs scripts/test-runtime-themes.mjs scripts/test-modifier-sequencing.mjs
+        run: pnpm exec oxfmt src/main.ts src/roll-worker.ts src/physical-die-visuals.ts src/physical-roll-planner.ts packages/renderer/src/index.ts scripts/test-visual-fallbacks.mjs scripts/test-natural-target-physics.mjs scripts/test-concurrent-table-rolls.mjs scripts/test-runtime-themes.mjs scripts/test-modifier-sequencing.mjs scripts/test-completion-api.mjs scripts/test-late-events.mjs
       - name: Reject pre-release compatibility seams
         run: |
           if grep -R "AdditionalPhysical\|additionalPhysical\|getAdditionalPhysical\|commitAdditionalPhysical\|hasPendingAdditionalPhysical\|hasConfiguredAdditionalPhysical" src packages/renderer/src; then exit 1; fi
