@@ -34,8 +34,10 @@ jobs:
           PY
       - name: Apply unified physical plan migration
         run: python scripts/agent-unify-physical-plan.py
+      - name: Apply follow-up cleanup
+        run: python scripts/agent-unify-physical-plan-fixes.py
       - name: Remove one-time migration files
-        run: rm -f scripts/agent-unify-physical-plan.py .github/workflows/agent-unify-physical-plan.yml .agent-unify-physical-plan-trigger
+        run: rm -f scripts/agent-unify-physical-plan.py scripts/agent-unify-physical-plan-fixes.py .github/workflows/agent-unify-physical-plan.yml .agent-unify-physical-plan-trigger
       - name: Install pnpm
         run: npm install --global pnpm@11.17.0
       - name: Install dependencies
@@ -44,10 +46,10 @@ jobs:
         run: pnpm exec oxfmt src/main.ts src/roll-worker.ts src/physical-die-visuals.ts src/physical-roll-planner.ts packages/renderer/src/index.ts scripts/test-visual-fallbacks.mjs scripts/test-natural-target-physics.mjs
       - name: Reject pre-release compatibility seams
         run: |
-          ! grep -R "AdditionalPhysical\|additionalPhysical\|getAdditionalPhysical\|commitAdditionalPhysical\|hasPendingAdditionalPhysical\|hasConfiguredAdditionalPhysical" src packages/renderer/src scripts/test-visual-fallbacks.mjs
-          ! grep -R "candidateAttempts\|candidateSearchMs\|assistedDiceCount\|maximumAssistAngleRadians\|continuityBlendedDiceCount" src/main.ts src/roll-worker.ts
-          ! grep -R "setResults:\|clearResults:\|setDie:\|setQuantity:\|setTheme:" src/main.ts packages/renderer/src/index.ts
-          ! grep -R "First die kind for backwards compatibility" src/main.ts
+          if grep -R "AdditionalPhysical\|additionalPhysical\|getAdditionalPhysical\|commitAdditionalPhysical\|hasPendingAdditionalPhysical\|hasConfiguredAdditionalPhysical" src packages/renderer/src; then exit 1; fi
+          if grep -R "candidateAttempts\|candidateSearchMs\|assistedDiceCount\|maximumAssistAngleRadians\|continuityBlendedDiceCount" src/main.ts src/roll-worker.ts; then exit 1; fi
+          if grep -R "setResults:\|clearResults:\|setDie:\|setQuantity:\|setTheme:" src/main.ts packages/renderer/src/index.ts; then exit 1; fi
+          if grep -R "First die kind for backwards compatibility" src/main.ts; then exit 1; fi
       - name: Lint
         run: env -u GITHUB_ACTIONS pnpm lint
       - name: Package typecheck
