@@ -234,9 +234,18 @@ replace_once(
     'sdk demo physical theme schema',
 )
 
-# The source-level smoke test must no longer require a reverse-side coin fallback field.
+# Source-level smoke coverage follows the direct physical presentation contract, never the removed
+# metadata adapter keys.
 remove_once(
     'scripts/test-visual-fallbacks.mjs',
     'assert.match(visualBase, /spec\\.oppositeLabel/);\n',
     'visual fallback opposite label assertion',
+)
+replace_once(
+    'scripts/test-visual-fallbacks.mjs',
+    'assert.match(physicalVisuals, /draftrollPhysicalPresentation/);',
+    """assert.match(physicalVisuals, /if \(spec\.presentation\)/);
+assert.match(physicalVisuals, /getRuntimeThemePresentation/);
+assert.doesNotMatch(physicalVisuals, /draftrollPhysicalPresentation/);""",
+    'direct physical presentation smoke assertion',
 )
