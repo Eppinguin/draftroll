@@ -75,5 +75,19 @@ count = source.split(effectBlock).length - 1;
 if (count !== 1) throw new Error(`redundant effect migration block expected once, found ${count}`);
 source = source.replace(effectBlock, '');
 
+const guardOld = `  if (/activeCanonicalPhysicalIndexes|activeGenericPhysicalIndexes/.test(source)) {
+    throw new Error('main.ts still contains parallel physical index arrays');
+  }`;
+const guardNew = `  if (/activeCanonicalPhysicalIndexes|activeGenericPhysicalIndexes/.test(source)) {
+    const leftovers = source
+      .split('\\n')
+      .map((line, index) => ({ line: index + 1, text: line }))
+      .filter(({ text }) => /activeCanonicalPhysicalIndexes|activeGenericPhysicalIndexes/.test(text));
+    throw new Error(\`main.ts still contains parallel physical index arrays: \${JSON.stringify(leftovers)}\`);
+  }`;
+count = source.split(guardOld).length - 1;
+if (count !== 1) throw new Error(`physical index guard expected once, found ${count}`);
+source = source.replace(guardOld, guardNew);
+
 await writeFile(path, source);
 console.log('final physical migration guards normalized');
