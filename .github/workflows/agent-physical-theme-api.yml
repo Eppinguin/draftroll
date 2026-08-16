@@ -31,6 +31,7 @@ jobs:
               "replace_all('src/physical-die-visuals.ts', 'lastPhysicalFallbackReplay', 'lastAdditionalPhysicalReplay')\n",
               "replace_all('src/physical-die-visuals.ts', 'capturePhysicalFallbackReplay', 'captureAdditionalPhysicalReplay')\n",
               "replace_all('src/physical-die-visuals.ts', 'restorePhysicalFallbackReplay', 'restoreAdditionalPhysicalReplay')\n",
+              "replace_all('src/physical-die-visuals.ts', 'physical fallback', 'additional physical')\n",
           ]:
               source = source.replace(line, '')
           path.write_text(source)
