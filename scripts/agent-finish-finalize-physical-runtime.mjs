@@ -23,7 +23,7 @@ function replaceOnce(source, search, replacement, label) {
   let source = await readFile(path, 'utf8');
   source = replaceOnce(
     source,
-    `  const activeTargeting = (\n    Object.entries(targetingCounts) as Array<['symmetry' | 'relabel' | 'fixed', number]>\n  ).filter(([, count]) => count > 0);`,
+    `  const activeTargeting = (Object.entries(targetingCounts) as Array<\n    ['symmetry' | 'relabel' | 'fixed', number]\n  >).filter(([, count]) => count > 0);`,
     `  const activeTargeting = (['symmetry', 'relabel', 'fixed'] as const).filter(\n    (targeting) => targetingCounts[targeting] > 0,\n  );`,
     'targeting diagnostics without unsafe assertion',
   );
