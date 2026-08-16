@@ -43,7 +43,7 @@ jobs:
       - name: Format changed sources
         run: pnpm exec oxfmt src/main.ts src/physical-die-visuals.ts scripts/test-visual-fallbacks.mjs
       - name: Lint
-        run: pnpm lint
+        run: env -u GITHUB_ACTIONS pnpm lint
       - name: Typecheck packages
         run: pnpm check:packages
       - name: Typecheck browser engine
