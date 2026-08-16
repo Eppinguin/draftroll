@@ -111,4 +111,29 @@ if concurrent.count(old_locked) != 1:
     raise SystemExit(f'locked-body ownership assertion: expected one match, found {concurrent.count(old_locked)}')
 concurrent_path.write_text(concurrent.replace(old_locked, new_locked, 1))
 
+themes_path = Path('scripts/test-runtime-themes.mjs')
+themes = themes_path.read_text()
+old_theme_setters = """    setDie() {},
+    setQuantity() {},
+    setTheme(themeId) {
+      bridgeCalls.push(['setTheme', themeId]);
+    },
+"""
+if themes.count(old_theme_setters) != 1:
+    raise SystemExit(f'runtime theme bridge setters: expected one match, found {themes.count(old_theme_setters)}')
+themes = themes.replace(old_theme_setters, '', 1)
+old_warmup = """  assert.deepEqual(bridgeCalls.slice(0, 2), [
+    ['installTheme', manifest.id],
+    ['setTheme', manifest.id],
+  ]);"""
+new_warmup = """  assert.deepEqual(bridgeCalls.slice(0, 1), [['installTheme', manifest.id]]);
+  assert.equal(
+    bridgeCalls.some(([name]) => name === 'setTheme'),
+    false,
+    'theme choice is carried by each physical visual, not mutable bridge state',
+  );"""
+if themes.count(old_warmup) != 1:
+    raise SystemExit(f'runtime theme warmup assertion: expected one match, found {themes.count(old_warmup)}')
+themes_path.write_text(themes.replace(old_warmup, new_warmup, 1))
+
 print('Unified-plan follow-up cleanup applied.')
