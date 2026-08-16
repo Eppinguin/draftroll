@@ -21,6 +21,22 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22.14.0'
+      - name: Fix migration template escaping
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/agent-physical-bridge-migration.mjs')
+          source = path.read_text()
+          replacements = {
+              "(definition?.id || `d${sides}`)": "(definition?.id || \\`d\\${sides}\\`)",
+              "context.font = `800 ${fontSize}px ${getRuntimeThemeFont(spec.theme) ?? 'system-ui, sans-serif'}`;": "context.font = \\`800 \\${fontSize}px \\${getRuntimeThemeFont(spec.theme) ?? 'system-ui, sans-serif'}\\`;",
+          }
+          for before, after in replacements.items():
+              if source.count(before) != 1:
+                  raise SystemExit(f'escape fix expected one match for {before!r}, found {source.count(before)}')
+              source = source.replace(before, after, 1)
+          path.write_text(source)
+          PY
       - name: Apply guarded migration
         run: node scripts/agent-physical-bridge-migration.mjs
       - name: Remove one-time migration files
