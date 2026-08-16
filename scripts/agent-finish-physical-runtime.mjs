@@ -29,13 +29,11 @@ const count = main.split(needle).length - 1;
 if (count !== 1) throw new Error(`shared planner recovery expected once, found ${count}`);
 main = main.replace(needle, replacement);
 
-for (const legacy of [
-  'buildRollPlanSync',
-  'cloneDynamicBody',
-  'contactSimilarity',
-  'enforceBodiesBounds',
-]) {
+for (const legacy of ['buildRollPlanSync', 'cloneDynamicBody', 'contactSimilarity']) {
   if (main.includes(legacy)) throw new Error(`legacy planner symbol survived: ${legacy}`);
+}
+if (!main.includes('function enforceBodiesBounds(')) {
+  throw new Error('live-world bounds guard was removed with the planner');
 }
 if (!main.includes("Roll worker failed; using shared main-thread planner.")) {
   throw new Error('shared planner recovery path was not installed');
