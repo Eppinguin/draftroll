@@ -97,6 +97,11 @@ jobs:
                   raise SystemExit(
                       f'physical mesh smoke ownership {before}: old={old_count}, new={new_count}'
                   )
+          stale_block = '''assert.match(visualBase, /createGeneratedDieVisual/);\nassert.match(visualBase, /triangulateTexturedShape/);\nassert.match(visualBase, /createDieSurfaceTexture/);\nassert.match(visualBase, /PolyhedronLabelAnchor/);\nassert.match(visualBase, /labelQuaternion/);\nassert.match(visualBase, /outcome\\.labels/);\n'''
+          replacement_block = '''assert.doesNotMatch(visualBase, /createGeneratedDieVisual/);\nassert.doesNotMatch(visualBase, /triangulateTexturedShape/);\nassert.doesNotMatch(visualBase, /createDieSurfaceTexture/);\nassert.doesNotMatch(visualBase, /PolyhedronLabelAnchor/);\nassert.doesNotMatch(visualBase, /createReadablePolyhedron/);\n'''
+          if source.count(stale_block) != 1:
+              raise SystemExit(f'stale fallback die assertions: expected one block, found {source.count(stale_block)}')
+          source = source.replace(stale_block, replacement_block, 1)
           path.write_text(source)
           PY
       - name: Remove one-time migration files
