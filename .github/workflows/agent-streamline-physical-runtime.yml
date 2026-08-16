@@ -1,0 +1,80 @@
+name: Agent streamline physical runtime
+
+on:
+  push:
+    branches:
+      - agent/dicebox-learnings-cards
+    paths:
+      - .agent-streamline-physical-runtime-trigger
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/dicebox-learnings-cards
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.14.0
+
+      - name: Apply physical runtime cleanup
+        run: node scripts/agent-streamline-physical-runtime.mjs
+
+      - name: Remove one-time migration files
+        run: |
+          rm scripts/agent-streamline-physical-runtime.mjs
+          rm .github/workflows/agent-streamline-physical-runtime.yml
+          rm .agent-streamline-physical-runtime-trigger
+
+      - name: Install pnpm
+        run: npm install --global pnpm@11.17.0
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Format changed sources
+        run: >-
+          pnpm exec oxfmt
+          src/main.ts
+          src/physical-roll-planner.ts
+          src/physical-die-visuals.ts
+          src/roll-worker.ts
+          scripts/test-natural-target-physics.mjs
+          scripts/test-large-pool-physics.mjs
+          scripts/test-visual-fallbacks.mjs
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck packages
+        run: pnpm check:packages
+
+      - name: Typecheck browser engine
+        run: pnpm exec tsc --noEmit
+
+      - name: Core regression
+        run: pnpm test:core
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Generated physical overlay regression
+        run: pnpm test:browser:build && pnpm exec playwright test tests/browser/specs/overlay.spec.ts --project=chromium --grep "generated non-standard physical dice"
+
+      - name: Commit validated cleanup
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No cleanup changes to commit"
+            exit 0
+          fi
+          git commit -m "streamline physical dice planning and playback"
+          git push origin HEAD:agent/dicebox-learnings-cards
