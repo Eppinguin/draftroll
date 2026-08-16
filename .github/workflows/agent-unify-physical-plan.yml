@@ -38,8 +38,10 @@ jobs:
         run: python scripts/agent-unify-physical-plan-fixes.py
       - name: Migrate remaining request-contract tests
         run: python scripts/agent-unify-request-contract-fixes.py
+      - name: Migrate remaining core expectations
+        run: python scripts/agent-unify-core-test-fixes.py
       - name: Remove one-time migration files
-        run: rm -f scripts/agent-unify-physical-plan.py scripts/agent-unify-physical-plan-fixes.py scripts/agent-unify-request-contract-fixes.py .github/workflows/agent-unify-physical-plan.yml .agent-unify-physical-plan-trigger
+        run: rm -f scripts/agent-unify-physical-plan.py scripts/agent-unify-physical-plan-fixes.py scripts/agent-unify-request-contract-fixes.py scripts/agent-unify-core-test-fixes.py .github/workflows/agent-unify-physical-plan.yml .agent-unify-physical-plan-trigger
       - name: Install pnpm
         run: npm install --global pnpm@11.17.0
       - name: Install dependencies
