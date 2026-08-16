@@ -37,7 +37,7 @@ jobs:
       - name: Remove one-time migration files
         run: rm -f scripts/agent-physical-main-migration.mjs .github/workflows/agent-physical-migration.yml .agent-physical-migration-trigger
       - name: Install pnpm
-        run: corepack enable && corepack prepare pnpm@11.17.0 --activate
+        run: npm install --global pnpm@11.17.0
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Format changed sources
