@@ -21,6 +21,9 @@ jobs:
         with:
           node-version: 22.14.0
 
+      - name: Normalize migration guards
+        run: node scripts/agent-normalize-finalize-physical-runtime.mjs
+
       - name: Apply final physical runtime architecture
         run: node scripts/agent-finalize-physical-runtime.mjs
 
@@ -29,6 +32,7 @@ jobs:
 
       - name: Remove one-time migration files
         run: |
+          rm scripts/agent-normalize-finalize-physical-runtime.mjs
           rm scripts/agent-finalize-physical-runtime.mjs
           rm scripts/agent-finish-finalize-physical-runtime.mjs
           rm .github/workflows/agent-finalize-physical-runtime.yml
