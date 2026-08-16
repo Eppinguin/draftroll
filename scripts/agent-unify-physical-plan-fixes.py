@@ -97,6 +97,11 @@ new_parallel = """  assert.deepEqual(
 """
 if concurrent.count(old_parallel) != 1:
     raise SystemExit(f'concurrent parallel arrays assertion: expected one match, found {concurrent.count(old_parallel)}')
-concurrent_path.write_text(concurrent.replace(old_parallel, new_parallel, 1))
+concurrent = concurrent.replace(old_parallel, new_parallel, 1)
+old_launch = "  assert.match(mainSource, /createLaunchStatesForGroup/);"
+new_launch = "  assert.match(mainSource, /createMixedPhysicalLaunchStates/);"
+if concurrent.count(old_launch) != 1:
+    raise SystemExit(f'concurrent launch assertion: expected one match, found {concurrent.count(old_launch)}')
+concurrent_path.write_text(concurrent.replace(old_launch, new_launch, 1))
 
 print('Unified-plan follow-up cleanup applied.')
