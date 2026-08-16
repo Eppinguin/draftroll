@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path';
 
 const root = resolve(import.meta.dirname, '..');
 const main = await readFile(join(root, 'src/main.ts'), 'utf8');
+const launch = await readFile(join(root, 'src/physical-launch.ts'), 'utf8');
 const worker = await readFile(join(root, 'src/roll-worker.ts'), 'utf8');
 const planner = await readFile(join(root, 'src/physical-roll-planner.ts'), 'utf8');
 const physicalDice = await readFile(join(root, 'src/physical-dice.ts'), 'utf8');
@@ -26,11 +27,11 @@ assert.match(shapes, /export const DIE_COLLIDER_SCALE/);
 assert.match(physicalDice, /d20: 1\.026/);
 assert.match(physicalDice, /x \* scale, y \* scale, z \* scale/);
 
-assert.match(main, /const largePool = count >= 12/);
-assert.match(main, /two-handed pour/);
-assert.match(main, /releaseDelay: number/);
-assert.match(main, /waveInterval/);
-assert.match(main, /spawn\.releaseDelay \+\s*releaseWindow/);
+assert.match(launch, /const largePool = participants\.length >= 12/);
+assert.match(launch, /waveSize = count >= 24/);
+assert.match(launch, /releaseDelay: number/);
+assert.match(launch, /waveInterval/);
+assert.match(launch, /spawn\.releaseDelay \+\s*releaseWindow/);
 assert.match(main, /activationDelays\?: Float32Array/);
 assert.match(main, /die\.group\.visible = time \+ plan\.step \* 0\.5 >= activationDelay/);
 assert.match(main, /setPhysicalDiceVisible\(false\)/);
@@ -80,6 +81,7 @@ console.log(
         'planning failure visibility restoration',
         'no orphaned completion on planning failure',
         'large-pool staged pour release',
+        'canonical and generated dice use the same radius-aware hand packing',
         'definition-driven edge-balance correction with bounded release cadence',
         'per-die activation visibility',
         '120 Hz shared physical planning and recording',

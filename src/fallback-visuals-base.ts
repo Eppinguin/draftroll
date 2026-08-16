@@ -3,12 +3,6 @@ import type {
   DraftrollFallbackKind,
   DraftrollFallbackVisual,
 } from '../packages/renderer/src/index';
-import {
-  createReadablePolyhedron,
-  type PolyhedronLabelAnchor,
-  type PolyhedronOutcome,
-  type ReadablePolyhedron,
-} from '../packages/renderer/src/polyhedra';
 import { THEMES, type ThemeName } from './themes';
 
 export interface FallbackVisualBounds {
@@ -16,7 +10,7 @@ export interface FallbackVisualBounds {
   z: number;
 }
 
-type VisualMode = 'sprite' | 'coin' | 'die' | 'card';
+type VisualMode = 'sprite' | 'coin' | 'card';
 
 interface Trajectory {
   start: THREE.Vector3;
@@ -138,48 +132,6 @@ function createFallbackTexture(spec: DraftrollFallbackVisual): THREE.CanvasTextu
   return texture;
 }
 
-function createDieSurfaceTexture(spec: DraftrollFallbackVisual): THREE.CanvasTexture {
-  const canvas = document.createElement('canvas');
-  canvas.width = 512;
-  canvas.height = 512;
-  const context = canvas.getContext('2d');
-  if (!context) throw new Error('Canvas 2D context unavailable.');
-  const palette = THEMES[normalizeTheme(spec.theme)];
-
-  const gradient = context.createLinearGradient(0, 0, 512, 512);
-  gradient.addColorStop(0, cssColor(palette.edge));
-  gradient.addColorStop(0.12, cssColor(palette.base));
-  gradient.addColorStop(0.68, cssColor(palette.base));
-  gradient.addColorStop(1, cssColor(palette.shadow));
-  context.fillStyle = gradient;
-  context.fillRect(0, 0, 512, 512);
-
-  context.globalAlpha = 0.1;
-  context.strokeStyle = palette.label;
-  context.lineWidth = 2;
-  for (let value = -512; value < 1024; value += 32) {
-    context.beginPath();
-    context.moveTo(value, 0);
-    context.lineTo(value - 512, 512);
-    context.stroke();
-  }
-  context.globalAlpha = 0.07;
-  for (let index = 0; index < 48; index += 1) {
-    const x = (index * 193) % 512;
-    const y = (index * 311) % 512;
-    context.beginPath();
-    context.arc(x, y, 1.5 + (index % 4), 0, Math.PI * 2);
-    context.fillStyle = index % 2 ? '#ffffff' : '#000000';
-    context.fill();
-  }
-  context.globalAlpha = 1;
-
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.anisotropy = 8;
-  return texture;
-}
-
 function metadataString(spec: DraftrollFallbackVisual, key: string): string | undefined {
   const value = spec.metadata?.[key];
   return typeof value === 'string' ? value : undefined;
@@ -275,219 +227,6 @@ function createCardBackTexture(spec: DraftrollFallbackVisual): THREE.CanvasTextu
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = 16;
   return texture;
-}
-
-function triangulateTexturedShape(shape: ReadablePolyhedron): THREE.BufferGeometry {
-  const positions: number[] = [];
-  const uvs: number[] = [];
-  const a = new THREE.Vector3();
-  const b = new THREE.Vector3();
-  const c = new THREE.Vector3();
-  const normal = new THREE.Vector3();
-  const basisU = new THREE.Vector3();
-  const basisV = new THREE.Vector3();
-  const point = new THREE.Vector3();
-
-  for (const face of shape.faces) {
-    if (face.length < 3) continue;
-    a.fromArray(shape.vertices[face[0]]);
-    b.fromArray(shape.vertices[face[1]]);
-    c.fromArray(shape.vertices[face[2]]);
-    normal.crossVectors(b.clone().sub(a), c.clone().sub(a)).normalize();
-    basisU.copy(b).sub(a).normalize();
-    basisV.crossVectors(normal, basisU).normalize();
-    const projected = face.map((vertexIndex) => {
-      point.fromArray(shape.vertices[vertexIndex]);
-      return { u: point.dot(basisU), v: point.dot(basisV) };
-    });
-    const minU = Math.min(...projected.map((value) => value.u));
-    const maxU = Math.max(...projected.map((value) => value.u));
-    const minV = Math.min(...projected.map((value) => value.v));
-    const maxV = Math.max(...projected.map((value) => value.v));
-    const spanU = Math.max(1e-5, maxU - minU);
-    const spanV = Math.max(1e-5, maxV - minV);
-    const uv = projected.map(
-      (value) =>
-        [
-          0.06 + (0.88 * (value.u - minU)) / spanU,
-          0.06 + (0.88 * (value.v - minV)) / spanV,
-        ] as const,
-    );
-
-    for (let index = 1; index + 1 < face.length; index += 1) {
-      for (const localIndex of [0, index, index + 1]) {
-        const vertex = shape.vertices[face[localIndex]];
-        positions.push(vertex[0], vertex[1], vertex[2]);
-        uvs.push(uv[localIndex][0], uv[localIndex][1]);
-      }
-    }
-  }
-
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-  geometry.computeVertexNormals();
-  geometry.computeBoundingSphere();
-  return geometry;
-}
-
-function parseNumericSides(spec: DraftrollFallbackVisual): number | null {
-  if (Number.isSafeInteger(spec.sides) && (spec.sides ?? 0) >= 1) return spec.sides!;
-  const match = /^d(\d+)$/i.exec(spec.type);
-  if (!match) return null;
-  const sides = Number(match[1]);
-  return Number.isSafeInteger(sides) && sides >= 1 ? sides : null;
-}
-
-function logicalResultValue(spec: DraftrollFallbackVisual, sides: number): number {
-  const numeric = typeof spec.result === 'number' ? spec.result : Number(spec.numericValue);
-  if (!Number.isFinite(numeric)) return 1;
-  return THREE.MathUtils.clamp(Math.round(numeric), 1, Math.max(1, sides));
-}
-
-function createNumberTexture(
-  spec: DraftrollFallbackVisual,
-  value: number | string,
-): THREE.CanvasTexture {
-  const canvas = document.createElement('canvas');
-  canvas.width = 256;
-  canvas.height = 256;
-  const context = canvas.getContext('2d');
-  if (!context) throw new Error('Canvas 2D context unavailable.');
-  const palette = THEMES[normalizeTheme(spec.theme)];
-  const label = String(value);
-  const length = label.length;
-
-  context.textAlign = 'center';
-  context.textBaseline = 'middle';
-  context.lineJoin = 'round';
-  context.font = `800 ${length >= 3 ? 104 : length === 2 ? 128 : 154}px system-ui, sans-serif`;
-  context.lineWidth = length >= 3 ? 12 : 14;
-  context.strokeStyle = 'rgba(0,0,0,.7)';
-  context.strokeText(label, 128, 126);
-  context.fillStyle = palette.label;
-  context.fillText(label, 128, 126);
-  if (label === '6' || label === '9') {
-    context.strokeStyle = palette.label;
-    context.lineWidth = 8;
-    context.beginPath();
-    context.moveTo(93, 202);
-    context.lineTo(163, 202);
-    context.stroke();
-  }
-
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.anisotropy = 8;
-  return texture;
-}
-
-function labelQuaternion(anchor: PolyhedronLabelAnchor): THREE.Quaternion {
-  const normal = new THREE.Vector3(...anchor.normal).normalize();
-  const up = new THREE.Vector3(...anchor.up).projectOnPlane(normal).normalize();
-  const right = new THREE.Vector3().crossVectors(up, normal).normalize();
-  const basis = new THREE.Matrix4().makeBasis(right, up, normal);
-  return new THREE.Quaternion().setFromRotationMatrix(basis);
-}
-
-function labelsForShape(
-  shape: ReadablePolyhedron,
-  result: number,
-): Array<{ outcome: PolyhedronOutcome; value: number }> {
-  if (shape.exact) {
-    return shape.outcomes.map((outcome) => ({ outcome, value: outcome.value }));
-  }
-  const outcome = shape.outcomes[(result - 1) % Math.max(1, shape.outcomes.length)];
-  return outcome ? [{ outcome, value: result }] : [];
-}
-
-function createGeneratedDieVisual(spec: DraftrollFallbackVisual): ThreeDimensionalVisual | null {
-  const sides = parseNumericSides(spec);
-  if (spec.kind !== 'spinner' || sides === null) return null;
-
-  const shape = createReadablePolyhedron(sides);
-  const palette = THEMES[normalizeTheme(spec.theme)];
-  const group = new THREE.Group();
-  const surfaceTexture = createDieSurfaceTexture(spec);
-  const geometry = triangulateTexturedShape(shape);
-  const material = new THREE.MeshPhysicalMaterial({
-    map: surfaceTexture,
-    color: 0xffffff,
-    roughness: 0.39,
-    metalness: 0.22,
-    clearcoat: 0.35,
-    clearcoatRoughness: 0.28,
-    flatShading: true,
-    transparent: true,
-    opacity: 0,
-    side: THREE.DoubleSide,
-  });
-  const mesh = new THREE.Mesh(geometry, material);
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  group.add(mesh);
-
-  const edgeGeometry = new THREE.EdgesGeometry(geometry, 18);
-  const edgeMaterial = new THREE.LineBasicMaterial({
-    color: palette.edge,
-    transparent: true,
-    opacity: 0,
-  });
-  const edges = new THREE.LineSegments(edgeGeometry, edgeMaterial);
-  edges.scale.setScalar(1.004);
-  group.add(edges);
-
-  const textures: THREE.Texture[] = [surfaceTexture];
-  const geometries: THREE.BufferGeometry[] = [geometry, edgeGeometry];
-  const materials: THREE.Material[] = [material, edgeMaterial];
-  const result = logicalResultValue(spec, sides);
-  const resultOutcome =
-    shape.outcomes.find((outcome) => outcome.value === result) ??
-    shape.outcomes[(result - 1) % Math.max(1, shape.outcomes.length)];
-
-  const materialByValue = new Map<number, THREE.MeshBasicMaterial>();
-  for (const { outcome, value } of labelsForShape(shape, result)) {
-    let labelMaterial = materialByValue.get(value);
-    if (!labelMaterial) {
-      const texture = createNumberTexture(spec, value);
-      labelMaterial = new THREE.MeshBasicMaterial({
-        map: texture,
-        transparent: true,
-        opacity: 0,
-        depthWrite: false,
-        toneMapped: false,
-        side: THREE.DoubleSide,
-      });
-      materialByValue.set(value, labelMaterial);
-      textures.push(texture);
-      materials.push(labelMaterial);
-    }
-
-    for (const anchor of outcome.labels) {
-      const labelGeometry = new THREE.PlaneGeometry(anchor.scale, anchor.scale);
-      const normal = new THREE.Vector3(...anchor.normal).normalize();
-      const label = new THREE.Mesh(labelGeometry, labelMaterial);
-      label.position.fromArray(anchor.position).addScaledVector(normal, 0.014);
-      label.quaternion.copy(labelQuaternion(anchor));
-      label.renderOrder = 7;
-      group.add(label);
-      geometries.push(labelGeometry);
-    }
-  }
-
-  if (resultOutcome) {
-    const settledUp = new THREE.Vector3(...resultOutcome.settledUp).normalize();
-    group.userData.settledRotation = new THREE.Quaternion().setFromUnitVectors(settledUp, UP);
-    group.userData.labelKind = resultOutcome.labelKind;
-  }
-
-  if (shape.family === 'd1-cylinder' || shape.family === 'd2-coin') {
-    group.scale.set(0.9, 0.9, 1.04);
-  } else if (shape.family === 'representative') {
-    group.scale.set(1.08, 0.94, 1.08);
-  }
-
-  return { mode: 'die', group, geometries, materials, textures };
 }
 
 function cropCoinTexture(texture: THREE.CanvasTexture): void {
@@ -773,7 +512,7 @@ export class FallbackVisualInstance {
         ? createCoinVisual(this.texture, spec)
         : spec.kind === 'card'
           ? createCardVisual(spec)
-          : createGeneratedDieVisual(spec);
+          : null;
     this.group.add(this.threeDimensional?.group ?? this.sprite);
 
     this.shadowMaterial = new THREE.SpriteMaterial({
@@ -904,17 +643,9 @@ export class FallbackVisualInstance {
             'XYZ',
           ),
         );
-        let settledRotation = new THREE.Quaternion().setFromEuler(
+        const settledRotation = new THREE.Quaternion().setFromEuler(
           new THREE.Euler(0.12, trajectory.finalYaw, -0.06),
         );
-        if (mode === 'die') {
-          const generatedRotation = this.threeDimensional.group.userData.settledRotation;
-          if (generatedRotation instanceof THREE.Quaternion) {
-            settledRotation = new THREE.Quaternion()
-              .setFromAxisAngle(UP, trajectory.finalYaw)
-              .multiply(generatedRotation);
-          }
-        }
         this.threeDimensional.group.quaternion
           .copy(moving)
           .slerp(settledRotation, THREE.MathUtils.smoothstep(normalized, 0.76, 1));

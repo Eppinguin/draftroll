@@ -212,10 +212,7 @@ function atlasCellTexture(atlas: THREE.Texture, value: number): THREE.Texture {
   texture.wrapS = THREE.ClampToEdgeWrapping;
   texture.wrapT = THREE.ClampToEdgeWrapping;
   texture.offset.set(column / LABEL_ATLAS_COLUMNS + padU, 1 - (row + 1) / LABEL_ATLAS_ROWS + padV);
-  texture.repeat.set(
-    1 / LABEL_ATLAS_COLUMNS - padU * 2,
-    1 / LABEL_ATLAS_ROWS - padV * 2,
-  );
+  texture.repeat.set(1 / LABEL_ATLAS_COLUMNS - padU * 2, 1 / LABEL_ATLAS_ROWS - padV * 2);
   texture.needsUpdate = true;
   return texture;
 }
@@ -355,7 +352,10 @@ export function createPhysicalDieMesh(options: PhysicalDieMeshOptions): Physical
       ownedTextures.push(texture);
       return texture;
     }
-    const content = presentation.contents[index] ?? { kind: 'number' as const, value: outcome.value };
+    const content = presentation.contents[index] ?? {
+      kind: 'number' as const,
+      value: outcome.value,
+    };
     const texture = presentationTexture(spec, content);
     ownedTextures.push(texture);
     return texture;
@@ -395,7 +395,9 @@ export function createPhysicalDieMesh(options: PhysicalDieMeshOptions): Physical
     const outcomeIndex = definition.outcomes
       .map((outcome, index) => ({
         index,
-        score: normal.dot(new THREE.Vector3(...outcome.settledUp)),
+        score: Math.max(
+          ...outcome.supportNormals.map((support) => -normal.dot(new THREE.Vector3(...support))),
+        ),
       }))
       .toSorted((left, right) => right.score - left.score)[0]?.index;
     if (outcomeIndex === undefined) continue;

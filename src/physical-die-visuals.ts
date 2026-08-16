@@ -1,7 +1,5 @@
 import * as THREE from 'three';
-import { FallbackVisualInstance as BaseFallbackVisualInstance } from './fallback-visuals-base';
 import type { DraftrollFallbackVisual } from '../packages/renderer/src/index';
-import type { PolyhedronLabelAnchor, ReadablePolyhedron } from '../packages/renderer/src/polyhedra';
 import {
   createDefaultPhysicalDiePresentation,
   createGeneratedPhysicalDieDefinition,
@@ -11,14 +9,9 @@ import {
   type PhysicalDieFaceContent,
   type PhysicalDiePresentation,
 } from './physical-dice';
+import { createPhysicalDieMesh, type PhysicalDieMesh } from './physical-die-mesh';
+import type { PhysicalLaunchState } from './physical-launch';
 import { extractPhysicalTransforms } from './physical-roll-planner';
-import {
-  getRuntimeThemeFont,
-  getRuntimeThemeMaterial,
-  getRuntimeThemeMesh,
-  getRuntimeThemeTexture,
-} from './runtime-themes';
-import { THEMES } from './themes';
 
 export interface PhysicalVisualBounds {
   x: number;
@@ -33,9 +26,6 @@ interface RecordedTrajectory {
 }
 
 const MAXIMUM_EXACT_GENERATED_SIDES = 256;
-const LABEL_ATLAS_COLUMNS = 5;
-const LABEL_ATLAS_ROWS = 4;
-const LABEL_ATLAS_PADDING = 0.055;
 const activePhysicalDice = new Set<PhysicalDieVisualInstance>();
 const pendingPhysicalDice = new Set<PhysicalDieVisualInstance>();
 let plannedPhysicalDice: PhysicalDieVisualInstance[] = [];
@@ -48,7 +38,7 @@ export function numericPhysicalSides(spec: DraftrollFallbackVisual): number | nu
   return Number.isSafeInteger(sides) && sides >= 1 ? sides : null;
 }
 
-/** True when a renderer fallback is really an exact physical numeric die. */
+/** Transitional browser-storage check for an exact arbitrary physical die. */
 export function usesPhysicalDieModel(spec: DraftrollFallbackVisual): boolean {
   if (spec.kind !== 'spinner') return false;
   const sides = numericPhysicalSides(spec);
@@ -71,23 +61,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function parsePhysicalFaceContent(value: unknown): PhysicalDieFaceContent | null {
   if (!isRecord(value)) return null;
-  const record = value;
-  const label = typeof record.label === 'string' ? record.label : undefined;
-  if (
-    record.kind === 'number' &&
-    typeof record.value === 'number' &&
-    Number.isFinite(record.value)
-  ) {
-    return { kind: 'number', value: record.value, label };
+  const label = typeof value.label === 'string' ? value.label : undefined;
+  if (value.kind === 'number' && typeof value.value === 'number' && Number.isFinite(value.value)) {
+    return { kind: 'number', value: value.value, label };
   }
-  if (record.kind === 'text' && typeof record.text === 'string') {
-    return { kind: 'text', text: record.text };
+  if (value.kind === 'text' && typeof value.text === 'string') {
+    return { kind: 'text', text: value.text };
   }
-  if (record.kind === 'icon' && typeof record.icon === 'string') {
-    return { kind: 'icon', icon: record.icon, label };
+  if (value.kind === 'icon' && typeof value.icon === 'string') {
+    return { kind: 'icon', icon: value.icon, label };
   }
-  if (record.kind === 'texture' && typeof record.asset === 'string') {
-    return { kind: 'texture', asset: record.asset, label };
+  if (value.kind === 'texture' && typeof value.asset === 'string') {
+    return { kind: 'texture', asset: value.asset, label };
   }
   return null;
 }
@@ -110,109 +95,6 @@ function readPhysicalPresentation(
     }
   }
   return { presentation: createDefaultPhysicalDiePresentation(definition), explicit: false };
-}
-
-function presentationTexture(
-  spec: DraftrollFallbackVisual,
-  content: PhysicalDieFaceContent,
-): THREE.CanvasTexture {
-  const canvas = document.createElement('canvas');
-  canvas.width = 256;
-  canvas.height = 256;
-  const context = canvas.getContext('2d');
-  if (!context) throw new Error('Canvas 2D context unavailable.');
-  const palette = THEMES[spec.theme] ?? THEMES.dragon;
-  const text =
-    content.kind === 'number'
-      ? (content.label ?? String(content.value))
-      : content.kind === 'text'
-        ? content.text
-        : content.kind === 'icon'
-          ? content.icon
-          : (content.label ?? '◆');
-  const length = Array.from(text).length;
-  const fontSize = content.kind === 'icon' ? 148 : length >= 5 ? 64 : length >= 3 ? 86 : 132;
-  context.textAlign = 'center';
-  context.textBaseline = 'middle';
-  context.lineJoin = 'round';
-  context.font = `800 ${fontSize}px ${getRuntimeThemeFont(spec.theme) ?? 'system-ui, sans-serif'}`;
-  context.lineWidth = Math.max(7, Math.round(fontSize * 0.08));
-  context.strokeStyle = 'rgba(0,0,0,.72)';
-  context.strokeText(text, 128, 126);
-  context.fillStyle = palette.label;
-  context.fillText(text, 128, 126);
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.anisotropy = 8;
-  return texture;
-}
-
-function faceNormal(shape: ReadablePolyhedron, faceIndex: number): THREE.Vector3 {
-  const face = shape.faces[faceIndex];
-  const points = face.map((index) => new THREE.Vector3(...shape.vertices[index]));
-  const normal = new THREE.Vector3()
-    .crossVectors(points[1].clone().sub(points[0]), points[2].clone().sub(points[0]))
-    .normalize();
-  const center = points
-    .reduce((sum, point) => sum.add(point), new THREE.Vector3())
-    .multiplyScalar(1 / points.length);
-  if (normal.dot(center) < 0) normal.negate();
-  return normal;
-}
-
-function secondaryAnchor(shape: ReadablePolyhedron, faceIndex: number): PolyhedronLabelAnchor {
-  const face = shape.faces[faceIndex];
-  const points = face.map((index) => new THREE.Vector3(...shape.vertices[index]));
-  const center = points
-    .reduce((sum, point) => sum.add(point), new THREE.Vector3())
-    .multiplyScalar(1 / points.length);
-  const normal = faceNormal(shape, faceIndex);
-  let span = 0;
-  for (let first = 0; first < points.length; first += 1) {
-    for (let second = first + 1; second < points.length; second += 1) {
-      span = Math.max(span, points[first].distanceTo(points[second]));
-    }
-  }
-  const reference =
-    Math.abs(normal.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
-  const up = reference.projectOnPlane(normal).normalize();
-  return {
-    kind: 'face',
-    faceIndex,
-    position: [center.x, center.y, center.z],
-    normal: [normal.x, normal.y, normal.z],
-    up: [up.x, up.y, up.z],
-    scale: THREE.MathUtils.clamp(span * 0.24, 0.13, 0.3),
-  };
-}
-
-function anchorQuaternion(anchor: PolyhedronLabelAnchor): THREE.Quaternion {
-  const normal = new THREE.Vector3(...anchor.normal).normalize();
-  const up = new THREE.Vector3(...anchor.up).projectOnPlane(normal).normalize();
-  const right = new THREE.Vector3().crossVectors(up, normal).normalize();
-  return new THREE.Quaternion().setFromRotationMatrix(
-    new THREE.Matrix4().makeBasis(right, up, normal),
-  );
-}
-
-function atlasCellTexture(atlas: THREE.Texture, value: number): THREE.Texture {
-  const clamped = THREE.MathUtils.clamp(Math.round(value), 1, 20);
-  const cell = clamped - 1;
-  const column = cell % LABEL_ATLAS_COLUMNS;
-  const row = Math.floor(cell / LABEL_ATLAS_COLUMNS);
-  const padU = LABEL_ATLAS_PADDING / LABEL_ATLAS_COLUMNS;
-  const padV = LABEL_ATLAS_PADDING / LABEL_ATLAS_ROWS;
-  const u0 = column / LABEL_ATLAS_COLUMNS + padU;
-  const u1 = (column + 1) / LABEL_ATLAS_COLUMNS - padU;
-  const v0 = 1 - (row + 1) / LABEL_ATLAS_ROWS + padV;
-  const v1 = 1 - row / LABEL_ATLAS_ROWS - padV;
-  const texture = atlas.clone();
-  texture.wrapS = THREE.ClampToEdgeWrapping;
-  texture.wrapT = THREE.ClampToEdgeWrapping;
-  texture.offset.set(u0, v0);
-  texture.repeat.set(u1 - u0, v1 - v0);
-  texture.needsUpdate = true;
-  return texture;
 }
 
 function sample(
@@ -264,84 +146,6 @@ function sample(
     );
 }
 
-function targetPosition(
-  count: number,
-  bounds: PhysicalVisualBounds,
-  occupied: readonly THREE.Vector2[],
-  random: () => number,
-): THREE.Vector2 {
-  const rangeX = Math.max(0.2, bounds.x - 1.05);
-  const rangeZ = Math.max(0.2, bounds.z - 1.05);
-  const separation = count <= 12 ? 1.8 : count <= 20 ? 1.5 : 1.25;
-  let best = new THREE.Vector2();
-  let bestDistance = -1;
-  for (let attempt = 0; attempt < 80; attempt += 1) {
-    const candidate = new THREE.Vector2((random() * 2 - 1) * rangeX, (random() * 2 - 1) * rangeZ);
-    const nearest = occupied.reduce(
-      (value, point) => Math.min(value, candidate.distanceTo(point)),
-      Number.POSITIVE_INFINITY,
-    );
-    if (nearest >= separation) return candidate;
-    if (nearest > bestDistance) {
-      bestDistance = nearest;
-      best = candidate;
-    }
-  }
-  return best;
-}
-
-function buildLaunchState(
-  definition: PhysicalDieDefinition,
-  index: number,
-  count: number,
-  bounds: PhysicalVisualBounds,
-  target: THREE.Vector2,
-  random: () => number,
-): number[] {
-  const radius = Math.max(0.25, physicalDieColliderRadius(definition));
-  const lane = count <= 1 ? 0 : THREE.MathUtils.lerp(-0.9, 0.9, index / Math.max(1, count - 1));
-  const startX = THREE.MathUtils.clamp(
-    lane * Math.min(2.2, bounds.x * 0.42) + (random() - 0.5) * 0.34,
-    -bounds.x + radius + 0.32,
-    bounds.x - radius - 0.32,
-  );
-  const startZ = bounds.z - radius - 0.35 - (index % 3) * 0.12;
-  const startY = radius * 1.5 + 1.35 + (index % 4) * 0.18 + random() * 0.55;
-  const flightTime = 0.58 + random() * 0.14;
-  const velocityX = (target.x - startX) / flightTime + (random() - 0.5) * 0.75;
-  const velocityZ = (target.y - startZ) / flightTime + (random() - 0.5) * 0.6;
-  const velocityY = 1.65 + random() * 1.35;
-  const rotation = new THREE.Quaternion().setFromEuler(
-    new THREE.Euler(random() * Math.PI * 2, random() * Math.PI * 2, random() * Math.PI * 2),
-  );
-  const axis = new THREE.Vector3(random() * 2 - 1, random() * 2 - 1, random() * 2 - 1);
-  if (axis.lengthSq() < 1e-6) axis.set(1, 0.4, 0.2);
-  axis.normalize();
-  const rollingX = velocityZ / radius;
-  const rollingZ = -velocityX / radius;
-  const spin = 4.5 + random() * 5.5;
-  const angularX = rollingX * 0.72 + axis.x * spin;
-  const angularY = axis.y * spin + (random() - 0.5) * 2.5;
-  const angularZ = rollingZ * 0.72 + axis.z * spin;
-  const delay = Math.min(0.13, index * 0.018 + random() * 0.018);
-  return [
-    startX,
-    startY,
-    startZ,
-    rotation.x,
-    rotation.y,
-    rotation.z,
-    rotation.w,
-    velocityX,
-    velocityY,
-    velocityZ,
-    angularX,
-    angularY,
-    angularZ,
-    delay,
-  ];
-}
-
 function trajectoryForIndex(
   transforms: Float32Array,
   frameCount: number,
@@ -375,6 +179,16 @@ function commitAdditionalTrajectories(
   });
 }
 
+function serializeLaunchState(state: PhysicalLaunchState): number[] {
+  return [
+    ...state.position,
+    ...state.quaternion,
+    ...state.velocity,
+    ...state.angularVelocity,
+    state.delay,
+  ];
+}
+
 export class PhysicalDieVisualInstance {
   readonly group: THREE.Group;
   readonly spec: DraftrollFallbackVisual;
@@ -384,13 +198,10 @@ export class PhysicalDieVisualInstance {
   launchState: number[] = [];
   configured = false;
 
-  private readonly base: BaseFallbackVisualInstance;
+  private readonly mesh: PhysicalDieMesh;
   private readonly inner: THREE.Group;
   private readonly labelMaterials: THREE.MeshBasicMaterial[];
   private readonly originalLabelMaps: Array<THREE.Texture | null>;
-  private readonly ownedLabelTextures: THREE.Texture[] = [];
-  private readonly extraGeometries: THREE.BufferGeometry[] = [];
-  private readonly defaultPresentation: PhysicalDiePresentation;
   private readonly requestedOutcome: number;
   private trajectory: RecordedTrajectory | null = null;
   private end = new THREE.Vector2();
@@ -406,128 +217,17 @@ export class PhysicalDieVisualInstance {
     this.sides = sides;
     this.definition = createGeneratedPhysicalDieDefinition(sides);
     const resolvedPresentation = readPhysicalPresentation(spec, this.definition);
-    this.defaultPresentation = resolvedPresentation.presentation;
     this.requestedOutcome = requestedOutcomeIndex(spec, sides);
-    this.base = new BaseFallbackVisualInstance(spec);
-    this.group = this.base.group;
-    const inner = this.group.children[0];
-    if (!(inner instanceof THREE.Group)) throw new Error('Physical die visual group is missing.');
-    this.inner = inner;
-
-    const body = inner.children[0];
-    if (body instanceof THREE.Mesh && body.material instanceof THREE.MeshPhysicalMaterial) {
-      const runtimeMaterial = getRuntimeThemeMaterial(spec.theme, spec.type);
-      const surface = getRuntimeThemeTexture(spec.theme, spec.type, 'surface');
-      const normal = getRuntimeThemeTexture(spec.theme, spec.type, 'normal');
-      const roughness = getRuntimeThemeTexture(spec.theme, spec.type, 'roughness');
-      if (surface) body.material.map = surface;
-      if (normal) body.material.normalMap = normal;
-      if (roughness) body.material.roughnessMap = roughness;
-      if (runtimeMaterial?.color !== undefined) body.material.color.set(runtimeMaterial.color);
-      if (runtimeMaterial?.emissive !== undefined)
-        body.material.emissive.set(runtimeMaterial.emissive);
-      if (runtimeMaterial?.emissiveIntensity !== undefined) {
-        body.material.emissiveIntensity = runtimeMaterial.emissiveIntensity;
-      }
-      if (runtimeMaterial?.roughness !== undefined)
-        body.material.roughness = runtimeMaterial.roughness;
-      if (runtimeMaterial?.metalness !== undefined)
-        body.material.metalness = runtimeMaterial.metalness;
-      if (runtimeMaterial?.clearcoat !== undefined)
-        body.material.clearcoat = runtimeMaterial.clearcoat;
-      if (runtimeMaterial?.clearcoatRoughness !== undefined) {
-        body.material.clearcoatRoughness = runtimeMaterial.clearcoatRoughness;
-      }
-      body.material.needsUpdate = true;
-
-      const runtimeMesh =
-        getRuntimeThemeMesh(spec.theme, spec.type) ?? getRuntimeThemeMesh(spec.theme, `d${sides}`);
-      if (runtimeMesh) {
-        const themedGeometry = runtimeMesh.clone();
-        themedGeometry.computeBoundingSphere();
-        const radius = themedGeometry.boundingSphere?.radius ?? 0;
-        if (radius > 1e-6) {
-          const scale = this.definition.radius / radius;
-          themedGeometry.scale(scale, scale, scale);
-        }
-        themedGeometry.computeVertexNormals();
-        themedGeometry.computeBoundingSphere();
-        body.geometry = themedGeometry;
-        this.extraGeometries.push(themedGeometry);
-        const edgeObject = inner.children[1];
-        if (edgeObject instanceof THREE.LineSegments) {
-          const themedEdges = new THREE.EdgesGeometry(themedGeometry, 18);
-          edgeObject.geometry = themedEdges;
-          this.extraGeometries.push(themedEdges);
-        }
-      }
-    }
-
-    const labelMeshes = inner.children
-      .slice(2)
-      .filter((child): child is THREE.Mesh => child instanceof THREE.Mesh);
-    let cursor = 0;
-    this.labelMaterials = this.definition.outcomes.map((outcome) => {
-      const mesh = labelMeshes[cursor];
-      cursor += outcome.labelAnchors.length;
-      if (!(mesh?.material instanceof THREE.MeshBasicMaterial)) {
-        throw new Error('Physical die label material is missing.');
-      }
-      return mesh.material;
+    this.mesh = createPhysicalDieMesh({
+      spec,
+      definition: this.definition,
+      presentation: resolvedPresentation.presentation,
+      explicitPresentation: resolvedPresentation.explicit,
     });
-
-    const runtimeAtlas =
-      getRuntimeThemeTexture(spec.theme, spec.type, 'label') ??
-      getRuntimeThemeTexture(spec.theme, `d${sides}`, 'label');
-    this.originalLabelMaps = this.definition.outcomes.map((outcome, index) => {
-      if (resolvedPresentation.explicit) {
-        const texture = presentationTexture(
-          spec,
-          this.defaultPresentation.contents[index] ?? { kind: 'number', value: outcome.value },
-        );
-        this.ownedLabelTextures.push(texture);
-        return texture;
-      }
-      if (runtimeAtlas && sides <= 20) {
-        const texture = atlasCellTexture(runtimeAtlas, outcome.value);
-        this.ownedLabelTextures.push(texture);
-        return texture;
-      }
-      return this.labelMaterials[index]?.map ?? null;
-    });
-    this.labelMaterials.forEach((material, index) => {
-      material.map = this.originalLabelMaps[index] ?? null;
-      material.needsUpdate = true;
-    });
-
-    const shape = this.definition.readableShape;
-    if (!shape) throw new Error('Generated physical die is missing readable geometry.');
-    const covered = new Set(
-      this.definition.outcomes.flatMap((outcome) =>
-        outcome.labelAnchors.map((anchor) => anchor.faceIndex),
-      ),
-    );
-    for (let faceIndex = 0; faceIndex < shape.faces.length; faceIndex += 1) {
-      if (covered.has(faceIndex)) continue;
-      const normal = faceNormal(shape, faceIndex);
-      const outcomeIndex = shape.outcomes
-        .map((outcome, index) => ({
-          index,
-          score: normal.dot(new THREE.Vector3(...outcome.settledUp)),
-        }))
-        .toSorted((left, right) => right.score - left.score)[0]?.index;
-      if (outcomeIndex === undefined) continue;
-      const anchor = secondaryAnchor(shape, faceIndex);
-      const geometry = new THREE.PlaneGeometry(anchor.scale, anchor.scale);
-      const mesh = new THREE.Mesh(geometry, this.labelMaterials[outcomeIndex]);
-      mesh.position
-        .fromArray(anchor.position)
-        .addScaledVector(new THREE.Vector3(...anchor.normal), 0.014);
-      mesh.quaternion.copy(anchorQuaternion(anchor));
-      mesh.renderOrder = 7;
-      inner.add(mesh);
-      this.extraGeometries.push(geometry);
-    }
+    this.group = this.mesh.group;
+    this.inner = this.mesh.visualRoot;
+    this.labelMaterials = this.mesh.labelMaterials;
+    this.originalLabelMaps = this.mesh.labelMaps.slice();
     activePhysicalDice.add(this);
   }
 
@@ -537,6 +237,24 @@ export class PhysicalDieVisualInstance {
 
   get requiresPlanning(): boolean {
     return this.needsPlanning;
+  }
+
+  get launchParticipant(): PendingPhysicalLaunchParticipant {
+    return {
+      id: this.spec.id,
+      radius: physicalDieColliderRadius(this.definition),
+      coinLike: this.sides === 2,
+    };
+  }
+
+  assignLaunchState(state: PhysicalLaunchState): void {
+    if (!this.needsPlanning) return;
+    this.launchState = serializeLaunchState(state);
+    this.end.set(state.target[0], state.target[1]);
+    this.group.position.set(...state.position);
+    this.inner.quaternion.set(...state.quaternion);
+    this.mesh.setOpacity(0);
+    this.mesh.updateShadow(this.group.position.y, 0);
   }
 
   private applyRequestedResult(landed: number): void {
@@ -567,7 +285,12 @@ export class PhysicalDieVisualInstance {
   }
 
   plannerState(): number[] {
-    if (this.needsPlanning || !this.trajectory) return [...this.launchState];
+    if (this.needsPlanning || !this.trajectory) {
+      if (this.launchState.length !== 14) {
+        throw new Error(`Physical die ${this.spec.id} has not been assigned a launch state.`);
+      }
+      return this.launchState.slice();
+    }
     const position = this.group.position;
     const quaternion = this.inner.quaternion;
     let velocityX = 0;
@@ -591,7 +314,6 @@ export class PhysicalDieVisualInstance {
       velocityX = (this.trajectory.positions[b] - this.trajectory.positions[a]) / dt;
       velocityY = (this.trajectory.positions[b + 1] - this.trajectory.positions[a + 1]) / dt;
       velocityZ = (this.trajectory.positions[b + 2] - this.trajectory.positions[a + 2]) / dt;
-
       const qa = first * 4;
       const qb = second * 4;
       const before = new THREE.Quaternion(
@@ -647,19 +369,18 @@ export class PhysicalDieVisualInstance {
     this.end.set(trajectory.positions[last] ?? 0, trajectory.positions[last + 2] ?? 0);
     this.settled = false;
     sample(trajectory, 0, this.group.position, this.inner.quaternion);
+    this.mesh.updateShadow(this.group.position.y, 0);
   }
 
   configureTrajectory(
-    index: number,
-    count: number,
+    _index: number,
+    _count: number,
     bounds: PhysicalVisualBounds,
-    random: () => number,
-    occupied: THREE.Vector2[] = [],
+    _random: () => number,
+    _occupied: THREE.Vector2[] = [],
   ): void {
     this.bounds = { ...bounds };
-    this.end = targetPosition(count, bounds, occupied, random);
-    occupied.push(this.end.clone());
-    this.launchState = buildLaunchState(this.definition, index, count, bounds, this.end, random);
+    this.launchState = [];
     this.configured = true;
     this.trajectory = null;
     this.needsPlanning = true;
@@ -667,20 +388,9 @@ export class PhysicalDieVisualInstance {
     this.lastProgress = 0;
     this.settled = false;
     this.presented = false;
-    this.group.position.set(this.launchState[0], this.launchState[1], this.launchState[2]);
-    this.inner.quaternion.set(
-      this.launchState[3],
-      this.launchState[4],
-      this.launchState[5],
-      this.launchState[6],
-    );
     this.group.visible = false;
-    this.inner.traverse((object) => {
-      if (object instanceof THREE.Mesh || object instanceof THREE.LineSegments) {
-        const materials = Array.isArray(object.material) ? object.material : [object.material];
-        for (const material of materials) if ('opacity' in material) material.opacity = 0;
-      }
-    });
+    this.mesh.setOpacity(0);
+    this.mesh.updateShadow(this.group.position.y, 0);
   }
 
   update(progress: number, _duration = 1): void {
@@ -693,22 +403,19 @@ export class PhysicalDieVisualInstance {
     if (!this.presented) return;
     sample(this.trajectory, normalized, this.group.position, this.inner.quaternion);
     const opacity = wasPresented ? 1 : THREE.MathUtils.clamp(normalized * 7, 0, 1);
-    this.inner.traverse((object) => {
-      if (object instanceof THREE.Mesh || object instanceof THREE.LineSegments) {
-        const materials = Array.isArray(object.material) ? object.material : [object.material];
-        for (const material of materials) if ('opacity' in material) material.opacity = opacity;
-      }
-    });
+    this.mesh.setOpacity(opacity);
+    this.mesh.updateShadow(this.group.position.y, opacity);
   }
 
   settle(): void {
-    if (!this.settled) {
-      this.update(1, 1);
-      this.lastProgress = 1;
-      this.presented = true;
-      this.group.visible = true;
-      this.settled = true;
-    }
+    if (this.settled) return;
+    this.update(1, 1);
+    this.lastProgress = 1;
+    this.presented = true;
+    this.group.visible = true;
+    this.mesh.setOpacity(1);
+    this.mesh.updateShadow(this.group.position.y, 1);
+    this.settled = true;
   }
 
   getWorldPosition(target = new THREE.Vector3()): THREE.Vector3 {
@@ -726,10 +433,19 @@ export class PhysicalDieVisualInstance {
   dispose(): void {
     activePhysicalDice.delete(this);
     pendingPhysicalDice.delete(this);
-    for (const texture of this.ownedLabelTextures) texture.dispose();
-    for (const geometry of this.extraGeometries) geometry.dispose();
-    this.base.dispose();
+    this.mesh.dispose();
   }
+}
+
+export interface PendingPhysicalLaunchParticipant {
+  id: string;
+  radius: number;
+  coinLike: boolean;
+}
+
+export interface PendingPhysicalLaunchAssignment {
+  id: string;
+  state: PhysicalLaunchState;
 }
 
 export interface PhysicalFallbackPlanEntry {
@@ -748,6 +464,24 @@ export interface PhysicalFallbackReplay {
 
 function configuredPhysicalDice(): PhysicalDieVisualInstance[] {
   return [...activePhysicalDice].filter((entry) => entry.configured);
+}
+
+export function getPendingPhysicalLaunchParticipants(): PendingPhysicalLaunchParticipant[] {
+  return [...pendingPhysicalDice]
+    .filter((entry) => entry.configured)
+    .map((entry) => entry.launchParticipant);
+}
+
+export function assignPendingPhysicalLaunchStates(
+  assignments: readonly PendingPhysicalLaunchAssignment[],
+): void {
+  const states = new Map(
+    assignments.map((assignment) => [assignment.id, assignment.state] as const),
+  );
+  for (const entry of pendingPhysicalDice) {
+    const state = states.get(entry.spec.id);
+    if (state) entry.assignLaunchState(state);
+  }
 }
 
 /** True when at least one arbitrary numeric die is participating in the physical table. */

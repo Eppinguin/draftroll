@@ -8,6 +8,8 @@ const [
   visuals,
   physicalDice,
   physicalVisuals,
+  physicalMesh,
+  physicalLaunch,
   physicalPlanner,
   rollWorker,
   physicsShapes,
@@ -22,6 +24,8 @@ const [
   readFile(new URL('../src/fallback-visuals.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/physical-dice.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/physical-die-visuals.ts', import.meta.url), 'utf8'),
+  readFile(new URL('../src/physical-die-mesh.ts', import.meta.url), 'utf8'),
+  readFile(new URL('../src/physical-launch.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/physical-roll-planner.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/roll-worker.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/physics-shapes.ts', import.meta.url), 'utf8'),
@@ -131,8 +135,8 @@ assert.match(physicalVisuals, /class PhysicalDieVisualInstance/);
 assert.match(physicalVisuals, /createGeneratedPhysicalDieDefinition/);
 assert.match(physicalVisuals, /createDefaultPhysicalDiePresentation/);
 assert.match(physicalVisuals, /draftrollPhysicalPresentation/);
-assert.match(physicalVisuals, /presentationTexture/);
-assert.match(physicalVisuals, /content.kind === 'icon'/);
+assert.match(physicalMesh, /presentationTexture/);
+assert.match(physicalMesh, /content.kind === 'icon'/);
 assert.match(physicalVisuals, /physicalDieColliderRadius/);
 assert.match(physicalVisuals, /getPhysicalFallbackPlanEntries/);
 assert.match(physicalVisuals, /commitPhysicalFallbackPlan/);
@@ -145,6 +149,8 @@ assert.doesNotMatch(physicalVisuals, /PhysicalRollPlanner/);
 assert.doesNotMatch(physicalVisuals, /localPlanner/);
 assert.doesNotMatch(physicalVisuals, /new Worker\(/);
 assert.doesNotMatch(physicalVisuals, /new CANNON\.World/);
+assert.doesNotMatch(visualBase, /createGeneratedDieVisual/);
+assert.doesNotMatch(visualBase, /createReadablePolyhedron/);
 assert.match(engine, /getPhysicalFallbackPlanEntries/);
 assert.match(engine, /commitPhysicalFallbackPlan/);
 assert.match(engine, /additional,/);
@@ -153,14 +159,20 @@ assert.match(engine, /physicalFallbackReplay/);
 assert.doesNotMatch(physicalVisuals, /settledRotation/);
 
 // Runtime themes can paint arbitrary artwork into generated physical outcome slots.
-assert.match(physicalVisuals, /getRuntimeThemeTexture/);
-assert.match(physicalVisuals, /getRuntimeThemeMaterial/);
-assert.match(physicalVisuals, /getRuntimeThemeMesh/);
-assert.match(physicalVisuals, /function atlasCellTexture/);
-assert.match(physicalVisuals, /LABEL_ATLAS_COLUMNS = 5/);
-assert.match(physicalVisuals, /LABEL_ATLAS_ROWS = 4/);
-assert.match(physicalVisuals, /getRuntimeThemeTexture\(spec\.theme, spec\.type, 'label'\)/);
-assert.match(physicalVisuals, /ownedLabelTextures/);
+assert.match(physicalMesh, /getRuntimeThemeTexture/);
+assert.match(physicalMesh, /getRuntimeThemeMaterial/);
+assert.match(physicalMesh, /getRuntimeThemeMesh/);
+assert.match(physicalMesh, /createPhysicalDieMesh/);
+assert.match(physicalMesh, /updateShadow/);
+assert.doesNotMatch(physicalVisuals, /BaseFallbackVisualInstance/);
+assert.doesNotMatch(physicalVisuals, /fallback-visuals-base/);
+assert.match(physicalLaunch, /createPhysicalLaunchStates/);
+assert.match(physicalLaunch, /participant\.radius/);
+assert.match(physicalMesh, /function atlasCellTexture/);
+assert.match(physicalMesh, /LABEL_ATLAS_COLUMNS = 5/);
+assert.match(physicalMesh, /LABEL_ATLAS_ROWS = 4/);
+assert.match(physicalMesh, /getRuntimeThemeTexture\(spec\.theme, spec\.type, 'label'\)/);
+assert.match(physicalMesh, /ownedTextures/);
 
 // Generated geometry remains the arbitrary-shape provider, not a separate die architecture.
 assert.match(polyhedra, /function fibonacciPoints/);
@@ -177,12 +189,11 @@ assert.doesNotMatch(polyhedra, /function bipyramid/);
 assert.doesNotMatch(polyhedra, /function prismBarrel/);
 
 // Cards/coins/symbolic visuals still belong to the non-die presentation layer.
-assert.match(visualBase, /createGeneratedDieVisual/);
-assert.match(visualBase, /triangulateTexturedShape/);
-assert.match(visualBase, /createDieSurfaceTexture/);
-assert.match(visualBase, /PolyhedronLabelAnchor/);
-assert.match(visualBase, /labelQuaternion/);
-assert.match(visualBase, /outcome\.labels/);
+assert.doesNotMatch(visualBase, /createGeneratedDieVisual/);
+assert.doesNotMatch(visualBase, /triangulateTexturedShape/);
+assert.doesNotMatch(visualBase, /createDieSurfaceTexture/);
+assert.doesNotMatch(visualBase, /PolyhedronLabelAnchor/);
+assert.doesNotMatch(visualBase, /createReadablePolyhedron/);
 assert.match(visualBase, /createCardVisual/);
 assert.match(visualBase, /createCardFrontTexture/);
 assert.match(visualBase, /createCardBackTexture/);
@@ -234,6 +245,9 @@ console.log(
       publicGeneratedDiceArePhysical: true,
       semanticPhysicalFaceContent: true,
       arbitraryThemeMeshes: true,
+      firstClassPhysicalMeshBuilder: true,
+      sharedCanonicalGeneratedLaunch: true,
+      fallbackRendererContainsNoDice: true,
       noParallelGeneratedPhysicsEngine: true,
       automaticFaceEdgeVertexLabels: true,
       generatedFaceLabelCoverage: true,

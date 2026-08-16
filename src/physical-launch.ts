@@ -182,18 +182,12 @@ function createHandCluster(
   const safeSpacing = Math.max(1.1, diameter * 1.012);
   const root = Math.sqrt(count);
   const largePool = count >= 12;
-  let halfX = Math.min(
-    boundsInput.x - 0.9,
-    largePool ? 1.48 + root * 0.58 : 0.92 + root * 0.39,
-  );
+  let halfX = Math.min(boundsInput.x - 0.9, largePool ? 1.48 + root * 0.58 : 0.92 + root * 0.39);
   let halfZ = Math.min(
     largePool ? 2.42 : 1.92,
     largePool ? 0.82 + root * 0.31 : 0.58 + root * 0.235,
   );
-  let halfY = Math.min(
-    largePool ? 2.1 : 2.8,
-    largePool ? 0.72 + root * 0.29 : 0.52 + root * 0.39,
-  );
+  let halfY = Math.min(largePool ? 2.1 : 2.8, largePool ? 0.72 + root * 0.29 : 0.52 + root * 0.39);
   const centerXLimit = Math.max(0, boundsInput.x - halfX - 0.92);
   const centerX = THREE.MathUtils.clamp(
     horizontalBias * boundsInput.x * 0.32,
@@ -528,7 +522,7 @@ export function createPhysicalLaunchStates(
       position: [position.x, position.y, position.z],
       quaternion: [quaternion.x, quaternion.y, quaternion.z, quaternion.w],
       velocity: [velocityX, velocityY, velocityZ],
-      angularVelocity: angularVelocity as [number, number, number],
+      angularVelocity: [angularVelocity[0], angularVelocity[1], angularVelocity[2]],
       delay,
       target: [target.x, target.y],
     };

@@ -4,10 +4,12 @@ import { resolve, join } from 'node:path';
 
 const root = resolve(import.meta.dirname, '..');
 const main = await readFile(join(root, 'src/main.ts'), 'utf8');
+const launch = await readFile(join(root, 'src/physical-launch.ts'), 'utf8');
 const worker = await readFile(join(root, 'src/roll-worker.ts'), 'utf8');
 const physicalPlanner = await readFile(join(root, 'src/physical-roll-planner.ts'), 'utf8');
 const dice = await readFile(join(root, 'src/dice.ts'), 'utf8');
 const physicsShapes = await readFile(join(root, 'src/physics-shapes.ts'), 'utf8');
+const physicalDice = await readFile(join(root, 'src/physical-dice.ts'), 'utf8');
 const restingPhysics = await readFile(join(root, 'src/resting-physics.ts'), 'utf8');
 const colliders = await readFile(join(root, 'src/collider-data.ts'), 'utf8');
 const renderer = await readFile(join(root, 'packages/renderer/src/index.ts'), 'utf8');
@@ -19,13 +21,20 @@ const wrangler = await readFile(join(root, 'apps/worker/wrangler.jsonc'), 'utf8'
 
 assert.match(dice, /getTargetNormal\(value: number\)/);
 assert.match(dice, /getResultSymmetryRotation\(fromValue: number, toValue: number\)/);
-assert.match(physicsShapes, /kind === 'coin'[\s\S]*?new CANNON\.Cylinder/);
+assert.match(
+  physicsShapes,
+  /createPhysicalDieCollider\(createCanonicalPhysicalDieDefinition\(kind\), sizeScale\)/,
+);
+assert.match(physicalDice, /collider\.kind === 'cylinder'[\s\S]*?new CANNON\.Cylinder/);
 assert.match(dice, /this\.kind === 'coin'[\s\S]*?Math\.PI/);
-assert.match(main, /die\.kind === 'coin'[\s\S]*?rollingX \* 1\.22/);
+assert.match(launch, /participant\.coinLike[\s\S]*?rollingX \* 1\.22/);
 assert.match(renderer, /normalized === 'd2'\) return 'coin'/);
 assert.match(physicalPlanner, /allWellSeated[\s\S]*?releaseUnstableRestPose/);
 assert.match(restingPhysics, /minimumRestingAlignment/);
-assert.match(restingPhysics, /closest support state is already determined by the natural trajectory/);
+assert.match(
+  restingPhysics,
+  /closest support state is already determined by the natural trajectory/,
+);
 assert.doesNotMatch(restingPhysics, /activeTargets|requested result/);
 assert.match(dice, /mapsShape/);
 assert.match(main, /function applyShapeSymmetryTargets/);
@@ -56,7 +65,7 @@ assert.match(main, /tableReplanPaused/);
 assert.match(main, /const lockedTrajectory = isRolling[\s\S]*?createLockedTableTrajectory/);
 assert.match(
   main,
-  /newStates\.length > 0[\s\S]*?buildRollPlan\(\[\.\.\.existingStates, \.\.\.newStates\], existingCount, lockedTrajectory\)[\s\S]*?createStaticTablePlan/,
+  /needsSharedPhysicalPlan[\s\S]*?buildRollPlan\(\[\.\.\.existingStates, \.\.\.newStates\], existingCount, lockedTrajectory\)[\s\S]*?createStaticTablePlan/,
 );
 assert.match(main, /Keep the completed plan while the table remains visible/);
 assert.match(overlay, /table: options\.table \? \{ \.\.\.options\.table \} : undefined/);
@@ -198,6 +207,7 @@ console.log(
         'shape-symmetry exact-result targeting',
         'all result-to-result symmetries for d4/d6/d8/d10/d12/d20',
         'physical d2 cylinder with coin-specific exact-result symmetry and launch flip',
+        'canonical and generated dice share one hand-launch generator',
         'result-independent edge/corner resting-pose release',
         'constant local-space trajectory rotation',
         'no post-impact target torque assistance',
