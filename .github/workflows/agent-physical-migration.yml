@@ -42,6 +42,8 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Format changed sources
         run: pnpm exec oxfmt src/main.ts src/physical-die-visuals.ts scripts/test-visual-fallbacks.mjs
+      - name: Apply safe lint fixes
+        run: env -u GITHUB_ACTIONS pnpm lint:fix
       - name: Lint
         run: env -u GITHUB_ACTIONS pnpm lint
       - name: Typecheck packages
