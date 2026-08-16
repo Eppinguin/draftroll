@@ -1679,7 +1679,7 @@ function prepareTargets(): boolean {
     fallbacks.length,
   );
   queuedVisualOrder = null;
-  if (activeVisualOrder.length !== quantity + fallbacks.length) {
+  if (activeVisualOrder.length !== activePhysicalSpecs.length + fallbacks.length) {
     setStatus('Visual ordering does not match the roll components', false);
     return false;
   }

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { runTsc } from './lib/load-typescript.mjs';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -209,6 +209,18 @@ try {
   assert.equal(calls[1].physical[3].presentation.contents[0].text, '−');
   assert.equal(calls[1].fallbacks[0].label, 'Success');
   assert.equal(calls[1].fallbacks[1].label, 'Storm');
+
+  const browserHost = await readFile(join(projectRoot, 'src/main.ts'), 'utf8');
+  assert.match(
+    browserHost,
+    /activeVisualOrder\.length !== activePhysicalSpecs\.length \+ fallbacks\.length/,
+    'browser host must validate visual order against every physical descriptor, not only canonical dice',
+  );
+  assert.doesNotMatch(
+    browserHost,
+    /activeVisualOrder\.length !== quantity \+ fallbacks\.length/,
+    'generated/custom physical dice must not be omitted from browser-host visual-order validation',
+  );
 
   const totalOnly = {
     authority: 'local',
