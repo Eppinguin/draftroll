@@ -39,6 +39,66 @@ jobs:
           PY
       - name: Apply guarded migration
         run: node scripts/agent-physical-bridge-migration.mjs
+      - name: Apply lint-safe migration cleanup
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace(path_name, before, after, label):
+              path = Path(path_name)
+              source = path.read_text()
+              count = source.count(before)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected one match, found {count}')
+              path.write_text(source.replace(before, after, 1))
+
+          replace(
+              'scripts/test-visual-fallbacks.mjs',
+              'assert.match(renderer, /physical?: DraftrollPhysicalVisual[]/);',
+              r'assert.match(renderer, /physical\?: DraftrollPhysicalVisual\[\]/);',
+              'physical bridge regex escaping',
+          )
+          replace(
+              'packages/renderer/src/index.ts',
+              "return { kind: 'text', text: face.label ?? String(face.result) };",
+              "return { kind: 'text', text: face.label ?? face.result };",
+              'custom physical text label',
+          )
+
+          path = Path('src/main.ts')
+          source = path.read_text()
+          before = '''  const tableRolls = raw.map((value) => {\n    if (!isRecord(value) || !Array.isArray(value.dieIds)) return value;\n    const dieIds = value.dieIds.filter((id): id is string => typeof id === 'string');\n    const ids = new Set(dieIds);\n    const physicalIndexes = visualOrder\n      .filter((entry) => entry.kind === 'physical' && ids.has(entry.dieId))\n      .map((entry) => entry.index);\n    const fallbackIndexes = visualOrder\n      .filter((entry) => entry.kind === 'fallback' && ids.has(entry.dieId))\n      .map((entry) => entry.index);\n    return {\n      ...value,\n      dieIds,\n      physicalStart: physicalIndexes.length > 0 ? Math.min(...physicalIndexes) : 0,\n      physicalCount: physicalIndexes.length,\n      fallbackStart: fallbackIndexes.length > 0 ? Math.min(...fallbackIndexes) : 0,\n      fallbackCount: fallbackIndexes.length,\n      visualCount: physicalIndexes.length + fallbackIndexes.length,\n    };\n  });'''
+          after = '''  const tableRolls: unknown[] = [];\n  for (const value of raw) {\n    if (!isRecord(value) || !Array.isArray(value.dieIds)) {\n      tableRolls.push(value);\n      continue;\n    }\n    const dieIds = value.dieIds.filter((id): id is string => typeof id === 'string');\n    const ids = new Set(dieIds);\n    const physicalIndexes = visualOrder\n      .filter((entry) => entry.kind === 'physical' && ids.has(entry.dieId))\n      .map((entry) => entry.index);\n    const fallbackIndexes = visualOrder\n      .filter((entry) => entry.kind === 'fallback' && ids.has(entry.dieId))\n      .map((entry) => entry.index);\n    tableRolls.push(\n      Object.assign({}, value, {\n        dieIds,\n        physicalStart: physicalIndexes.length > 0 ? Math.min(...physicalIndexes) : 0,\n        physicalCount: physicalIndexes.length,\n        fallbackStart: fallbackIndexes.length > 0 ? Math.min(...fallbackIndexes) : 0,\n        fallbackCount: fallbackIndexes.length,\n        visualCount: physicalIndexes.length + fallbackIndexes.length,\n      }),\n    );\n  }'''
+          if source.count(before) != 1:
+              raise SystemExit(f'table roll copy cleanup: expected one match, found {source.count(before)}')
+          source = source.replace(before, after, 1)
+          source = source.replace(
+              "return { ...entry, index: generatedFallbacks.length + entry.index };",
+              "return { kind: 'fallback', index: generatedFallbacks.length + entry.index, dieId: entry.dieId };",
+              1,
+          )
+          source = source.replace(
+              "if (canonicalIndex !== undefined) return { ...entry, index: canonicalIndex };",
+              "if (canonicalIndex !== undefined) {\n      return { kind: 'physical', index: canonicalIndex, dieId: entry.dieId };\n    }",
+              1,
+          )
+          path.write_text(source)
+
+          path = Path('src/physical-die-visuals.ts')
+          source = path.read_text()
+          source = source.replace(
+              "function parsePhysicalFaceContent(value: unknown): PhysicalDieFaceContent | null {\n  if (!value || typeof value !== 'object') return null;\n  const record = value as Record<string, unknown>;",
+              "function isRecord(value: unknown): value is Record<string, unknown> {\n  return typeof value === 'object' && value !== null;\n}\n\nfunction parsePhysicalFaceContent(value: unknown): PhysicalDieFaceContent | null {\n  if (!isRecord(value)) return null;\n  const record = value;",
+              1,
+          )
+          source = source.replace(
+              "  if (raw && typeof raw === 'object' && Array.isArray((raw as { contents?: unknown }).contents)) {\n    const contents = (raw as { contents: unknown[] }).contents.map(parsePhysicalFaceContent);",
+              "  if (isRecord(raw) && Array.isArray(raw.contents)) {\n    const contents = raw.contents.map(parsePhysicalFaceContent);",
+              1,
+          )
+          source = source.replace('  const length = [...text].length;', '  const length = Array.from(text).length;', 1)
+          path.write_text(source)
+          PY
       - name: Remove one-time migration files
         run: rm -f scripts/agent-physical-bridge-migration.mjs .github/workflows/agent-physical-bridge-migration.yml .agent-physical-bridge-trigger
       - name: Install pnpm
