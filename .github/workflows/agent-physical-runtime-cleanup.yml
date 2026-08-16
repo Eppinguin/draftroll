@@ -85,10 +85,16 @@ jobs:
               'assert.match(physicalVisuals, /ownedLabelTextures/);': 'assert.match(physicalMesh, /ownedTextures/);',
           }
           for before, after in replacements.items():
-              count = source.count(before)
-              if count != 1:
-                  raise SystemExit(f'physical mesh smoke ownership {before}: expected one match, found {count}')
-              source = source.replace(before, after, 1)
+              old_count = source.count(before)
+              new_count = source.count(after)
+              if old_count == 1:
+                  source = source.replace(before, after, 1)
+              elif old_count == 0 and new_count >= 1:
+                  continue
+              else:
+                  raise SystemExit(
+                      f'physical mesh smoke ownership {before}: old={old_count}, new={new_count}'
+                  )
           path.write_text(source)
           PY
       - name: Remove one-time migration files
