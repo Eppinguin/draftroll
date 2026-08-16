@@ -249,3 +249,10 @@ assert.match(physicalVisuals, /getRuntimeThemePresentation/);
 assert.doesNotMatch(physicalVisuals, /draftrollPhysicalPresentation/);""",
     'direct physical presentation smoke assertion',
 )
+replace_once(
+    'scripts/test-visual-fallbacks.mjs',
+    'assert.match(engine, /physicalFallbackReplay/);',
+    """assert.match(engine, /additionalPhysicalReplay/);
+assert.doesNotMatch(engine, /physicalFallbackReplay/);""",
+    'additional physical replay smoke assertion',
+)
