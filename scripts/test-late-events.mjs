@@ -185,7 +185,7 @@ try {
   assert.match(rendererSource, /applyPlanTransform\(plan, time, scale\.x, scale\.z\)/);
   assert.match(
     rendererSource,
-    /genericPhysicalVisuals\.forEach\(\(visual\) => visual\.update\(time, scale\.x, scale\.z\)\)/,
+    /physicalTable\.forEachVisual\(\(visual\) => visual\.update\(time, scale\.x, scale\.z\)\)/,
   );
   assert.match(rendererSource, /updatePlanVisuals\(plan, planTime\)/);
   assert.match(rendererSource, /impact\.time > planTime/);

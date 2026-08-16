@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { DraftrollPhysicalVisual } from '../packages/renderer/src/index';
+import { clonePhysicalDieDefinition } from '../packages/renderer/src/physical';
 import {
   createDefaultPhysicalDiePresentation,
   createGeneratedPhysicalDieDefinition,
@@ -106,8 +107,6 @@ export class PhysicalDieVisualInstance {
 
   private readonly mesh: PhysicalDieMesh;
   private readonly inner: THREE.Group;
-  private readonly labelMaterials: THREE.MeshBasicMaterial[];
-  private readonly originalLabelMaps: Array<THREE.Texture | null>;
   private readonly requestedOutcome: number;
   private readonly sampleQuaternion = new THREE.Quaternion();
   private readonly plannerQuaternionA = new THREE.Quaternion();
@@ -121,17 +120,29 @@ export class PhysicalDieVisualInstance {
   private lastScaleX = 1;
   private lastScaleZ = 1;
   private activationDelay = 0;
+  private landedOutcome: number | null = null;
 
   constructor(spec: DraftrollPhysicalVisual) {
     this.spec = spec;
-    if (!Number.isSafeInteger(spec.sides) || spec.sides < 1 || spec.sides > 256) {
-      throw new Error(`Physical die requires 1 to 256 exact outcome slots: ${spec.type}`);
+    const maximumSides = spec.definition ? 10_000 : 256;
+    if (!Number.isSafeInteger(spec.sides) || spec.sides < 1 || spec.sides > maximumSides) {
+      throw new Error(`Physical die requires 1 to ${maximumSides} outcome slots: ${spec.type}`);
     }
     if (activePhysicalDice.has(spec.id)) {
       throw new Error(`Physical die id is already active: ${spec.id}`);
     }
     this.sides = spec.sides;
-    this.definition = createGeneratedPhysicalDieDefinition(spec.sides);
+    this.definition = spec.definition
+      ? clonePhysicalDieDefinition(spec.definition)
+      : createGeneratedPhysicalDieDefinition(spec.sides);
+    if (this.definition.sides !== spec.sides || this.definition.outcomes.length !== spec.sides) {
+      throw new Error(`Physical definition does not match descriptor: ${spec.id}`);
+    }
+    if (spec.definition && this.definition.targeting !== 'relabel') {
+      throw new Error(
+        `Host-supplied physical die ${spec.id} requires relabel targeting; ${this.definition.targeting} targeting has no custom rotation/search provider`,
+      );
+    }
     const resolvedPresentation = readPhysicalPresentation(spec, this.definition);
     this.requestedOutcome = spec.outcomeIndex;
     this.mesh = createPhysicalDieMesh({
@@ -142,8 +153,6 @@ export class PhysicalDieVisualInstance {
     });
     this.group = this.mesh.group;
     this.inner = this.mesh.visualRoot;
-    this.labelMaterials = this.mesh.labelMaterials;
-    this.originalLabelMaps = this.mesh.labelMaps.slice();
     activePhysicalDice.set(spec.id, this);
   }
 
@@ -206,18 +215,7 @@ export class PhysicalDieVisualInstance {
       this.definition.outcomes.length - 1,
     );
     if (requested === landing) return;
-    const requestedMap = this.originalLabelMaps[requested] ?? null;
-    const landingMap = this.originalLabelMaps[landing] ?? null;
-    const requestedMaterial = this.labelMaterials[requested];
-    const landingMaterial = this.labelMaterials[landing];
-    if (requestedMaterial) {
-      requestedMaterial.map = landingMap;
-      requestedMaterial.needsUpdate = true;
-    }
-    if (landingMaterial) {
-      landingMaterial.map = requestedMap;
-      landingMaterial.needsUpdate = true;
-    }
+    this.mesh.swapOutcomeLabels(requested, landing);
   }
 
   plannerState(): number[] {
@@ -326,6 +324,7 @@ export class PhysicalDieVisualInstance {
     activationDelay = 0,
   ): void {
     const newlyIntroduced = this.needsPlanning;
+    this.landedOutcome = landed;
     if (newlyIntroduced) this.applyRequestedResult(landed);
     this.trajectory = { transforms, frameCount, step, physicalCount, physicalIndex };
     this.activationDelay = Math.max(0, activationDelay);
@@ -392,6 +391,27 @@ export class PhysicalDieVisualInstance {
     this.settled = true;
   }
 
+  get targetingMode(): PhysicalDieDefinition['targeting'] {
+    return this.definition.targeting;
+  }
+
+  get landedOutcomeIndex(): number | null {
+    return this.landedOutcome;
+  }
+
+  get displayedOutcomeIndex(): number {
+    return this.requestedOutcome;
+  }
+
+  getVisualRadius(): number {
+    return this.definition.radius;
+  }
+
+  moveTo(position: THREE.Vector3): void {
+    this.group.position.copy(position);
+    this.mesh.updateShadow(this.group.position.y, 1);
+  }
+
   getWorldPosition(target = new THREE.Vector3()): THREE.Vector3 {
     return this.group.getWorldPosition(target);
   }
@@ -437,6 +457,10 @@ export interface PhysicalVisualPlanAssignment {
 
 function configuredPhysicalDice(): PhysicalDieVisualInstance[] {
   return [...activePhysicalDice.values()].filter((entry) => entry.isPrepared);
+}
+
+export function getPhysicalVisualInstance(id: string): PhysicalDieVisualInstance | undefined {
+  return activePhysicalDice.get(id);
 }
 
 export function getPendingPhysicalLaunchParticipants(): PendingPhysicalLaunchParticipant[] {

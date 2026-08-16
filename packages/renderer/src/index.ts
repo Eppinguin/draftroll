@@ -33,7 +33,14 @@ export type {
   PhysicalDieTargetingMode,
   SerializedPhysicalCollider,
 } from './physical';
-import type { PhysicalDieFaceContent, PhysicalDiePresentation } from './physical';
+export { clonePhysicalDieDefinition } from './physical';
+import {
+  clonePhysicalDieDefinition,
+  type PhysicalDieDefinition,
+  type PhysicalDieFaceContent,
+  type PhysicalDieModel,
+  type PhysicalDiePresentation,
+} from './physical';
 import type {
   CustomDiceDefinition,
   CustomDieFace,
@@ -99,8 +106,14 @@ export interface DraftrollPhysicalVisual {
   result: number | string;
   /** Numeric contribution retained independently from the face artwork. */
   numericValue?: number;
-  /** Canonical optimized geometry when available; otherwise generated geometry is used. */
+  /** Canonical optimized geometry when available; otherwise generated/custom geometry is used. */
   canonicalKind?: DraftrollDieKind;
+  /**
+   * Explicit geometry/support definition for a host-supplied physical model.
+   * Host-supplied definitions currently use relabel targeting so authoritative outcomes remain
+   * deterministic without steering the physical trajectory.
+   */
+  definition?: PhysicalDieDefinition;
   title: string;
   label: string;
   theme: string;
@@ -216,6 +229,13 @@ export interface RendererPlayOptions {
   /** Optional multi-roller table batching. Room sessions enable this by default. */
   table?: RendererTableOptions;
   defaultThemeId?: string;
+  /**
+   * Optional host-supplied physical models keyed by die ID, custom-die ID, die type, or dN.
+   * A model overrides generated/canonical geometry for the matching rendered die without changing
+   * the authoritative normalized result. Host-supplied models currently require relabel targeting;
+   * fixed artwork and custom symmetry targeting need an explicit trajectory/rotation provider first.
+   */
+  physicalModels?: Readonly<Record<string, PhysicalDieModel>>;
   /** Render only these normalized die IDs while retaining the full roll context. */
   dieIds?: readonly string[];
   /**
@@ -547,6 +567,7 @@ function clonePreparedPhysicalVisual(visual: PhysicalVisual): DraftrollPhysicalV
     result: visual.result,
     numericValue: visual.numericValue,
     canonicalKind: visual.canonicalKind,
+    definition: visual.definition ? clonePhysicalDieDefinition(visual.definition) : undefined,
     title: visual.title,
     label: visual.label,
     theme: visual.theme,
@@ -956,7 +977,22 @@ export class DraftrollRenderer implements DiceRenderer {
         options.signal,
       );
       const definition = definitions.get(die.customDiceId ?? '');
-      const physicalSlot = resolvePhysicalSlot(die, definition);
+      const physicalModel = resolvePhysicalModel(options.physicalModels, die);
+      if (physicalModel && physicalModel.definition.targeting !== 'relabel') {
+        throw new UnsupportedRollError(
+          `Physical model ${physicalModel.definition.id} uses ${physicalModel.definition.targeting} targeting; host-supplied physical models currently require relabel targeting to preserve authoritative results`,
+          result,
+        );
+      }
+      const physicalSlot = physicalModel
+        ? resolvePhysicalModelSlot(die, physicalModel)
+        : resolvePhysicalSlot(die, definition);
+      if (physicalModel && !physicalSlot) {
+        throw new UnsupportedRollError(
+          `Physical model ${physicalModel.definition.id} cannot map result for die ${die.id}`,
+          result,
+        );
+      }
       const outcome =
         options.outcomeResolver?.(die, result) ?? defaultOutcomeForDie(die, physicalSlot?.sides);
 
@@ -971,15 +1007,29 @@ export class DraftrollRenderer implements DiceRenderer {
           result: die.result,
           numericValue:
             die.numericValue ?? (typeof die.result === 'number' ? die.result : undefined),
-          canonicalKind: physicalSlot.kind ?? undefined,
-          title: readPhysicalTitle(die, definition, physicalSlot.sides),
+          canonicalKind: physicalModel ? undefined : (physicalSlot.kind ?? undefined),
+          definition: physicalModel
+            ? clonePhysicalDieDefinition(physicalModel.definition)
+            : undefined,
+          title: readPhysicalTitle(
+            die,
+            definition,
+            physicalSlot.sides,
+            physicalModel?.definition.id,
+          ),
           label: die.faceLabel ?? String(die.result),
           theme,
           outcome,
           physics: die.physics,
-          presentation: definition
-            ? createCustomPhysicalPresentation(definition, physicalSlot.sides)
-            : intrinsicPhysicalPresentation(die, physicalSlot.sides),
+          presentation: physicalModel
+            ? {
+                contents: physicalModel.presentation.contents.map((content) =>
+                  Object.assign({}, content),
+                ),
+              }
+            : definition
+              ? createCustomPhysicalPresentation(definition, physicalSlot.sides)
+              : intrinsicPhysicalPresentation(die, physicalSlot.sides),
           metadata: {
             ...definition?.metadata,
             ...die.metadata,
@@ -1732,6 +1782,65 @@ function resolvePhysicalSlot(
   return { kind, sides, outcomeIndex: value - 1 };
 }
 
+function resolvePhysicalModel(
+  models: RendererPlayOptions['physicalModels'],
+  die: NormalizedDieResult,
+): PhysicalDieModel | undefined {
+  if (!models) return undefined;
+  const candidates = [
+    die.id,
+    die.customDiceId,
+    die.type,
+    Number.isSafeInteger(die.sides) ? `d${die.sides}` : undefined,
+  ];
+  for (const key of candidates) {
+    if (!key) continue;
+    const model = models[key];
+    if (model) return model;
+  }
+  return undefined;
+}
+
+function resolvePhysicalModelSlot(
+  die: NormalizedDieResult,
+  model: PhysicalDieModel,
+): ResolvedPhysicalSlot | null {
+  const definition = model.definition;
+  if (
+    !definition.id.trim() ||
+    !Number.isSafeInteger(definition.sides) ||
+    definition.sides < 1 ||
+    definition.sides > 10_000 ||
+    definition.outcomes.length !== definition.sides ||
+    model.presentation.contents.length !== definition.sides
+  ) {
+    return null;
+  }
+  if (die.faceIndex !== undefined && Number.isInteger(die.faceIndex)) {
+    const faceIndex = die.faceIndex;
+    if (faceIndex >= 0 && faceIndex < definition.sides) {
+      return { kind: null, sides: definition.sides, outcomeIndex: faceIndex };
+    }
+  }
+  const numeric = die.numericValue ?? (typeof die.result === 'number' ? die.result : Number.NaN);
+  const matches = definition.outcomes.filter((outcome) => {
+    const semantic = outcome.result ?? outcome.value;
+    if (semantic !== die.result) return false;
+    return (
+      outcome.numericValue === undefined ||
+      !Number.isFinite(numeric) ||
+      outcome.numericValue === numeric
+    );
+  });
+  if (matches.length === 1) {
+    return { kind: null, sides: definition.sides, outcomeIndex: matches[0].index };
+  }
+  if (Number.isInteger(numeric) && numeric >= 1 && numeric <= definition.sides) {
+    return { kind: null, sides: definition.sides, outcomeIndex: numeric - 1 };
+  }
+  return null;
+}
+
 function intrinsicPhysicalPresentation(
   die: NormalizedDieResult,
   sides: number,
@@ -1796,11 +1905,12 @@ function readPhysicalTitle(
   die: NormalizedDieResult,
   definition: CustomDiceDefinition | undefined,
   sides: number,
+  physicalModelId?: string,
 ): string {
   const metadataLabel = typeof die.metadata?.label === 'string' ? die.metadata.label : undefined;
   const definitionLabel =
     typeof definition?.metadata?.name === 'string' ? definition.metadata.name : undefined;
-  return metadataLabel ?? definitionLabel ?? (definition?.id || `d${sides}`);
+  return metadataLabel ?? definitionLabel ?? physicalModelId ?? (definition?.id || `d${sides}`);
 }
 
 function numericFaceValue(value: number | string): number {

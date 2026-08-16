@@ -63,9 +63,6 @@ try {
         replay: null,
       };
     },
-    setDie() {},
-    setQuantity() {},
-    setTheme() {},
     getThemes() {
       return [
         { id: 'dragon', name: 'Wyrmfire' },
@@ -210,6 +207,83 @@ try {
   assert.equal(calls[1].fallbacks[0].label, 'Success');
   assert.equal(calls[1].fallbacks[1].label, 'Storm');
 
+  const customModelResult = {
+    authority: 'local',
+    name: 'Custom physical model',
+    expression: '1d3',
+    total: 2,
+    dice: [{ id: 'custom-d3', type: 'd3', sides: 3, result: 2, kept: true, themeId: 'dragon' }],
+    operations: [],
+    createdAt: new Date(0).toISOString(),
+  };
+  const customModel = {
+    definition: {
+      id: 'host:triad:v1',
+      sides: 3,
+      geometrySource: 'theme',
+      targeting: 'relabel',
+      radius: 0.72,
+      collisionScale: 1.02,
+      collider: { kind: 'box', halfExtents: [0.55, 0.55, 0.55] },
+      outcomes: [
+        {
+          index: 0,
+          value: 1,
+          result: 1,
+          numericValue: 1,
+          supportNormals: [[0, 1, 0]],
+          labelAnchors: [],
+        },
+        {
+          index: 1,
+          value: 2,
+          result: 2,
+          numericValue: 2,
+          supportNormals: [[1, 0, 0]],
+          labelAnchors: [],
+        },
+        {
+          index: 2,
+          value: 3,
+          result: 3,
+          numericValue: 3,
+          supportNormals: [[0, 0, 1]],
+          labelAnchors: [],
+        },
+      ],
+    },
+    presentation: {
+      contents: [
+        { kind: 'text', text: 'ONE' },
+        { kind: 'icon', icon: '◆' },
+        { kind: 'text', text: 'THREE' },
+      ],
+    },
+  };
+  const customCompletion = await renderer.playRoll(customModelResult, {
+    animationSeed: 'custom-model',
+    physicalModels: { d3: customModel },
+  });
+  assert.equal(customCompletion.total, 2);
+  assert.equal(calls.length, 3);
+  assert.equal(calls[2].physical.length, 1);
+  assert.equal(calls[2].physical[0].canonicalKind, undefined);
+  assert.equal(calls[2].physical[0].definition.id, 'host:triad:v1');
+  assert.equal(calls[2].physical[0].definition.targeting, 'relabel');
+  assert.equal(calls[2].physical[0].presentation.contents[1].icon, '◆');
+  await assert.rejects(
+    renderer.playRoll(customModelResult, {
+      physicalModels: {
+        d3: {
+          ...customModel,
+          definition: { ...customModel.definition, targeting: 'fixed' },
+        },
+      },
+    }),
+    /currently require relabel targeting/,
+  );
+  assert.equal(calls.length, 3);
+
   const browserHost = await readFile(join(projectRoot, 'src/main.ts'), 'utf8');
   assert.match(
     browserHost,
@@ -233,10 +307,10 @@ try {
   };
   const totalOnlyCompletion = await renderer.playRoll(totalOnly, { animationSeed: 'total-only' });
   assert.equal(totalOnlyCompletion.total, 5);
-  assert.deepEqual(calls[2].physical, []);
-  assert.equal(calls[2].fallbacks[0].kind, 'token');
-  assert.equal(calls[2].fallbacks[0].label, '5');
-  assert.equal(calls[2].fallbacks[0].metadata.synthetic, true);
+  assert.deepEqual(calls[3].physical, []);
+  assert.equal(calls[3].fallbacks[0].kind, 'token');
+  assert.equal(calls[3].fallbacks[0].label, '5');
+  assert.equal(calls[3].fallbacks[0].metadata.synthetic, true);
 
   console.log(
     JSON.stringify(

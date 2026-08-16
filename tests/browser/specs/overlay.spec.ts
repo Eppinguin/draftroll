@@ -57,6 +57,22 @@ test('overlay accepts generated non-standard physical dice', async ({ page }) =>
   const generatedOnly = await generatedRoll;
   expect(generatedOnly.dice).toBe(2);
   expect(Number.isFinite(generatedOnly.total)).toBe(true);
+  const generatedSnapshot = await page
+    .frameLocator('iframe[title="Draftroll dice overlay"]')
+    .locator('body')
+    .evaluate(() => window.draftrollDice.getPhysicalSnapshot());
+  expect(generatedSnapshot).toHaveLength(2);
+  expect(generatedSnapshot.every((entry) => entry.implementation === 'generated')).toBe(true);
+  expect(generatedSnapshot.every((entry) => entry.targeting === 'relabel')).toBe(true);
+  expect(generatedSnapshot.every((entry) => entry.visible)).toBe(true);
+  expect(
+    generatedSnapshot.every(
+      (entry) =>
+        Number.isInteger(entry.landedOutcomeIndex) &&
+        entry.requestedOutcomeIndex >= 0 &&
+        entry.requestedOutcomeIndex < entry.sides,
+    ),
+  ).toBe(true);
 
   await page.getByTestId('underlay-action').click();
   await expect(iframe).toHaveCSS('visibility', 'hidden');
@@ -65,6 +81,16 @@ test('overlay accepts generated non-standard physical dice', async ({ page }) =>
   expect(mixed.dice).toBe(3);
   expect(Number.isFinite(mixed.total)).toBe(true);
   await expect(iframe).toHaveCSS('visibility', 'visible');
+  const mixedSnapshot = await page
+    .frameLocator('iframe[title="Draftroll dice overlay"]')
+    .locator('body')
+    .evaluate(() => window.draftrollDice.getPhysicalSnapshot());
+  expect(mixedSnapshot.map((entry) => entry.implementation)).toEqual([
+    'canonical',
+    'generated',
+    'generated',
+  ]);
+  expect(mixedSnapshot.map((entry) => entry.targeting)).toEqual(['symmetry', 'relabel', 'relabel']);
 });
 
 test('overlay lifecycle survives repeated rolls and explicit host interaction on a responsive viewport', async ({

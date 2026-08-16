@@ -291,8 +291,9 @@ export function createGeneratedPhysicalDieDefinition(sides: number): PhysicalDie
 
 /**
  * Validates and clones host/theme supplied physical geometry into the same definition contract.
- * A custom mesh may use relabel targeting for dynamic content, symmetry when exact rotations are
- * known by the presentation layer, or fixed when artwork is baked permanently into the mesh.
+ * Custom definitions default to relabel targeting so authoritative outcomes can be assigned after
+ * a natural landing. Symmetry/fixed modes are reserved for renderers that also provide the required
+ * rotation set or trajectory-search capability.
  */
 export function createCustomPhysicalDieDefinition(
   input: CustomPhysicalDieDefinitionInput,
@@ -344,7 +345,7 @@ export function createCustomPhysicalDieDefinition(
     id: input.id,
     sides: input.sides,
     geometrySource: 'theme',
-    targeting: input.targeting ?? 'fixed',
+    targeting: input.targeting ?? 'relabel',
     radius: input.radius,
     collisionScale,
     collider: cloneCollider(input.collider),

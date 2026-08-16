@@ -9,11 +9,7 @@
  * @packageDocumentation
  */
 
-import type {
-  PolyhedronLabelAnchor,
-  PolyhedronVertex,
-  ReadablePolyhedron,
-} from './polyhedra';
+import type { PolyhedronLabelAnchor, PolyhedronVertex, ReadablePolyhedron } from './polyhedra';
 
 /**
  * Identifies the provider of one physical die's geometry.
@@ -142,4 +138,64 @@ export interface CustomPhysicalDieDefinitionInput {
     supportNormals: PolyhedronVertex[];
     labelAnchors?: PolyhedronLabelAnchor[];
   }>;
+}
+
+function cloneDefinitionVertex(value: PolyhedronVertex): PolyhedronVertex {
+  return [value[0], value[1], value[2]];
+}
+
+function cloneDefinitionAnchor(anchor: PolyhedronLabelAnchor): PolyhedronLabelAnchor {
+  return {
+    ...anchor,
+    position: cloneDefinitionVertex(anchor.position),
+    normal: cloneDefinitionVertex(anchor.normal),
+    up: cloneDefinitionVertex(anchor.up),
+  };
+}
+
+function cloneReadablePolyhedron(shape: ReadablePolyhedron): ReadablePolyhedron {
+  return {
+    ...shape,
+    vertices: shape.vertices.map(cloneDefinitionVertex),
+    faces: shape.faces.map((face) => face.slice()),
+    landingFaces: shape.landingFaces.slice(),
+    faceKinds: shape.faceKinds?.slice(),
+    outcomes: shape.outcomes.map((outcome) => ({
+      ...outcome,
+      settledUp: cloneDefinitionVertex(outcome.settledUp),
+      labels: outcome.labels.map(cloneDefinitionAnchor),
+    })),
+  };
+}
+
+/**
+ * Deep-clones a serializable physical die definition for replay and bridge ownership boundaries.
+ *
+ * @public
+ */
+export function clonePhysicalDieDefinition(
+  definition: PhysicalDieDefinition,
+): PhysicalDieDefinition {
+  const collider: SerializedPhysicalCollider =
+    definition.collider.kind === 'box'
+      ? { kind: 'box', halfExtents: cloneDefinitionVertex(definition.collider.halfExtents) }
+      : definition.collider.kind === 'cylinder'
+        ? { ...definition.collider }
+        : {
+            kind: 'convex',
+            vertices: definition.collider.vertices.map(cloneDefinitionVertex),
+            faces: definition.collider.faces.map((face) => face.slice()),
+          };
+  return {
+    ...definition,
+    collider,
+    outcomes: definition.outcomes.map((outcome) => ({
+      ...outcome,
+      supportNormals: outcome.supportNormals.map(cloneDefinitionVertex),
+      labelAnchors: outcome.labelAnchors.map(cloneDefinitionAnchor),
+    })),
+    readableShape: definition.readableShape
+      ? cloneReadablePolyhedron(definition.readableShape)
+      : undefined,
+  };
 }

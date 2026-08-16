@@ -12,6 +12,7 @@ const [
   physicalLaunch,
   physicalPlanner,
   rollWorker,
+  physicalTable,
   physicsShapes,
   restingPhysics,
   visualBase,
@@ -28,6 +29,7 @@ const [
   readFile(new URL('../src/physical-launch.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/physical-roll-planner.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/roll-worker.ts', import.meta.url), 'utf8'),
+  readFile(new URL('../src/physical-table.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/physics-shapes.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/resting-physics.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/fallback-visuals-base.ts', import.meta.url), 'utf8'),
@@ -60,7 +62,7 @@ assert.match(engine, /collectOrderedVisualResults/);
 assert.match(engine, /function updatePlanVisuals/);
 assert.match(
   engine,
-  /genericPhysicalVisuals\.forEach\(\(visual\) => visual\.update\(time, scale\.x, scale\.z\)\)/,
+  /physicalTable\.forEachVisual\(\(visual\) => visual\.update\(time, scale\.x, scale\.z\)\)/,
 );
 assert.match(engine, /updatePlanVisuals\(activePlan, planTime\)/);
 assert.match(engine, /fallbacks:\s*activeFallbackSpecs/);
@@ -130,7 +132,8 @@ assert.doesNotMatch(physicalPlanner, /activeFlags\.slice/);
 // The roll worker consumes one ordered physical-entry array and returns one transform/landing stream.
 assert.match(rollWorker, /PhysicalRollPlanner/);
 assert.match(rollWorker, /interface PlanEntry/);
-assert.match(rollWorker, /definition: PhysicalDieDefinition/);
+assert.match(rollWorker, /definitionKey: string/);
+assert.match(rollWorker, /definitions = new Map<string, PhysicalDieDefinition>/);
 assert.match(rollWorker, /entries: PlanEntry\[\]/);
 assert.match(rollWorker, /transforms: transforms\.buffer/);
 assert.match(rollWorker, /landings: landings\.buffer/);
@@ -145,11 +148,15 @@ assert.match(visuals, /fallback-visuals-base/);
 assert.doesNotMatch(visuals, /GeneratedFallbackVisualInstance/);
 assert.match(physicalVisuals, /class PhysicalDieVisualInstance/);
 assert.match(physicalVisuals, /createGeneratedPhysicalDieDefinition/);
+assert.match(physicalVisuals, /spec\.definition/);
+assert.match(renderer, /physicalModels\?:/);
+assert.match(renderer, /definition\?: PhysicalDieDefinition/);
 assert.match(physicalVisuals, /createDefaultPhysicalDiePresentation/);
 assert.match(physicalVisuals, /if \(spec\.presentation\)/);
 assert.match(physicalVisuals, /getRuntimeThemePresentation/);
 assert.doesNotMatch(physicalVisuals, /draftrollPhysicalPresentation/);
-assert.match(physicalMesh, /presentationTexture/);
+assert.match(physicalMesh, /acquireLabelAtlas/);
+assert.match(physicalMesh, /swapOutcomeLabels/);
 assert.match(physicalMesh, /content.kind === 'icon'/);
 assert.match(physicalVisuals, /physicalDieColliderRadius/);
 assert.match(physicalVisuals, /getPhysicalVisualPlanEntries/);
@@ -175,7 +182,14 @@ assert.doesNotMatch(visualBase, /createReadablePolyhedron/);
 assert.match(engine, /createWorkerPhysicalEntries/);
 assert.match(engine, /commitPhysicalVisualPlan/);
 assert.match(engine, /landings: plan\.landings\.slice\(\)/);
-assert.match(engine, /activeGenericPhysicalIndexes/);
+assert.doesNotMatch(engine, /activeGenericPhysicalIndexes|activeCanonicalPhysicalIndexes/);
+assert.match(engine, /PhysicalTableRegistry/);
+assert.match(physicalTable, /class PhysicalTableRegistry/);
+assert.match(physicalTable, /forEachVisual/);
+assert.doesNotMatch(engine, /physicalTable\.visualInstances/);
+assert.match(renderer, /currently require relabel targeting/);
+assert.match(engine, /visual\.definition\.targeting !== 'relabel'/);
+assert.match(physicalDice, /input\.targeting \?\? 'relabel'/);
 assert.doesNotMatch(engine, /AdditionalPhysical|additionalPhysical/);
 assert.doesNotMatch(engine, /physicalFallbackReplay/);
 assert.doesNotMatch(physicalVisuals, /settledRotation/);
@@ -193,8 +207,10 @@ assert.doesNotMatch(physicalVisuals, /BaseFallbackVisualInstance/);
 assert.doesNotMatch(physicalVisuals, /fallback-visuals-base/);
 assert.match(physicalLaunch, /createPhysicalLaunchStates/);
 assert.match(physicalLaunch, /participant\.radius/);
-assert.match(physicalMesh, /function atlasCellTexture/);
+assert.doesNotMatch(physicalMesh, /function atlasCellTexture|presentationTexture/);
 assert.match(physicalMesh, /LABEL_ATLAS_COLUMNS = 5/);
+assert.match(physicalMesh, /labelAtlasCache/);
+assert.match(physicalMesh, /surfaceTextureCache/);
 assert.match(physicalMesh, /LABEL_ATLAS_ROWS = 4/);
 assert.match(physicalMesh, /getRuntimeThemeTexture\(spec\.theme, spec\.type, 'label'\)/);
 assert.match(physicalMesh, /ownedTextures/);

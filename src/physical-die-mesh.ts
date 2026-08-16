@@ -21,12 +21,16 @@ const LABEL_ATLAS_COLUMNS = 5;
 const LABEL_ATLAS_ROWS = 4;
 const LABEL_ATLAS_PADDING = 0.055;
 let shadowTexture: THREE.CanvasTexture | null = null;
+const surfaceTextureCache = new Map<string, { texture: THREE.CanvasTexture; refs: number }>();
+const labelAtlasCache = new Map<
+  string,
+  { texture: THREE.CanvasTexture; refs: number; columns: number; rows: number }
+>();
 
 export interface PhysicalDieMesh {
   group: THREE.Group;
   visualRoot: THREE.Group;
-  labelMaterials: THREE.MeshBasicMaterial[];
-  labelMaps: Array<THREE.Texture | null>;
+  swapOutcomeLabels(first: number, second: number): void;
   setOpacity(opacity: number): void;
   updateShadow(height: number, opacity?: number): void;
   dispose(): void;
@@ -102,6 +106,31 @@ function createSurfaceTexture(spec: DraftrollPhysicalVisual): THREE.CanvasTextur
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = 8;
   return texture;
+}
+
+function acquireSurfaceTexture(spec: DraftrollPhysicalVisual): {
+  texture: THREE.CanvasTexture;
+  release(): void;
+} {
+  const key = normalizeTheme(spec.theme);
+  let cached = surfaceTextureCache.get(key);
+  if (!cached) {
+    cached = { texture: createSurfaceTexture(spec), refs: 0 };
+    surfaceTextureCache.set(key, cached);
+  }
+  cached.refs += 1;
+  return {
+    texture: cached.texture,
+    release(): void {
+      const current = surfaceTextureCache.get(key);
+      if (!current) return;
+      current.refs -= 1;
+      if (current.refs <= 0) {
+        current.texture.dispose();
+        surfaceTextureCache.delete(key);
+      }
+    },
+  };
 }
 
 function triangulateShape(shape: ReadablePolyhedron): THREE.BufferGeometry {
@@ -204,41 +233,39 @@ function anchorQuaternion(anchor: PolyhedronLabelAnchor): THREE.Quaternion {
   );
 }
 
-function atlasCellTexture(atlas: THREE.Texture, value: number): THREE.Texture {
-  const clamped = THREE.MathUtils.clamp(Math.round(value), 1, 20);
-  const cell = clamped - 1;
-  const column = cell % LABEL_ATLAS_COLUMNS;
-  const row = Math.floor(cell / LABEL_ATLAS_COLUMNS);
-  const padU = LABEL_ATLAS_PADDING / LABEL_ATLAS_COLUMNS;
-  const padV = LABEL_ATLAS_PADDING / LABEL_ATLAS_ROWS;
-  const texture = atlas.clone();
-  texture.wrapS = THREE.ClampToEdgeWrapping;
-  texture.wrapT = THREE.ClampToEdgeWrapping;
-  texture.offset.set(column / LABEL_ATLAS_COLUMNS + padU, 1 - (row + 1) / LABEL_ATLAS_ROWS + padV);
-  texture.repeat.set(1 / LABEL_ATLAS_COLUMNS - padU * 2, 1 / LABEL_ATLAS_ROWS - padV * 2);
-  texture.needsUpdate = true;
-  return texture;
+interface LabelAtlasResource {
+  texture: THREE.Texture;
+  columns: number;
+  rows: number;
+  cells: number[];
+  padding: number;
+  release(): void;
 }
 
-function presentationTexture(
+function drawLabelContent(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  size: number,
   spec: DraftrollPhysicalVisual,
   content: PhysicalDieFaceContent,
   style: ThemeLabelStyleDefinition | undefined,
   fontFamily: string | undefined,
-): THREE.Texture {
+): void {
   if (content.kind === 'texture') {
-    const source = getRuntimeThemeAssetTexture(spec.theme, content.asset);
-    if (source) {
-      const texture = source.clone();
-      texture.needsUpdate = true;
-      return texture;
+    const sourceTexture = getRuntimeThemeAssetTexture(spec.theme, content.asset);
+    const image = sourceTexture?.image;
+    const drawable =
+      image instanceof HTMLImageElement ||
+      image instanceof HTMLCanvasElement ||
+      image instanceof HTMLVideoElement ||
+      (typeof ImageBitmap !== 'undefined' && image instanceof ImageBitmap);
+    if (drawable) {
+      const inset = Math.max(2, Math.round(size * 0.08));
+      context.drawImage(image, x + inset, y + inset, size - inset * 2, size - inset * 2);
+      return;
     }
   }
-  const canvas = document.createElement('canvas');
-  canvas.width = 256;
-  canvas.height = 256;
-  const context = canvas.getContext('2d');
-  if (!context) throw new Error('Canvas 2D context unavailable.');
   const palette = THEMES[normalizeTheme(spec.theme)];
   const text =
     content.kind === 'number'
@@ -249,7 +276,9 @@ function presentationTexture(
           ? content.icon
           : (content.label ?? '◆');
   const length = Array.from(text).length;
-  const fontSize = content.kind === 'icon' ? 148 : length >= 5 ? 64 : length >= 3 ? 86 : 132;
+  const base = content.kind === 'icon' ? 0.58 : length >= 5 ? 0.27 : length >= 3 ? 0.36 : 0.53;
+  const fontSize = Math.max(12, Math.round(size * base));
+  context.save();
   context.textAlign = 'center';
   context.textBaseline = 'middle';
   context.lineJoin = 'round';
@@ -258,24 +287,186 @@ function presentationTexture(
   context.strokeStyle = style?.outlineColor ?? 'rgba(0,0,0,.72)';
   if (style?.glowColor) {
     context.shadowColor = style.glowColor;
-    context.shadowBlur = Math.max(4, Math.round(fontSize * 0.08));
+    context.shadowBlur = Math.max(2, Math.round(fontSize * 0.08));
   }
-  context.strokeText(text, 128, 126);
+  context.strokeText(text, x + size / 2, y + size * 0.49);
   context.fillStyle = style?.color ?? palette.label;
-  context.fillText(text, 128, 126);
+  context.fillText(text, x + size / 2, y + size * 0.49);
   context.shadowBlur = 0;
   if (content.kind === 'number' && (text === '6' || text === '9')) {
     context.strokeStyle = style?.color ?? palette.label;
-    context.lineWidth = 8;
+    context.lineWidth = Math.max(2, Math.round(size * 0.03));
     context.beginPath();
-    context.moveTo(93, 202);
-    context.lineTo(163, 202);
+    context.moveTo(x + size * 0.36, y + size * 0.79);
+    context.lineTo(x + size * 0.64, y + size * 0.79);
     context.stroke();
   }
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.anisotropy = 8;
-  return texture;
+  context.restore();
+}
+
+function generatedAtlasKey(
+  spec: DraftrollPhysicalVisual,
+  presentation: PhysicalDiePresentation,
+  style: ThemeLabelStyleDefinition | undefined,
+  fontFamily: string | undefined,
+): string {
+  return JSON.stringify([spec.theme, presentation.contents, style ?? null, fontFamily ?? null]);
+}
+
+function acquireLabelAtlas(
+  spec: DraftrollPhysicalVisual,
+  definition: PhysicalDieDefinition,
+  presentation: PhysicalDiePresentation,
+  explicitPresentation: boolean,
+  runtimeAtlas: THREE.Texture | undefined,
+  style: ThemeLabelStyleDefinition | undefined,
+  fontFamily: string | undefined,
+): LabelAtlasResource {
+  if (!explicitPresentation && runtimeAtlas && definition.sides <= 20) {
+    return {
+      texture: runtimeAtlas,
+      columns: LABEL_ATLAS_COLUMNS,
+      rows: LABEL_ATLAS_ROWS,
+      cells: definition.outcomes.map(
+        (outcome) => THREE.MathUtils.clamp(Math.round(outcome.value), 1, 20) - 1,
+      ),
+      padding: LABEL_ATLAS_PADDING,
+      release() {},
+    };
+  }
+  const key = generatedAtlasKey(spec, presentation, style, fontFamily);
+  let cached = labelAtlasCache.get(key);
+  if (!cached) {
+    const count = Math.max(1, definition.outcomes.length);
+    const columns = Math.ceil(Math.sqrt(count));
+    const rows = Math.ceil(count / columns);
+    const cellSize = THREE.MathUtils.clamp(Math.floor(4096 / Math.max(columns, rows)), 32, 128);
+    const canvas = document.createElement('canvas');
+    canvas.width = columns * cellSize;
+    canvas.height = rows * cellSize;
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('Canvas 2D context unavailable.');
+    presentation.contents.forEach((content, index) => {
+      const column = index % columns;
+      const row = Math.floor(index / columns);
+      drawLabelContent(
+        context,
+        column * cellSize,
+        row * cellSize,
+        cellSize,
+        spec,
+        content,
+        style,
+        fontFamily,
+      );
+    });
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = 8;
+    cached = { texture, refs: 0, columns, rows };
+    labelAtlasCache.set(key, cached);
+  }
+  cached.refs += 1;
+  return {
+    texture: cached.texture,
+    columns: cached.columns,
+    rows: cached.rows,
+    cells: definition.outcomes.map((_outcome, index) => index),
+    padding: 0.08,
+    release(): void {
+      const current = labelAtlasCache.get(key);
+      if (!current) return;
+      current.refs -= 1;
+      if (current.refs <= 0) {
+        current.texture.dispose();
+        labelAtlasCache.delete(key);
+      }
+    },
+  };
+}
+
+function labelUvRect(
+  atlas: LabelAtlasResource,
+  cell: number,
+): readonly [number, number, number, number] {
+  const column = cell % atlas.columns;
+  const row = Math.floor(cell / atlas.columns);
+  const padU = atlas.padding / atlas.columns;
+  const padV = atlas.padding / atlas.rows;
+  const u0 = column / atlas.columns + padU;
+  const u1 = (column + 1) / atlas.columns - padU;
+  const v0 = 1 - (row + 1) / atlas.rows + padV;
+  const v1 = 1 - row / atlas.rows - padV;
+  return [u0, v0, u1, v1];
+}
+
+function appendLabelQuad(positions: number[], anchor: PolyhedronLabelAnchor, scale: number): void {
+  const center = new THREE.Vector3(...anchor.position).addScaledVector(
+    new THREE.Vector3(...anchor.normal),
+    0.014,
+  );
+  const rotation = anchorQuaternion(anchor);
+  const half = (anchor.scale * scale) / 2;
+  const corners = [
+    new THREE.Vector3(-half, -half, 0),
+    new THREE.Vector3(half, -half, 0),
+    new THREE.Vector3(half, half, 0),
+    new THREE.Vector3(-half, half, 0),
+  ].map((corner) => corner.applyQuaternion(rotation).add(center));
+  for (const index of [0, 1, 2, 0, 2, 3]) {
+    const point = corners[index];
+    positions.push(point.x, point.y, point.z);
+  }
+}
+
+function writeOutcomeUvs(
+  uvs: Float32Array,
+  vertexStart: number,
+  vertexCount: number,
+  atlas: LabelAtlasResource,
+  cell: number,
+): void {
+  const [u0, v0, u1, v1] = labelUvRect(atlas, cell);
+  const quad = [u0, v0, u1, v0, u1, v1, u0, v0, u1, v1, u0, v1];
+  for (let vertex = 0; vertex < vertexCount; vertex += 1) {
+    const source = (vertex % 6) * 2;
+    const target = (vertexStart + vertex) * 2;
+    uvs[target] = quad[source];
+    uvs[target + 1] = quad[source + 1];
+  }
+}
+
+function colliderGeometry(definition: PhysicalDieDefinition): THREE.BufferGeometry {
+  const collider = definition.collider;
+  if (collider.kind === 'box') {
+    return new THREE.BoxGeometry(
+      collider.halfExtents[0] * 2,
+      collider.halfExtents[1] * 2,
+      collider.halfExtents[2] * 2,
+    );
+  }
+  if (collider.kind === 'cylinder') {
+    return new THREE.CylinderGeometry(
+      collider.radiusTop,
+      collider.radiusBottom,
+      collider.height,
+      collider.segments,
+    );
+  }
+  const positions: number[] = [];
+  for (const face of collider.faces) {
+    for (let index = 1; index + 1 < face.length; index += 1) {
+      for (const vertexIndex of [face[0], face[index], face[index + 1]]) {
+        const vertex = collider.vertices[vertexIndex];
+        positions.push(vertex[0], vertex[1], vertex[2]);
+      }
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.computeVertexNormals();
+  geometry.computeBoundingSphere();
+  return geometry;
 }
 
 function scaleThemeMesh(
@@ -297,7 +488,6 @@ function scaleThemeMesh(
 export function createPhysicalDieMesh(options: PhysicalDieMeshOptions): PhysicalDieMesh {
   const { spec, definition, presentation, explicitPresentation } = options;
   const shape = definition.readableShape;
-  if (!shape) throw new Error('Physical die visual requires readable polyhedron geometry.');
   const palette = THEMES[normalizeTheme(spec.theme)];
   const group = new THREE.Group();
   const visualRoot = new THREE.Group();
@@ -309,10 +499,13 @@ export function createPhysicalDieMesh(options: PhysicalDieMeshOptions): Physical
   const runtimeMesh =
     getRuntimeThemeMesh(spec.theme, spec.type) ??
     getRuntimeThemeMesh(spec.theme, `d${definition.sides}`);
-  const geometry = runtimeMesh ? scaleThemeMesh(runtimeMesh, definition) : triangulateShape(shape);
+  const geometry = runtimeMesh
+    ? scaleThemeMesh(runtimeMesh, definition)
+    : shape
+      ? triangulateShape(shape)
+      : colliderGeometry(definition);
   ownedGeometries.push(geometry);
-  const generatedSurface = createSurfaceTexture(spec);
-  ownedTextures.push(generatedSurface);
+  const generatedSurface = acquireSurfaceTexture(spec);
   const runtimeSurface =
     getRuntimeThemeTexture(spec.theme, spec.type, 'surface') ??
     getRuntimeThemeTexture(spec.theme, `d${definition.sides}`, 'surface');
@@ -326,7 +519,7 @@ export function createPhysicalDieMesh(options: PhysicalDieMeshOptions): Physical
     getRuntimeThemeMaterial(spec.theme, spec.type) ??
     getRuntimeThemeMaterial(spec.theme, `d${definition.sides}`);
   const bodyMaterial = new THREE.MeshPhysicalMaterial({
-    map: runtimeSurface ?? generatedSurface,
+    map: runtimeSurface ?? generatedSurface.texture,
     normalMap: runtimeNormal,
     roughnessMap: runtimeRoughness,
     color: runtimeMaterial?.color ?? 0xffffff,
@@ -368,80 +561,98 @@ export function createPhysicalDieMesh(options: PhysicalDieMeshOptions): Physical
   const labelStyle = getRuntimeThemeLabelStyle(spec.theme, spec.type, fallbackKind);
   const labelScale = labelStyle?.scale ?? 1;
   const fontFamily = getRuntimeThemeFont(spec.theme, spec.type, fallbackKind);
-  const labelMaps = definition.outcomes.map((outcome, index): THREE.Texture | null => {
-    if (!explicitPresentation && runtimeAtlas && definition.sides <= 20) {
-      const texture = atlasCellTexture(runtimeAtlas, outcome.value);
-      ownedTextures.push(texture);
-      return texture;
+  const anchorsByOutcome = definition.outcomes.map((outcome) => outcome.labelAnchors.slice());
+  if (shape) {
+    const covered = new Set(
+      definition.outcomes.flatMap((outcome) =>
+        outcome.labelAnchors.map((anchor) => anchor.faceIndex),
+      ),
+    );
+    for (let faceIndex = 0; faceIndex < shape.faces.length; faceIndex += 1) {
+      if (covered.has(faceIndex)) continue;
+      const normal = faceNormal(shape, faceIndex);
+      const outcomeIndex = definition.outcomes
+        .map((outcome, index) => ({
+          index,
+          score: Math.max(
+            ...outcome.supportNormals.map((support) => -normal.dot(new THREE.Vector3(...support))),
+          ),
+        }))
+        .toSorted((left, right) => right.score - left.score)[0]?.index;
+      if (outcomeIndex !== undefined)
+        anchorsByOutcome[outcomeIndex].push(secondaryAnchor(shape, faceIndex));
     }
-    const content = presentation.contents[index] ?? {
-      kind: 'number' as const,
-      value: outcome.value,
-    };
-    const texture = presentationTexture(spec, content, labelStyle, fontFamily);
-    ownedTextures.push(texture);
-    return texture;
+  }
+  const totalLabelAnchors = anchorsByOutcome.reduce((sum, anchors) => sum + anchors.length, 0);
+  const labelAtlas =
+    totalLabelAnchors > 0
+      ? acquireLabelAtlas(
+          spec,
+          definition,
+          presentation,
+          explicitPresentation,
+          runtimeAtlas,
+          labelStyle,
+          fontFamily,
+        )
+      : null;
+  const labelPositions: number[] = [];
+  const ranges = anchorsByOutcome.map((anchors) => {
+    const vertexStart = labelPositions.length / 3;
+    for (const anchor of anchors) appendLabelQuad(labelPositions, anchor, labelScale);
+    return { vertexStart, vertexCount: anchors.length * 6 };
   });
-  const labelMaterials = definition.outcomes.map((outcome, index) => {
-    const material = new THREE.MeshBasicMaterial({
-      map: labelMaps[index] ?? undefined,
+  let labelGeometry: THREE.BufferGeometry | null = null;
+  let labelMaterial: THREE.MeshBasicMaterial | null = null;
+  const outcomeCells = labelAtlas?.cells.slice() ?? [];
+  if (labelAtlas && labelPositions.length > 0) {
+    labelGeometry = new THREE.BufferGeometry();
+    labelGeometry.setAttribute('position', new THREE.Float32BufferAttribute(labelPositions, 3));
+    const uvs = new Float32Array((labelPositions.length / 3) * 2);
+    ranges.forEach((range, index) =>
+      writeOutcomeUvs(uvs, range.vertexStart, range.vertexCount, labelAtlas, outcomeCells[index]),
+    );
+    labelGeometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+    ownedGeometries.push(labelGeometry);
+    labelMaterial = new THREE.MeshBasicMaterial({
+      map: labelAtlas.texture,
       transparent: true,
       opacity: 0,
       depthWrite: false,
       toneMapped: false,
       side: THREE.DoubleSide,
     });
-    ownedMaterials.push(material);
-    for (const anchor of outcome.labelAnchors) {
-      const labelGeometry = new THREE.PlaneGeometry(
-        anchor.scale * labelScale,
-        anchor.scale * labelScale,
-      );
-      ownedGeometries.push(labelGeometry);
-      const label = new THREE.Mesh(labelGeometry, material);
-      label.position
-        .fromArray(anchor.position)
-        .addScaledVector(new THREE.Vector3(...anchor.normal), 0.014);
-      label.quaternion.copy(anchorQuaternion(anchor));
-      label.renderOrder = 7;
-      visualRoot.add(label);
-    }
-    return material;
-  });
-
-  const covered = new Set(
-    definition.outcomes.flatMap((outcome) =>
-      outcome.labelAnchors.map((anchor) => anchor.faceIndex),
-    ),
-  );
-  for (let faceIndex = 0; faceIndex < shape.faces.length; faceIndex += 1) {
-    if (covered.has(faceIndex)) continue;
-    const normal = faceNormal(shape, faceIndex);
-    const outcomeIndex = definition.outcomes
-      .map((outcome, index) => ({
-        index,
-        score: Math.max(
-          ...outcome.supportNormals.map((support) => -normal.dot(new THREE.Vector3(...support))),
-        ),
-      }))
-      .toSorted((left, right) => right.score - left.score)[0]?.index;
-    if (outcomeIndex === undefined) continue;
-    const anchor = secondaryAnchor(shape, faceIndex);
-    const labelGeometry = new THREE.PlaneGeometry(
-      anchor.scale * labelScale,
-      anchor.scale * labelScale,
-    );
-    ownedGeometries.push(labelGeometry);
-    const label = new THREE.Mesh(labelGeometry, labelMaterials[outcomeIndex]);
-    label.position
-      .fromArray(anchor.position)
-      .addScaledVector(new THREE.Vector3(...anchor.normal), 0.014);
-    label.quaternion.copy(anchorQuaternion(anchor));
-    label.renderOrder = 7;
-    visualRoot.add(label);
+    ownedMaterials.push(labelMaterial);
+    const labels = new THREE.Mesh(labelGeometry, labelMaterial);
+    labels.renderOrder = 7;
+    visualRoot.add(labels);
   }
+  const swapOutcomeLabels = (first: number, second: number): void => {
+    if (!labelAtlas || !labelGeometry || first === second) return;
+    if (first < 0 || second < 0 || first >= ranges.length || second >= ranges.length) return;
+    const firstCell = outcomeCells[first];
+    outcomeCells[first] = outcomeCells[second];
+    outcomeCells[second] = firstCell;
+    const uv = labelGeometry.getAttribute('uv');
+    if (!(uv instanceof THREE.BufferAttribute) || !(uv.array instanceof Float32Array)) return;
+    writeOutcomeUvs(
+      uv.array,
+      ranges[first].vertexStart,
+      ranges[first].vertexCount,
+      labelAtlas,
+      outcomeCells[first],
+    );
+    writeOutcomeUvs(
+      uv.array,
+      ranges[second].vertexStart,
+      ranges[second].vertexCount,
+      labelAtlas,
+      outcomeCells[second],
+    );
+    uv.needsUpdate = true;
+  };
 
-  if (shape.family === 'd1-cylinder' || shape.family === 'd2-coin') {
+  if (shape?.family === 'd1-cylinder' || shape?.family === 'd2-coin') {
     visualRoot.scale.set(0.9, 0.9, 1.04);
   }
 
@@ -469,9 +680,7 @@ export function createPhysicalDieMesh(options: PhysicalDieMeshOptions): Physical
     const value = THREE.MathUtils.clamp(opacity, 0, 1);
     bodyMaterial.opacity = value;
     edgeMaterial.opacity = value * 0.92;
-    labelMaterials.forEach((material) => {
-      material.opacity = value;
-    });
+    if (labelMaterial) labelMaterial.opacity = value;
   };
   const updateShadow = (height: number, opacity = 1): void => {
     const radius = Math.max(0.25, definition.radius);
@@ -488,14 +697,15 @@ export function createPhysicalDieMesh(options: PhysicalDieMeshOptions): Physical
   return {
     group,
     visualRoot,
-    labelMaterials,
-    labelMaps,
+    swapOutcomeLabels,
     setOpacity,
     updateShadow,
     dispose(): void {
       for (const geometryToDispose of ownedGeometries) geometryToDispose.dispose();
       for (const materialToDispose of ownedMaterials) materialToDispose.dispose();
       for (const textureToDispose of ownedTextures) textureToDispose.dispose();
+      generatedSurface.release();
+      labelAtlas?.release();
     },
   };
 }

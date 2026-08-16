@@ -6,7 +6,8 @@ import {
 } from './physical-roll-planner';
 
 interface PlanEntry {
-  definition: PhysicalDieDefinition;
+  definitionKey: string;
+  definition?: PhysicalDieDefinition;
   state: number[];
   physics?: PhysicalRollEntry['physics'];
   captureImpacts?: boolean;
@@ -25,6 +26,7 @@ interface PlanRequest {
 }
 
 const planner = new PhysicalRollPlanner();
+const definitions = new Map<string, PhysicalDieDefinition>();
 
 function readLockedMotion(
   request: PlanRequest,
@@ -41,12 +43,19 @@ function readLockedMotion(
 
 self.addEventListener('message', (event: MessageEvent<PlanRequest>) => {
   const request = event.data;
-  const entries: PhysicalRollEntry[] = request.entries.map((entry) => ({
-    definition: entry.definition,
-    state: entry.state,
-    physics: entry.physics,
-    captureImpacts: entry.captureImpacts !== false,
-  }));
+  const entries: PhysicalRollEntry[] = request.entries.map((entry) => {
+    if (entry.definition) definitions.set(entry.definitionKey, entry.definition);
+    const definition = definitions.get(entry.definitionKey);
+    if (!definition) {
+      throw new Error(`Physical definition is not registered: ${entry.definitionKey}`);
+    }
+    return {
+      definition,
+      state: entry.state,
+      physics: entry.physics,
+      captureImpacts: entry.captureImpacts !== false,
+    };
+  });
   const lockedCount = Math.max(0, Math.min(entries.length, request.lockedCount ?? 0));
   const result = planner.simulate({
     entries,

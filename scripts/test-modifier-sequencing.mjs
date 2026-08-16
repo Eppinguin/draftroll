@@ -690,7 +690,7 @@ try {
   );
   assert.match(
     browserHostSource,
-    /dice\.length === 0 && genericPhysicalVisuals\.length === 0 && fallbackVisuals\.length === 0/,
+    /dice\.length === 0 && physicalTable\.visualCount === 0 && fallbackVisuals\.length === 0/,
     'table emptiness must account for canonical, generated/custom physical, and fallback visuals',
   );
   assert.match(

@@ -164,7 +164,10 @@ export class PhysicalTableRegistry {
     return null;
   }
 
-  private requireEntry(id: string, implementation: PhysicalTableImplementation): PhysicalTableEntry {
+  private requireEntry(
+    id: string,
+    implementation: PhysicalTableImplementation,
+  ): PhysicalTableEntry {
     const entry = this.entriesById.get(id);
     if (!entry || entry.implementation !== implementation) {
       throw new Error(`Physical table ${implementation} entry is missing: ${id}`);
