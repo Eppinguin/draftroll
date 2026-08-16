@@ -1,0 +1,60 @@
+name: Agent arbitrary physical roll fix
+
+on:
+  push:
+    branches:
+      - agent/dicebox-learnings-cards
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/dicebox-learnings-cards
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.14.0'
+      - name: Apply arbitrary physical roll fix
+        run: python scripts/agent-fix-arbitrary-physical-rolls.py
+      - name: Remove one-time migration files
+        run: rm -f scripts/agent-fix-arbitrary-physical-rolls.py .github/workflows/agent-fix-arbitrary-physical-rolls.yml
+      - name: Install pnpm
+        run: npm install --global pnpm@11.17.0
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Format changed sources
+        run: pnpm exec oxfmt src/main.ts scripts/test-mixed-renderer.mjs tests/browser/specs/overlay.spec.ts
+      - name: Typecheck packages
+        run: pnpm check:packages
+      - name: Typecheck browser engine
+        run: pnpm exec tsc --noEmit
+      - name: Mixed renderer regression
+        run: pnpm test:mixed-renderer
+      - name: Generated polyhedra regression
+        run: pnpm test:generated-polyhedra
+      - name: Core regression
+        run: pnpm test:core
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Overlay arbitrary-dN browser regression
+        run: |
+          pnpm test:browser:build
+          pnpm exec playwright test tests/browser/specs/overlay.spec.ts --project=chromium
+      - name: Commit validated fix
+        run: |
+          if git diff --quiet; then
+            echo "No fix changes produced"
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix arbitrary physical roll validation"
+          git push origin HEAD:agent/dicebox-learnings-cards
