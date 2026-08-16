@@ -1,6 +1,16 @@
 from pathlib import Path
 import re
 
+
+def remove_once(path: str, text: str, label: str) -> None:
+    target = Path(path)
+    source = target.read_text()
+    count = source.count(text)
+    if count != 1:
+        raise SystemExit(f'{label}: expected one match, found {count}')
+    target.write_text(source.replace(text, '', 1))
+
+
 runtime_path = Path('src/runtime-themes.ts')
 runtime = runtime_path.read_text()
 old = """  const contents: PhysicalDieFaceContent[] = source.contents.map((content) => {
@@ -74,3 +84,36 @@ if main.count(old_physics) != 1:
     raise SystemExit(f'canonical physics clone: expected one match, found {main.count(old_physics)}')
 main = main.replace(old_physics, 'canonical.map((visual) => Object.assign({}, visual.physics))', 1)
 main_path.write_text(main)
+
+# Pre-release cleanup: the fallback-only renderer policy existed only to support the removed die
+# fallback path. Remove it from every public/package boundary instead of preserving compatibility.
+remove_once(
+    'packages/overlay/src/index.ts',
+    '      forceFallback: options.forceFallback,\n',
+    'overlay forceFallback',
+)
+remove_once(
+    'packages/sdk/src/index.ts',
+    '            forceFallback: this.options.renderer?.forceFallback ?? roomRenderer?.fallbackOnly,\n',
+    'sdk forceFallback policy',
+)
+remove_once(
+    'packages/protocol/src/policy.ts',
+    '  fallbackOnly: boolean;\n',
+    'room renderer fallbackOnly field',
+)
+remove_once(
+    'packages/protocol/src/policy.ts',
+    '    fallbackOnly: false,\n',
+    'room renderer fallbackOnly preset',
+)
+remove_once(
+    'packages/protocol/src/runtime.ts',
+    "      'fallbackOnly',\n",
+    'runtime fallbackOnly allowed field',
+)
+remove_once(
+    'packages/protocol/src/runtime.ts',
+    "  if (value.fallbackOnly !== undefined)\n    readBoolean(value.fallbackOnly, `${path}.fallbackOnly`, context, true);\n",
+    'runtime fallbackOnly validation',
+)
