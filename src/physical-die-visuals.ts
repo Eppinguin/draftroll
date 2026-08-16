@@ -11,22 +11,17 @@ import {
 import { createPhysicalDieMesh, type PhysicalDieMesh } from './physical-die-mesh';
 import type { PhysicalLaunchState } from './physical-launch';
 import { getRuntimeThemePresentation } from './runtime-themes';
-import { extractPhysicalTransforms } from './physical-roll-planner';
 
-export interface PhysicalVisualBounds {
-  x: number;
-  z: number;
-}
-
-interface RecordedTrajectory {
-  positions: Float32Array;
-  quaternions: Float32Array;
+interface SharedTrajectoryView {
+  transforms: Float32Array;
   frameCount: number;
   step: number;
+  physicalCount: number;
+  physicalIndex: number;
 }
 
-const activePhysicalDice = new Set<PhysicalDieVisualInstance>();
-const pendingPhysicalDice = new Set<PhysicalDieVisualInstance>();
+const activePhysicalDice = new Map<string, PhysicalDieVisualInstance>();
+const pendingPhysicalDice = new Set<string>();
 
 function readPhysicalPresentation(
   spec: DraftrollPhysicalVisual,
@@ -48,71 +43,47 @@ function readPhysicalPresentation(
   return { presentation: createDefaultPhysicalDiePresentation(definition), explicit: false };
 }
 
-function sample(
-  trajectory: RecordedTrajectory,
-  progress: number,
-  position: THREE.Vector3,
-  quaternion: THREE.Quaternion,
-): void {
-  const scaled = THREE.MathUtils.clamp(progress, 0, 1) * Math.max(0, trajectory.frameCount - 1);
-  const first = Math.floor(scaled);
-  const second = Math.min(trajectory.frameCount - 1, first + 1);
-  const blend = scaled - first;
-  const firstPosition = first * 3;
-  const secondPosition = second * 3;
-  position.set(
-    THREE.MathUtils.lerp(
-      trajectory.positions[firstPosition],
-      trajectory.positions[secondPosition],
-      blend,
-    ),
-    THREE.MathUtils.lerp(
-      trajectory.positions[firstPosition + 1],
-      trajectory.positions[secondPosition + 1],
-      blend,
-    ),
-    THREE.MathUtils.lerp(
-      trajectory.positions[firstPosition + 2],
-      trajectory.positions[secondPosition + 2],
-      blend,
-    ),
-  );
-  const firstQuaternion = first * 4;
-  const secondQuaternion = second * 4;
-  quaternion
-    .set(
-      trajectory.quaternions[firstQuaternion],
-      trajectory.quaternions[firstQuaternion + 1],
-      trajectory.quaternions[firstQuaternion + 2],
-      trajectory.quaternions[firstQuaternion + 3],
-    )
-    .slerp(
-      new THREE.Quaternion(
-        trajectory.quaternions[secondQuaternion],
-        trajectory.quaternions[secondQuaternion + 1],
-        trajectory.quaternions[secondQuaternion + 2],
-        trajectory.quaternions[secondQuaternion + 3],
-      ),
-      blend,
-    );
+function trajectoryDuration(trajectory: SharedTrajectoryView): number {
+  return Math.max(0, trajectory.frameCount - 1) * trajectory.step;
 }
 
-function trajectoryForIndex(
-  transforms: Float32Array,
-  frameCount: number,
-  step: number,
-  count: number,
-  index: number,
-): RecordedTrajectory {
-  const single = extractPhysicalTransforms(transforms, frameCount, count, index, 1);
-  const positions = new Float32Array(frameCount * 3);
-  const quaternions = new Float32Array(frameCount * 4);
-  for (let frame = 0; frame < frameCount; frame += 1) {
-    const source = frame * 7;
-    positions.set(single.subarray(source, source + 3), frame * 3);
-    quaternions.set(single.subarray(source + 3, source + 7), frame * 4);
-  }
-  return { positions, quaternions, frameCount, step };
+function trajectoryOffset(trajectory: SharedTrajectoryView, frameIndex: number): number {
+  return frameIndex * trajectory.physicalCount * 7 + trajectory.physicalIndex * 7;
+}
+
+function sampleTrajectory(
+  trajectory: SharedTrajectoryView,
+  time: number,
+  scaleX: number,
+  scaleZ: number,
+  position: THREE.Vector3,
+  quaternion: THREE.Quaternion,
+  quaternionScratch: THREE.Quaternion,
+): void {
+  const framePosition = THREE.MathUtils.clamp(time / trajectory.step, 0, trajectory.frameCount - 1);
+  const first = Math.floor(framePosition);
+  const second = Math.min(trajectory.frameCount - 1, first + 1);
+  const blend = framePosition - first;
+  const a = trajectoryOffset(trajectory, first);
+  const b = trajectoryOffset(trajectory, second);
+  position.set(
+    THREE.MathUtils.lerp(trajectory.transforms[a], trajectory.transforms[b], blend) * scaleX,
+    THREE.MathUtils.lerp(trajectory.transforms[a + 1], trajectory.transforms[b + 1], blend),
+    THREE.MathUtils.lerp(trajectory.transforms[a + 2], trajectory.transforms[b + 2], blend) * scaleZ,
+  );
+  quaternion.set(
+    trajectory.transforms[a + 3],
+    trajectory.transforms[a + 4],
+    trajectory.transforms[a + 5],
+    trajectory.transforms[a + 6],
+  );
+  quaternionScratch.set(
+    trajectory.transforms[b + 3],
+    trajectory.transforms[b + 4],
+    trajectory.transforms[b + 5],
+    trajectory.transforms[b + 6],
+  );
+  quaternion.slerp(quaternionScratch, blend);
 }
 
 function serializeLaunchState(state: PhysicalLaunchState): number[] {
@@ -130,27 +101,33 @@ export class PhysicalDieVisualInstance {
   readonly spec: DraftrollPhysicalVisual;
   readonly definition: PhysicalDieDefinition;
   readonly sides: number;
-  bounds: PhysicalVisualBounds = { x: 5, z: 5 };
   launchState: number[] = [];
-  configured = false;
 
   private readonly mesh: PhysicalDieMesh;
   private readonly inner: THREE.Group;
   private readonly labelMaterials: THREE.MeshBasicMaterial[];
   private readonly originalLabelMaps: Array<THREE.Texture | null>;
   private readonly requestedOutcome: number;
-  private trajectory: RecordedTrajectory | null = null;
-  private end = new THREE.Vector2();
+  private readonly sampleQuaternion = new THREE.Quaternion();
+  private readonly plannerQuaternionA = new THREE.Quaternion();
+  private readonly plannerQuaternionB = new THREE.Quaternion();
+  private readonly plannerQuaternionDelta = new THREE.Quaternion();
+  private trajectory: SharedTrajectoryView | null = null;
+  private prepared = false;
   private settled = false;
   private needsPlanning = false;
-  private lastProgress = 0;
+  private lastTime = 0;
+  private lastScaleX = 1;
+  private lastScaleZ = 1;
   private activationDelay = 0;
-  private presented = false;
 
   constructor(spec: DraftrollPhysicalVisual) {
     this.spec = spec;
     if (!Number.isSafeInteger(spec.sides) || spec.sides < 1 || spec.sides > 256) {
       throw new Error(`Physical die requires 1 to 256 exact outcome slots: ${spec.type}`);
+    }
+    if (activePhysicalDice.has(spec.id)) {
+      throw new Error(`Physical die id is already active: ${spec.id}`);
     }
     this.sides = spec.sides;
     this.definition = createGeneratedPhysicalDieDefinition(spec.sides);
@@ -166,11 +143,15 @@ export class PhysicalDieVisualInstance {
     this.inner = this.mesh.visualRoot;
     this.labelMaterials = this.mesh.labelMaterials;
     this.originalLabelMaps = this.mesh.labelMaps.slice();
-    activePhysicalDice.add(this);
+    activePhysicalDice.set(spec.id, this);
   }
 
   get hasTrajectory(): boolean {
     return this.trajectory !== null;
+  }
+
+  get isPrepared(): boolean {
+    return this.prepared;
   }
 
   get requiresPlanning(): boolean {
@@ -185,11 +166,26 @@ export class PhysicalDieVisualInstance {
     };
   }
 
+  prepare(): void {
+    this.launchState = [];
+    this.prepared = true;
+    this.trajectory = null;
+    this.needsPlanning = true;
+    pendingPhysicalDice.add(this.spec.id);
+    this.lastTime = 0;
+    this.lastScaleX = 1;
+    this.lastScaleZ = 1;
+    this.activationDelay = 0;
+    this.settled = false;
+    this.group.visible = false;
+    this.mesh.setOpacity(0);
+    this.mesh.updateShadow(this.group.position.y, 0);
+  }
+
   assignLaunchState(state: PhysicalLaunchState): void {
     if (!this.needsPlanning) return;
     this.launchState = serializeLaunchState(state);
     this.activationDelay = Math.max(0, state.delay);
-    this.end.set(state.target[0], state.target[1]);
     this.group.position.set(...state.position);
     this.inner.quaternion.set(...state.quaternion);
     this.mesh.setOpacity(0);
@@ -239,43 +235,66 @@ export class PhysicalDieVisualInstance {
     let angularY = 0;
     let angularZ = 0;
 
-    if (!this.settled && this.lastProgress < 0.995 && this.trajectory.frameCount > 1) {
-      const scaled = this.lastProgress * (this.trajectory.frameCount - 1);
-      let first = Math.floor(scaled);
+    if (!this.settled && this.lastTime < trajectoryDuration(this.trajectory) - 1e-6) {
+      const framePosition = THREE.MathUtils.clamp(
+        this.lastTime / this.trajectory.step,
+        0,
+        this.trajectory.frameCount - 1,
+      );
+      let first = Math.floor(framePosition);
       let second = Math.min(this.trajectory.frameCount - 1, first + 1);
       if (first === second && first > 0) {
         first -= 1;
         second = first + 1;
       }
       const dt = Math.max(1e-6, (second - first) * this.trajectory.step);
-      const a = first * 3;
-      const b = second * 3;
-      velocityX = (this.trajectory.positions[b] - this.trajectory.positions[a]) / dt;
-      velocityY = (this.trajectory.positions[b + 1] - this.trajectory.positions[a + 1]) / dt;
-      velocityZ = (this.trajectory.positions[b + 2] - this.trajectory.positions[a + 2]) / dt;
-      const qa = first * 4;
-      const qb = second * 4;
-      const before = new THREE.Quaternion(
-        this.trajectory.quaternions[qa],
-        this.trajectory.quaternions[qa + 1],
-        this.trajectory.quaternions[qa + 2],
-        this.trajectory.quaternions[qa + 3],
+      const a = trajectoryOffset(this.trajectory, first);
+      const b = trajectoryOffset(this.trajectory, second);
+      velocityX =
+        ((this.trajectory.transforms[b] - this.trajectory.transforms[a]) / dt) * this.lastScaleX;
+      velocityY = (this.trajectory.transforms[b + 1] - this.trajectory.transforms[a + 1]) / dt;
+      velocityZ =
+        ((this.trajectory.transforms[b + 2] - this.trajectory.transforms[a + 2]) / dt) *
+        this.lastScaleZ;
+
+      this.plannerQuaternionA.set(
+        this.trajectory.transforms[a + 3],
+        this.trajectory.transforms[a + 4],
+        this.trajectory.transforms[a + 5],
+        this.trajectory.transforms[a + 6],
       );
-      const after = new THREE.Quaternion(
-        this.trajectory.quaternions[qb],
-        this.trajectory.quaternions[qb + 1],
-        this.trajectory.quaternions[qb + 2],
-        this.trajectory.quaternions[qb + 3],
+      this.plannerQuaternionB.set(
+        this.trajectory.transforms[b + 3],
+        this.trajectory.transforms[b + 4],
+        this.trajectory.transforms[b + 5],
+        this.trajectory.transforms[b + 6],
       );
-      const delta = after.multiply(before.invert()).normalize();
-      if (delta.w < 0) delta.set(-delta.x, -delta.y, -delta.z, -delta.w);
-      const halfSin = Math.hypot(delta.x, delta.y, delta.z);
+      this.plannerQuaternionA.invert();
+      this.plannerQuaternionDelta
+        .copy(this.plannerQuaternionB)
+        .multiply(this.plannerQuaternionA)
+        .normalize();
+      if (this.plannerQuaternionDelta.w < 0) {
+        this.plannerQuaternionDelta.set(
+          -this.plannerQuaternionDelta.x,
+          -this.plannerQuaternionDelta.y,
+          -this.plannerQuaternionDelta.z,
+          -this.plannerQuaternionDelta.w,
+        );
+      }
+      const halfSin = Math.hypot(
+        this.plannerQuaternionDelta.x,
+        this.plannerQuaternionDelta.y,
+        this.plannerQuaternionDelta.z,
+      );
       if (halfSin > 1e-6) {
-        const angle = 2 * Math.atan2(halfSin, THREE.MathUtils.clamp(delta.w, -1, 1));
+        const angle =
+          2 *
+          Math.atan2(halfSin, THREE.MathUtils.clamp(this.plannerQuaternionDelta.w, -1, 1));
         const speed = Math.min(28, angle / dt);
-        angularX = (delta.x / halfSin) * speed;
-        angularY = (delta.y / halfSin) * speed;
-        angularZ = (delta.z / halfSin) * speed;
+        angularX = (this.plannerQuaternionDelta.x / halfSin) * speed;
+        angularY = (this.plannerQuaternionDelta.y / halfSin) * speed;
+        angularZ = (this.plannerQuaternionDelta.z / halfSin) * speed;
       }
     }
 
@@ -297,65 +316,76 @@ export class PhysicalDieVisualInstance {
     ];
   }
 
-  commitTrajectory(trajectory: RecordedTrajectory, landed: number, activationDelay = 0): void {
+  commitTrajectory(
+    transforms: Float32Array,
+    frameCount: number,
+    step: number,
+    physicalCount: number,
+    physicalIndex: number,
+    landed: number,
+    activationDelay = 0,
+  ): void {
     const newlyIntroduced = this.needsPlanning;
     if (newlyIntroduced) this.applyRequestedResult(landed);
-    this.trajectory = trajectory;
+    this.trajectory = { transforms, frameCount, step, physicalCount, physicalIndex };
     this.activationDelay = Math.max(0, activationDelay);
     this.needsPlanning = false;
-    pendingPhysicalDice.delete(this);
-    this.lastProgress = 0;
-    const last = Math.max(0, trajectory.frameCount - 1) * 3;
-    this.end.set(trajectory.positions[last] ?? 0, trajectory.positions[last + 2] ?? 0);
+    pendingPhysicalDice.delete(this.spec.id);
+    this.lastTime = 0;
+    this.lastScaleX = 1;
+    this.lastScaleZ = 1;
     this.settled = false;
-    sample(trajectory, 0, this.group.position, this.inner.quaternion);
+    sampleTrajectory(
+      this.trajectory,
+      0,
+      1,
+      1,
+      this.group.position,
+      this.inner.quaternion,
+      this.sampleQuaternion,
+    );
     this.mesh.updateShadow(this.group.position.y, 0);
   }
 
-  configureTrajectory(
-    _index: number,
-    _count: number,
-    bounds: PhysicalVisualBounds,
-    _random: () => number,
-    _occupied: THREE.Vector2[] = [],
-  ): void {
-    this.bounds = { ...bounds };
-    this.launchState = [];
-    this.configured = true;
-    this.trajectory = null;
-    this.needsPlanning = true;
-    pendingPhysicalDice.add(this);
-    this.lastProgress = 0;
-    this.activationDelay = 0;
-    this.settled = false;
-    this.presented = false;
-    this.group.visible = false;
-    this.mesh.setOpacity(0);
-    this.mesh.updateShadow(this.group.position.y, 0);
-  }
-
-  update(progress: number, duration = 1): void {
+  update(time: number, scaleX = 1, scaleZ = 1): void {
     if (this.settled || !this.trajectory) return;
-    const normalized = THREE.MathUtils.clamp(progress, 0, 1);
-    this.lastProgress = normalized;
-    const elapsed = normalized * Math.max(0, duration);
-    if (elapsed + this.trajectory.step * 0.5 >= this.activationDelay) this.presented = true;
-    this.group.visible = this.presented;
-    if (!this.presented) {
+    this.lastTime = THREE.MathUtils.clamp(time, 0, trajectoryDuration(this.trajectory));
+    this.lastScaleX = scaleX;
+    this.lastScaleZ = scaleZ;
+    const visible = this.lastTime + this.trajectory.step * 0.5 >= this.activationDelay;
+    this.group.visible = visible;
+    if (!visible) {
       this.mesh.setOpacity(0);
       this.mesh.updateShadow(this.group.position.y, 0);
       return;
     }
-    sample(this.trajectory, normalized, this.group.position, this.inner.quaternion);
+    sampleTrajectory(
+      this.trajectory,
+      this.lastTime,
+      scaleX,
+      scaleZ,
+      this.group.position,
+      this.inner.quaternion,
+      this.sampleQuaternion,
+    );
     this.mesh.setOpacity(1);
     this.mesh.updateShadow(this.group.position.y, 1);
   }
 
   settle(): void {
     if (this.settled) return;
-    this.update(1, 1);
-    this.lastProgress = 1;
-    this.presented = true;
+    if (this.trajectory) {
+      this.lastTime = trajectoryDuration(this.trajectory);
+      sampleTrajectory(
+        this.trajectory,
+        this.lastTime,
+        this.lastScaleX,
+        this.lastScaleZ,
+        this.group.position,
+        this.inner.quaternion,
+        this.sampleQuaternion,
+      );
+    }
     this.group.visible = true;
     this.mesh.setOpacity(1);
     this.mesh.updateShadow(this.group.position.y, 1);
@@ -367,7 +397,7 @@ export class PhysicalDieVisualInstance {
   }
 
   getSettledPosition(target = new THREE.Vector2()): THREE.Vector2 {
-    return target.copy(this.end);
+    return target.set(this.group.position.x, this.group.position.z);
   }
 
   getSettleTime(duration: number): number {
@@ -375,8 +405,10 @@ export class PhysicalDieVisualInstance {
   }
 
   dispose(): void {
-    activePhysicalDice.delete(this);
-    pendingPhysicalDice.delete(this);
+    if (activePhysicalDice.get(this.spec.id) === this) {
+      activePhysicalDice.delete(this.spec.id);
+    }
+    pendingPhysicalDice.delete(this.spec.id);
     this.mesh.dispose();
   }
 }
@@ -398,25 +430,32 @@ export interface PhysicalVisualPlanEntry {
   state: number[];
 }
 
+export interface PhysicalVisualPlanAssignment {
+  id: string;
+  physicalIndex: number;
+}
+
 function configuredPhysicalDice(): PhysicalDieVisualInstance[] {
-  return [...activePhysicalDice].filter((entry) => entry.configured);
+  return [...activePhysicalDice.values()].filter((entry) => entry.isPrepared);
 }
 
 export function getPendingPhysicalLaunchParticipants(): PendingPhysicalLaunchParticipant[] {
-  return [...pendingPhysicalDice]
-    .filter((entry) => entry.configured)
-    .map((entry) => entry.launchParticipant);
+  const participants: PendingPhysicalLaunchParticipant[] = [];
+  for (const id of pendingPhysicalDice) {
+    const entry = activePhysicalDice.get(id);
+    if (entry?.isPrepared) participants.push(entry.launchParticipant);
+  }
+  return participants;
 }
 
 export function assignPendingPhysicalLaunchStates(
   assignments: readonly PendingPhysicalLaunchAssignment[],
 ): void {
-  const states = new Map(
-    assignments.map((assignment) => [assignment.id, assignment.state] as const),
-  );
-  for (const entry of pendingPhysicalDice) {
-    const state = states.get(entry.spec.id);
-    if (state) entry.assignLaunchState(state);
+  for (const assignment of assignments) {
+    const entry = activePhysicalDice.get(assignment.id);
+    if (entry && pendingPhysicalDice.has(assignment.id)) {
+      entry.assignLaunchState(assignment.state);
+    }
   }
 }
 
@@ -441,14 +480,10 @@ export function commitPhysicalVisualPlan(
   frameCount: number,
   step: number,
   physicalCount: number,
-  physicalIndexes: readonly number[],
+  assignments: readonly PhysicalVisualPlanAssignment[],
   landings: Int32Array,
   activationDelays?: Float32Array,
 ): void {
-  const entries = configuredPhysicalDice();
-  if (entries.length !== physicalIndexes.length) {
-    throw new Error('Physical visual indexes do not match the configured generic dice.');
-  }
   if (
     frameCount < 1 ||
     transforms.length !== frameCount * physicalCount * 7 ||
@@ -457,15 +492,33 @@ export function commitPhysicalVisualPlan(
   ) {
     throw new Error('Physical trajectory buffers do not match the unified plan.');
   }
-  entries.forEach((entry, index) => {
-    const physicalIndex = physicalIndexes[index];
-    if (physicalIndex === undefined || physicalIndex < 0 || physicalIndex >= physicalCount) {
+  const configuredIds = new Set(configuredPhysicalDice().map((entry) => entry.spec.id));
+  const assignedIds = new Set(assignments.map((assignment) => assignment.id));
+  if (
+    configuredIds.size !== assignments.length ||
+    assignedIds.size !== assignments.length ||
+    [...configuredIds].some((id) => !assignedIds.has(id))
+  ) {
+    throw new Error('Physical visual assignments do not match the configured generic dice.');
+  }
+
+  for (const assignment of assignments) {
+    const entry = activePhysicalDice.get(assignment.id);
+    if (!entry?.isPrepared) {
+      throw new Error(`Physical visual is not configured: ${assignment.id}`);
+    }
+    const physicalIndex = assignment.physicalIndex;
+    if (physicalIndex < 0 || physicalIndex >= physicalCount) {
       throw new Error(`Physical visual index is invalid: ${String(physicalIndex)}`);
     }
     entry.commitTrajectory(
-      trajectoryForIndex(transforms, frameCount, step, physicalCount, physicalIndex),
+      transforms,
+      frameCount,
+      step,
+      physicalCount,
+      physicalIndex,
       landings[physicalIndex] ?? 0,
       activationDelays?.[physicalIndex] ?? 0,
     );
-  });
+  }
 }
