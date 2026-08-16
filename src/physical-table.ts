@@ -24,27 +24,27 @@ export interface PhysicalTableEntry {
  */
 export class PhysicalTableRegistry {
   private readonly entriesById = new Map<string, PhysicalTableEntry>();
-  private entriesInOrder: PhysicalTableEntry[] = [];
-  private canonicalCountValue = 0;
-  private visualCountValue = 0;
+  private readonly entriesInOrder: PhysicalTableEntry[] = [];
+  private readonly canonicalEntriesInOrder: PhysicalTableEntry[] = [];
+  private readonly visualEntriesInOrder: PhysicalTableEntry[] = [];
 
   get size(): number {
     return this.entriesInOrder.length;
   }
 
   get canonicalCount(): number {
-    return this.canonicalCountValue;
+    return this.canonicalEntriesInOrder.length;
   }
 
   get visualCount(): number {
-    return this.visualCountValue;
+    return this.visualEntriesInOrder.length;
   }
 
   reset(specs: readonly { id: string; canonicalKind?: string }[]): void {
     this.entriesById.clear();
-    this.entriesInOrder = [];
-    this.canonicalCountValue = 0;
-    this.visualCountValue = 0;
+    this.entriesInOrder.length = 0;
+    this.canonicalEntriesInOrder.length = 0;
+    this.visualEntriesInOrder.length = 0;
     this.append(specs);
   }
 
@@ -58,12 +58,15 @@ export class PhysicalTableRegistry {
         id: spec.id,
         physicalIndex: this.entriesInOrder.length,
         implementation,
-        canonicalIndex: implementation === 'canonical' ? this.canonicalCountValue++ : null,
-        visualIndex: implementation === 'visual' ? this.visualCountValue++ : null,
+        canonicalIndex:
+          implementation === 'canonical' ? this.canonicalEntriesInOrder.length : null,
+        visualIndex: implementation === 'visual' ? this.visualEntriesInOrder.length : null,
         die: null,
         visual: null,
       };
       this.entriesInOrder.push(entry);
+      if (implementation === 'canonical') this.canonicalEntriesInOrder.push(entry);
+      else this.visualEntriesInOrder.push(entry);
       this.entriesById.set(entry.id, entry);
     }
   }
@@ -72,12 +75,12 @@ export class PhysicalTableRegistry {
     return this.entriesInOrder;
   }
 
-  canonicalEntries(): PhysicalTableEntry[] {
-    return this.entriesInOrder.filter((entry) => entry.implementation === 'canonical');
+  canonicalEntries(): readonly PhysicalTableEntry[] {
+    return this.canonicalEntriesInOrder;
   }
 
-  visualEntries(): PhysicalTableEntry[] {
-    return this.entriesInOrder.filter((entry) => entry.implementation === 'visual');
+  visualEntries(): readonly PhysicalTableEntry[] {
+    return this.visualEntriesInOrder;
   }
 
   boundEntries(): PhysicalTableEntry[] {
@@ -105,7 +108,7 @@ export class PhysicalTableRegistry {
   }
 
   physicalIndexForCanonical(canonicalIndex: number): number {
-    return this.canonicalEntries()[canonicalIndex]?.physicalIndex ?? canonicalIndex;
+    return this.canonicalEntriesInOrder[canonicalIndex]?.physicalIndex ?? canonicalIndex;
   }
 
   bindCanonical(id: string, die: DieInstance): void {
@@ -128,8 +131,12 @@ export class PhysicalTableRegistry {
     if (entry?.implementation === 'canonical') entry.die = null;
   }
 
-  visualInstances(): PhysicalDieVisualInstance[] {
-    return this.visualEntries().flatMap((entry) => (entry.visual ? [entry.visual] : []));
+  forEachVisual(
+    callback: (visual: PhysicalDieVisualInstance, entry: PhysicalTableEntry) => void,
+  ): void {
+    for (const entry of this.visualEntriesInOrder) {
+      if (entry.visual) callback(entry.visual, entry);
+    }
   }
 
   worldPosition(physicalIndex: number, target = new THREE.Vector3()): THREE.Vector3 | null {
@@ -141,7 +148,7 @@ export class PhysicalTableRegistry {
   }
 
   findByObject(object: THREE.Object3D): PhysicalTableEntry | null {
-    for (const entry of this.boundEntries()) {
+    for (const entry of this.entriesInOrder) {
       const root = entry.die?.group ?? entry.visual?.group;
       if (!root) continue;
       let current: THREE.Object3D | null = object;
