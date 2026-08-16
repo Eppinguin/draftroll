@@ -21,6 +21,18 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22.14.0'
+      - name: Fix embedded migration interpolation
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/agent-physical-runtime-cleanup.mjs')
+          source = path.read_text()
+          before = 'createSeededRandom(\\`${seed}:\\${group.groupId}\\`)'
+          after = 'createSeededRandom(\\`\\${seed}:\\${group.groupId}\\`)'
+          if source.count(before) != 1:
+              raise SystemExit(f'launch seed interpolation: expected one match, found {source.count(before)}')
+          path.write_text(source.replace(before, after, 1))
+          PY
       - name: Check migration syntax
         run: node --check scripts/agent-physical-runtime-cleanup.mjs
       - name: Apply guarded migration
