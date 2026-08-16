@@ -25,6 +25,15 @@ modifier = re.sub(
     r'\1.physical.map((visual) => visual.result)',
     modifier,
 )
+old_fate = """    explosionCalls.map((request) => request.fallbacks?.map((fallback) => fallback.result)),
+    [[1], [-1]],
+    'fallback-only explosions must also preserve prior visuals and append causal waves',"""
+new_fate = """    explosionCalls.map((request) => request.physical.map((visual) => visual.result)),
+    [[1], [-1]],
+    'Fate explosions remain first-class physical dice and append causal waves',"""
+if modifier.count(old_fate) != 1:
+    raise SystemExit(f'Fate physical sequencing assertion: expected one match, found {modifier.count(old_fate)}')
+modifier = modifier.replace(old_fate, new_fate, 1)
 if re.search(r'[A-Za-z_]\w*Calls(?:\[\d+\])?\.results', modifier):
     raise SystemExit('modifier sequencing still inspects removed bridge request.results')
 modifier_path.write_text(modifier)
