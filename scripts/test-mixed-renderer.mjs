@@ -48,15 +48,18 @@ try {
   const bridge = {
     async roll(request) {
       calls.push(request);
-      const physicalResults = Array.isArray(request.results)
-        ? request.results
-        : request.results === undefined
-          ? []
-          : [request.results];
+      const physicalResults = (request.physical ?? []).map((visual) => visual.result);
+      const physicalValues = (request.physical ?? []).map((visual) =>
+        typeof visual.numericValue === 'number'
+          ? visual.numericValue
+          : typeof visual.result === 'number'
+            ? visual.result
+            : 0,
+      );
       const fallbackResults = (request.fallbacks ?? []).map((fallback) => fallback.result);
       return {
         results: [...physicalResults, ...fallbackResults],
-        total: physicalResults.reduce((sum, value) => sum + value, 0),
+        total: physicalValues.reduce((sum, value) => sum + value, 0),
         replay: null,
       };
     },
@@ -91,9 +94,18 @@ try {
   const completion = await renderer.playRoll(result, { animationSeed: 'mixed-test' });
   assert.equal(completion.total, 31);
   assert.equal(calls.length, 1);
-  assert.deepEqual(calls[0].kinds, ['d20', 'd8', 'd6', 'd6']);
-  assert.deepEqual(calls[0].results, [17, 6, 4, 4]);
-  assert.deepEqual(calls[0].themes, ['dragon', 'frost', 'ember', 'dragon']);
+  assert.deepEqual(
+    calls[0].physical.map((visual) => visual.canonicalKind),
+    ['d20', 'd8', 'd6', 'd6'],
+  );
+  assert.deepEqual(
+    calls[0].physical.map((visual) => visual.result),
+    [17, 6, 4, 4],
+  );
+  assert.deepEqual(
+    calls[0].physical.map((visual) => visual.theme),
+    ['dragon', 'frost', 'ember', 'dragon'],
+  );
   assert.equal(calls[0].context.name, 'Mara Voss');
 
   const universalResult = {
@@ -168,11 +180,17 @@ try {
   });
   assert.equal(universalCompletion.total, 108);
   assert.equal(calls.length, 2);
-  assert.deepEqual(calls[1].kinds, ['d20', 'coin']);
-  assert.deepEqual(calls[1].results, [17, 2]);
+  assert.deepEqual(
+    calls[1].physical.map((visual) => visual.type),
+    ['d20', 'd2', 'd9'],
+  );
+  assert.deepEqual(
+    calls[1].physical.map((visual) => visual.outcomeIndex),
+    [16, 1, 6],
+  );
   assert.deepEqual(
     calls[1].fallbacks.map((fallback) => fallback.kind),
-    ['coin', 'fate', 'spinner', 'percentile', 'card', 'token'],
+    ['coin', 'fate', 'percentile', 'card', 'token'],
   );
   assert.deepEqual(
     calls[1].visualOrder.map((entry) => entry.kind),
@@ -181,7 +199,7 @@ try {
       'physical',
       'fallback',
       'fallback',
-      'fallback',
+      'physical',
       'fallback',
       'fallback',
       'fallback',
@@ -189,8 +207,8 @@ try {
   );
   assert.equal(calls[1].fallbacks[0].oppositeLabel, 'Tails');
   assert.equal(calls[1].fallbacks[1].label, '−');
-  assert.equal(calls[1].fallbacks[4].label, 'Success');
-  assert.equal(calls[1].fallbacks[5].label, 'Storm');
+  assert.equal(calls[1].fallbacks[3].label, 'Success');
+  assert.equal(calls[1].fallbacks[4].label, 'Storm');
 
   const totalOnly = {
     authority: 'local',
@@ -203,7 +221,7 @@ try {
   };
   const totalOnlyCompletion = await renderer.playRoll(totalOnly, { animationSeed: 'total-only' });
   assert.equal(totalOnlyCompletion.total, 5);
-  assert.deepEqual(calls[2].results, []);
+  assert.deepEqual(calls[2].physical, []);
   assert.equal(calls[2].fallbacks[0].kind, 'token');
   assert.equal(calls[2].fallbacks[0].label, '5');
   assert.equal(calls[2].fallbacks[0].metadata.synthetic, true);
@@ -212,7 +230,7 @@ try {
     JSON.stringify(
       {
         ok: true,
-        physicalKinds: calls[0].kinds,
+        physicalKinds: calls[0].physical.map((visual) => visual.canonicalKind ?? visual.type),
         fallbackKinds: calls[1].fallbacks.map((fallback) => fallback.kind),
         total: universalCompletion.total,
       },

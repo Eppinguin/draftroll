@@ -37,6 +37,7 @@ import {
 import { consumeSettledVisualIndexes, deriveDieSettleTimes } from './settlement';
 import type {
   DraftrollFallbackVisual,
+  DraftrollPhysicalVisual,
   DraftrollVisualOrderEntry,
   DraftrollThemeManifest,
   RendererCameraOptions,
@@ -73,6 +74,8 @@ export interface RollEffectContext {
 }
 
 export interface DiceRollRequest {
+  /** First-class physical dice. Legacy results/kinds remain accepted for backwards compatibility. */
+  physical?: DraftrollPhysicalVisual[];
   results?: number[] | number;
   outcomes?: EffectOutcome[] | EffectOutcome;
   themes?: ThemeName[] | ThemeName;
@@ -2063,6 +2066,7 @@ function estimateFirstImpactTime(positionY: number, velocityY: number, radius: n
 
 interface ActiveTableRollGroup {
   groupId: string;
+  dieIds?: string[];
   actorLabel?: string;
   rollLabel?: string;
   total: number;
@@ -3307,6 +3311,171 @@ function createStaticTablePlan(duration: number): RollPlan {
   return plan;
 }
 
+function cloneBridgePhysicalPresentation(
+  presentation: DraftrollPhysicalVisual['presentation'],
+): DraftrollPhysicalVisual['presentation'] {
+  return presentation
+    ? { contents: presentation.contents.map((content) => ({ ...content })) }
+    : undefined;
+}
+
+function physicalBridgeFallback(visual: DraftrollPhysicalVisual): DraftrollFallbackVisual {
+  return {
+    id: visual.id,
+    type: visual.type,
+    kind: 'spinner',
+    result: visual.outcomeIndex + 1,
+    numericValue: visual.outcomeIndex + 1,
+    sides: visual.sides,
+    title: visual.title,
+    label: visual.label,
+    theme: visual.theme,
+    outcome: visual.outcome,
+    metadata: {
+      ...visual.metadata,
+      draftrollPhysicalModel: true,
+      draftrollPhysicalOutcomeIndex: visual.outcomeIndex,
+      draftrollPhysicalSemanticResult: visual.result,
+      ...(visual.presentation
+        ? { draftrollPhysicalPresentation: cloneBridgePhysicalPresentation(visual.presentation) }
+        : {}),
+    },
+  };
+}
+
+function translatePhysicalTableContext(
+  context: Record<string, unknown>,
+  visualOrder: readonly DraftrollVisualOrderEntry[],
+): Record<string, unknown> {
+  const raw = Array.isArray(context.tableRolls) ? context.tableRolls : null;
+  if (!raw) return context;
+  const tableRolls: unknown[] = [];
+  for (const value of raw) {
+    if (!isRecord(value) || !Array.isArray(value.dieIds)) {
+      tableRolls.push(value);
+      continue;
+    }
+    const dieIds = value.dieIds.filter((id): id is string => typeof id === 'string');
+    const ids = new Set(dieIds);
+    const physicalIndexes = visualOrder
+      .filter((entry) => entry.kind === 'physical' && ids.has(entry.dieId))
+      .map((entry) => entry.index);
+    const fallbackIndexes = visualOrder
+      .filter((entry) => entry.kind === 'fallback' && ids.has(entry.dieId))
+      .map((entry) => entry.index);
+    tableRolls.push(
+      Object.assign({}, value, {
+        dieIds,
+        physicalStart: physicalIndexes.length > 0 ? Math.min(...physicalIndexes) : 0,
+        physicalCount: physicalIndexes.length,
+        fallbackStart: fallbackIndexes.length > 0 ? Math.min(...fallbackIndexes) : 0,
+        fallbackCount: fallbackIndexes.length,
+        visualCount: physicalIndexes.length + fallbackIndexes.length,
+      }),
+    );
+  }
+  return { ...context, tableRolls };
+}
+
+/**
+ * Converts the new all-physical bridge contract into the engine's temporary canonical/supplemental
+ * storage layout. The distinction stops here: the shared worker receives both as physical bodies.
+ */
+function normalizePhysicalBridgeRequest(request: DiceRollRequest): DiceRollRequest {
+  if (!request.physical) return request;
+  const physical = request.physical.map((visual) => ({
+    ...visual,
+    physics: visual.physics ? { ...visual.physics } : undefined,
+    presentation: cloneBridgePhysicalPresentation(visual.presentation),
+    metadata: visual.metadata ? { ...visual.metadata } : undefined,
+  }));
+  const canonicalResults: number[] = [];
+  const canonicalKinds: DieKind[] = [];
+  const canonicalThemes: ThemeName[] = [];
+  const canonicalOutcomes: EffectOutcome[] = [];
+  const canonicalPhysics: DicePhysicsProperties[] = [];
+  const canonicalByPublicIndex = new Map<number, number>();
+  const generatedByPublicIndex = new Map<number, number>();
+  const generatedFallbacks: DraftrollFallbackVisual[] = [];
+
+  physical.forEach((visual, publicIndex) => {
+    if (
+      !Number.isSafeInteger(visual.sides) ||
+      visual.sides < 1 ||
+      visual.sides > 256 ||
+      !Number.isSafeInteger(visual.outcomeIndex) ||
+      visual.outcomeIndex < 0 ||
+      visual.outcomeIndex >= visual.sides
+    ) {
+      throw new Error(`Invalid physical die descriptor: ${visual.id}`);
+    }
+    const canonicalKind =
+      visual.canonicalKind && isDieKind(visual.canonicalKind)
+        ? visual.canonicalKind
+        : isDieKind(visual.type)
+          ? visual.type
+          : null;
+    if (canonicalKind) {
+      canonicalByPublicIndex.set(publicIndex, canonicalResults.length);
+      canonicalResults.push(visual.outcomeIndex + 1);
+      canonicalKinds.push(canonicalKind);
+      canonicalThemes.push(visual.theme);
+      canonicalOutcomes.push(visual.outcome);
+      canonicalPhysics.push({ ...visual.physics });
+      return;
+    }
+    generatedByPublicIndex.set(publicIndex, generatedFallbacks.length);
+    generatedFallbacks.push(physicalBridgeFallback(visual));
+  });
+
+  const ordinaryFallbacks =
+    request.fallbacks?.map((fallback) => ({
+      ...fallback,
+      metadata: fallback.metadata ? { ...fallback.metadata } : undefined,
+    })) ?? [];
+  const publicOrder = request.visualOrder ?? [
+    ...physical.map((visual, index) => ({
+      kind: 'physical' as const,
+      index,
+      dieId: visual.id,
+    })),
+    ...ordinaryFallbacks.map((fallback, index) => ({
+      kind: 'fallback' as const,
+      index,
+      dieId: fallback.id,
+    })),
+  ];
+  const visualOrder = publicOrder.map((entry): DraftrollVisualOrderEntry => {
+    if (entry.kind === 'fallback') {
+      return {
+        kind: 'fallback',
+        index: generatedFallbacks.length + entry.index,
+        dieId: entry.dieId,
+      };
+    }
+    const canonicalIndex = canonicalByPublicIndex.get(entry.index);
+    if (canonicalIndex !== undefined) {
+      return { kind: 'physical', index: canonicalIndex, dieId: entry.dieId };
+    }
+    const generatedIndex = generatedByPublicIndex.get(entry.index);
+    if (generatedIndex === undefined) throw new Error('Physical visual ordering is invalid');
+    return { kind: 'fallback', index: generatedIndex, dieId: entry.dieId };
+  });
+  const context = translatePhysicalTableContext({ ...request.context }, visualOrder);
+  return {
+    ...request,
+    physical: undefined,
+    results: canonicalResults,
+    kinds: canonicalKinds,
+    themes: canonicalThemes,
+    outcomes: canonicalOutcomes,
+    physics: canonicalPhysics,
+    fallbacks: [...generatedFallbacks, ...ordinaryFallbacks],
+    visualOrder,
+    context,
+  };
+}
+
 interface AdditivePhysicalRequest {
   results: number[];
   kinds: DieKind[];
@@ -3620,6 +3789,9 @@ function incomingTableRolls(
             typeof entry.groupId === 'string'
               ? entry.groupId
               : `table-add-${physicalStart}-${index}`,
+          dieIds: Array.isArray(entry.dieIds)
+            ? entry.dieIds.filter((id): id is string => typeof id === 'string')
+            : undefined,
           actorLabel: typeof entry.actorLabel === 'string' ? entry.actorLabel : undefined,
           rollLabel: typeof entry.rollLabel === 'string' ? entry.rollLabel : undefined,
           total: Number.isFinite(Number(entry.total)) ? Number(entry.total) : 0,
@@ -3639,6 +3811,9 @@ function incomingTableRolls(
   return [
     {
       groupId: typeof context.rollId === 'string' ? context.rollId : `table-add-${physicalStart}`,
+      dieIds: Array.isArray(context.renderedDieIds)
+        ? context.renderedDieIds.filter((id): id is string => typeof id === 'string')
+        : undefined,
       actorLabel: typeof context.name === 'string' ? context.name : undefined,
       rollLabel: typeof metadata?.actionName === 'string' ? metadata.actionName : undefined,
       total: Number.isFinite(Number(context.normalizedTotal)) ? Number(context.normalizedTotal) : 0,
@@ -3700,6 +3875,7 @@ function mergeTableRollGroups(
       actorLabel: addition.actorLabel ?? previous.actorLabel,
       rollLabel: addition.rollLabel ?? previous.rollLabel,
       total: singleRollCompletedTotal ?? previous.total,
+      dieIds: [...new Set([...(previous.dieIds ?? []), ...(addition.dieIds ?? [])])],
       physicalCount: previous.physicalCount + addition.physicalCount,
       fallbackCount: previous.fallbackCount + addition.fallbackCount,
       visualCount: previous.visualCount + addition.visualCount,
@@ -4068,10 +4244,13 @@ function fallbackVisualId(index: number): string {
 }
 
 function effectGroupId(kind: 'physical' | 'fallback', index: number): string {
-  const group = readActiveTableRolls().find((entry) =>
-    kind === 'physical'
-      ? index >= entry.physicalStart && index < entry.physicalStart + entry.physicalCount
-      : index >= entry.fallbackStart && index < entry.fallbackStart + entry.fallbackCount,
+  const dieId = kind === 'physical' ? physicalVisualId(index) : fallbackVisualId(index);
+  const group = readActiveTableRolls().find(
+    (entry) =>
+      entry.dieIds?.includes(dieId) ??
+      (kind === 'physical'
+        ? index >= entry.physicalStart && index < entry.physicalStart + entry.physicalCount
+        : index >= entry.fallbackStart && index < entry.fallbackStart + entry.fallbackCount),
   );
   if (group) return group.groupId;
   if (typeof activeContext.rollId === 'string') return activeContext.rollId;
@@ -4410,7 +4589,11 @@ presetInput.addEventListener('keydown', (event) => {
 });
 
 window.draftrollDice = {
-  roll: (request) => {
+  roll: (input) => {
+    const request =
+      input && typeof input === 'object' && !Array.isArray(input)
+        ? normalizePhysicalBridgeRequest(input)
+        : input;
     if (
       request &&
       typeof request === 'object' &&

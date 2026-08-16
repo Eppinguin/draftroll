@@ -78,9 +78,9 @@ export interface ThemeLabelDefinition {
   glowColor?: string;
   fontFamily?: string;
   font?: ThemeAssetReference;
-  /** A 5x4 atlas containing values 1 through 20. */
+  /** A 5x4 atlas containing physical outcome slots 1 through 20; cells may be numbers or icons. */
   atlas?: ThemeAssetReference;
-  /** Optional die-specific atlas override. */
+  /** Optional die-specific outcome-slot atlas override, including arbitrary dN identifiers. */
   atlases?: Partial<Record<ThemeDieType, ThemeAssetReference>>;
 }
 

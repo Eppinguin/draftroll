@@ -39,6 +39,10 @@ for (const kind of ['coin', 'percentile', 'fate', 'spinner', 'token', 'card']) {
   );
 }
 assert.match(renderer, /DraftrollFallbackVisual/);
+assert.match(renderer, /interface DraftrollPhysicalVisual/);
+assert.match(renderer, /physical\?: DraftrollPhysicalVisual\[\]/);
+assert.match(renderer, /resolvePhysicalSlot/);
+assert.match(renderer, /createCustomPhysicalPresentation/);
 assert.match(renderer, /visualOrder/);
 assert.match(renderer, /normalizeFallbackKind/);
 
@@ -119,14 +123,16 @@ assert.match(rollWorker, /additionalLandings/);
 assert.match(rollWorker, /extractPhysicalTransforms/);
 assert.doesNotMatch(rollWorker, /new CANNON\.World/);
 
-// Numeric spinner inputs are promoted immediately into the physical model.
+// Legacy spinner inputs are accepted only at the browser compatibility boundary; SDK dN is physical.
 assert.match(visuals, /PhysicalDieVisualInstance/);
 assert.match(visuals, /usesPhysicalDieModel/);
 assert.doesNotMatch(visuals, /GeneratedFallbackVisualInstance/);
 assert.match(physicalVisuals, /class PhysicalDieVisualInstance/);
 assert.match(physicalVisuals, /createGeneratedPhysicalDieDefinition/);
 assert.match(physicalVisuals, /createDefaultPhysicalDiePresentation/);
-assert.match(physicalVisuals, /remapPhysicalDiePresentation/);
+assert.match(physicalVisuals, /draftrollPhysicalPresentation/);
+assert.match(physicalVisuals, /presentationTexture/);
+assert.match(physicalVisuals, /content.kind === 'icon'/);
 assert.match(physicalVisuals, /physicalDieColliderRadius/);
 assert.match(physicalVisuals, /getPhysicalFallbackPlanEntries/);
 assert.match(physicalVisuals, /commitPhysicalFallbackPlan/);
@@ -149,6 +155,7 @@ assert.doesNotMatch(physicalVisuals, /settledRotation/);
 // Runtime themes can paint arbitrary artwork into generated physical outcome slots.
 assert.match(physicalVisuals, /getRuntimeThemeTexture/);
 assert.match(physicalVisuals, /getRuntimeThemeMaterial/);
+assert.match(physicalVisuals, /getRuntimeThemeMesh/);
 assert.match(physicalVisuals, /function atlasCellTexture/);
 assert.match(physicalVisuals, /LABEL_ATLAS_COLUMNS = 5/);
 assert.match(physicalVisuals, /LABEL_ATLAS_ROWS = 4/);
@@ -224,6 +231,9 @@ console.log(
       generatedGeneratedCollisions: true,
       generatedStandardCollisions: true,
       runtimeThemeArtwork: true,
+      publicGeneratedDiceArePhysical: true,
+      semanticPhysicalFaceContent: true,
+      arbitraryThemeMeshes: true,
       noParallelGeneratedPhysicsEngine: true,
       automaticFaceEdgeVertexLabels: true,
       generatedFaceLabelCoverage: true,

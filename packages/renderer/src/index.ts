@@ -22,8 +22,21 @@ export type {
   RendererPerformanceBudget,
   RendererPerformanceBudgetInput,
 } from './performance';
+export type {
+  CustomPhysicalDieDefinitionInput,
+  PhysicalDieDefinition,
+  PhysicalDieFaceContent,
+  PhysicalDieGeometrySource,
+  PhysicalDieModel,
+  PhysicalDieOutcomeSlot,
+  PhysicalDiePresentation,
+  PhysicalDieTargetingMode,
+  SerializedPhysicalCollider,
+} from './physical';
+import type { PhysicalDieFaceContent, PhysicalDiePresentation } from './physical';
 import type {
   CustomDiceDefinition,
+  CustomDieFace,
   NormalizedDieResult,
   NormalizedRollResult,
   DicePhysicsProperties,
@@ -62,6 +75,42 @@ export type DraftrollFallbackKind = 'coin' | 'percentile' | 'fate' | 'spinner' |
  * @public
  */
 export type DraftrollEffectOutcome = 'positive' | 'neutral' | 'negative' | 'none';
+
+/**
+ * Serializable first-class physical die presented by the browser bridge.
+ *
+ * @remarks
+ * Canonical, generated, and custom/theme dice use the same physical contract. The outcome index
+ * selects a physical support slot while result/numericValue retain the host's semantic outcome.
+ * Presentation is optional: ordinary numeric dice use renderer/theme defaults, while symbolic dice
+ * can attach text or icon content to the same physical slots without changing game semantics.
+ *
+ * @public
+ */
+export interface DraftrollPhysicalVisual {
+  id: string;
+  /** Original normalized die type or custom die identifier. */
+  type: string;
+  /** Number of logical physical outcome slots. */
+  sides: number;
+  /** Zero-based physical outcome slot requested by the authoritative result. */
+  outcomeIndex: number;
+  /** Authoritative semantic result. */
+  result: number | string;
+  /** Numeric contribution retained independently from the face artwork. */
+  numericValue?: number;
+  /** Canonical optimized geometry when available; otherwise generated geometry is used. */
+  canonicalKind?: DraftrollDieKind;
+  title: string;
+  label: string;
+  theme: string;
+  outcome: DraftrollEffectOutcome;
+  physics?: DicePhysicsProperties;
+  /** Optional slot artwork such as custom text/icons. */
+  presentation?: PhysicalDiePresentation;
+  metadata?: Record<string, unknown>;
+}
+
 /**
  * Named renderer quality and battery profiles.
  *
@@ -370,7 +419,9 @@ export interface DraftrollBridge {
   roll(
     request?:
       | {
-          /** Results belonging only to physical dice. May be empty for fallback-only rolls. */
+          /** First-class physical dice. New integrations should use this instead of legacy parallel arrays. */
+          physical?: DraftrollPhysicalVisual[];
+          /** @deprecated Legacy canonical-only physical results. */
           results?: number[] | number;
           outcomes?: DraftrollEffectOutcome[] | DraftrollEffectOutcome;
           themes?: string[] | string;
@@ -510,13 +561,29 @@ export class UnsupportedRollError extends DraftrollError {
   }
 }
 
-interface PhysicalVisual {
+interface PhysicalVisual extends DraftrollPhysicalVisual {
   die: NormalizedDieResult;
-  kind: DraftrollDieKind;
-  value: number;
-  theme: string;
-  outcome: DraftrollEffectOutcome;
-  physics?: DicePhysicsProperties;
+}
+
+function clonePreparedPhysicalVisual(visual: PhysicalVisual): DraftrollPhysicalVisual {
+  return {
+    id: visual.id,
+    type: visual.type,
+    sides: visual.sides,
+    outcomeIndex: visual.outcomeIndex,
+    result: visual.result,
+    numericValue: visual.numericValue,
+    canonicalKind: visual.canonicalKind,
+    title: visual.title,
+    label: visual.label,
+    theme: visual.theme,
+    outcome: visual.outcome,
+    physics: visual.physics ? { ...visual.physics } : undefined,
+    presentation: visual.presentation
+      ? { contents: visual.presentation.contents.map((content) => ({ ...content })) }
+      : undefined,
+    metadata: visual.metadata ? { ...visual.metadata } : undefined,
+  };
 }
 
 interface PreparedRollPresentation {
@@ -577,6 +644,8 @@ interface TableRollContextEntry {
   expression?: string;
   physicalStart: number;
   physicalCount: number;
+  /** Stable IDs make group ownership independent from internal visual storage/ranges. */
+  dieIds: string[];
   fallbackStart: number;
   fallbackCount: number;
   visualCount: number;
@@ -915,29 +984,36 @@ export class DraftrollRenderer implements DiceRenderer {
         options.signal,
       );
       const definition = definitions.get(die.customDiceId ?? '');
-      const physicalFace = resolvePhysicalFace(die, definition);
-      const physicalKind = physicalFace?.kind ?? normalizeKind(die.type, die.sides);
-      const numericResult =
-        physicalFace?.value ?? (typeof die.result === 'number' ? die.result : Number(die.result));
-      const isPhysicalValue =
-        options.forceFallback !== true &&
-        physicalKind !== null &&
-        Number.isInteger(numericResult) &&
-        numericResult >= 1 &&
-        numericResult <= maximumPhysicalValue(physicalKind) &&
-        (physicalFace !== null || !isDistinctFallbackType(die.type));
+      const physicalSlot = resolvePhysicalSlot(die, definition);
       const outcome =
-        options.outcomeResolver?.(die, result) ?? defaultOutcomeForDie(die, physicalKind);
+        options.outcomeResolver?.(die, result) ?? defaultOutcomeForDie(die, physicalSlot?.sides);
 
-      if (isPhysicalValue && physicalKind) {
+      if (options.forceFallback !== true && physicalSlot) {
         const index = physical.length;
         physical.push({
           die,
-          kind: physicalKind,
-          value: numericResult,
+          id: die.id,
+          type: die.type,
+          sides: physicalSlot.sides,
+          outcomeIndex: physicalSlot.outcomeIndex,
+          result: die.result,
+          numericValue:
+            die.numericValue ?? (typeof die.result === 'number' ? die.result : undefined),
+          canonicalKind: physicalSlot.kind ?? undefined,
+          title: readPhysicalTitle(die, definition, physicalSlot.sides),
+          label: die.faceLabel ?? String(die.result),
           theme,
           outcome,
           physics: die.physics,
+          presentation: definition
+            ? createCustomPhysicalPresentation(definition, physicalSlot.sides)
+            : undefined,
+          metadata: {
+            ...definition?.metadata,
+            ...die.metadata,
+            ...(die.faceMetadata ? { faceMetadata: die.faceMetadata } : {}),
+            ...(die.faceIndex !== undefined ? { faceIndex: die.faceIndex } : {}),
+          },
         });
         visualOrder.push({ kind: 'physical', index, dieId: die.id });
         continue;
@@ -983,7 +1059,7 @@ export class DraftrollRenderer implements DiceRenderer {
     };
     const expectedResults = visualOrder.map((entry) =>
       entry.kind === 'physical'
-        ? (physical[entry.index]?.value ?? 0)
+        ? (physical[entry.index]?.result ?? 0)
         : (fallbacks[entry.index]?.result ?? ''),
     );
     return {
@@ -1108,6 +1184,9 @@ export class DraftrollRenderer implements DiceRenderer {
       );
     }
     this.assertPresentationGeneration(presentationGeneration);
+    const physical: DraftrollPhysicalVisual[] = [];
+    // Deprecated canonical arrays remain populated for older custom bridges. Built-in Draftroll
+    // treats physical[] as authoritative and ignores these when the new field is present.
     const numericResults: number[] = [];
     const physicalKinds: DraftrollDieKind[] = [];
     const themes: string[] = [];
@@ -1118,14 +1197,17 @@ export class DraftrollRenderer implements DiceRenderer {
     const tableRolls: TableRollContextEntry[] = [];
 
     for (const entry of entries) {
-      const physicalStart = numericResults.length;
+      const physicalStart = physical.length;
       const fallbackStart = fallbacks.length;
       entry.physical.forEach((visual) => {
-        numericResults.push(visual.value);
-        physicalKinds.push(visual.kind);
-        themes.push(visual.theme);
-        outcomes.push(visual.outcome);
-        physics.push({ ...visual.physics });
+        physical.push(clonePreparedPhysicalVisual(visual));
+        if (visual.canonicalKind) {
+          numericResults.push(visual.outcomeIndex + 1);
+          physicalKinds.push(visual.canonicalKind);
+          themes.push(visual.theme);
+          outcomes.push(visual.outcome);
+          physics.push({ ...visual.physics });
+        }
       });
       entry.fallbacks.forEach((fallback) => fallbacks.push({ ...fallback }));
       entry.visualOrder.forEach((visual) =>
@@ -1145,6 +1227,7 @@ export class DraftrollRenderer implements DiceRenderer {
         expression: entry.result.expression,
         physicalStart,
         physicalCount: entry.physical.length,
+        dieIds: entry.visualOrder.map((visual) => visual.dieId),
         fallbackStart,
         fallbackCount: entry.fallbacks.length,
         visualCount: entry.visualOrder.length,
@@ -1156,12 +1239,12 @@ export class DraftrollRenderer implements DiceRenderer {
       (entries[0].options.preservePreviousDice === true || entries[0].table.mode === 'concurrent'
         ? 'add'
         : 'replace');
-    if (numericResults.length > 0 && presentationMode === 'replace') {
+    if (physical.length > 0 && presentationMode === 'replace') {
       // These legacy bridge setters rebuild the browser table. They are useful
       // for a replacement cast, but calling them before an additive modifier
       // stage would remove the settled dice that the new dice must join.
-      this.bridge.setQuantity(numericResults.length);
-      this.bridge.setTheme(themes[0] ?? this.fallbackThemeId);
+      this.bridge.setQuantity(physical.length);
+      this.bridge.setTheme(physical[0]?.theme ?? this.fallbackThemeId);
     }
     const startTimes = entries
       .map((entry) => finiteStartTime(entry))
@@ -1214,6 +1297,7 @@ export class DraftrollRenderer implements DiceRenderer {
       );
     }
     const bridgePromise = this.bridge.roll({
+      physical,
       results: numericResults,
       outcomes,
       themes,
@@ -1610,17 +1694,29 @@ function normalizeKind(type: string, sides?: number): DraftrollDieKind | null {
     : null;
 }
 
+const MAXIMUM_EXACT_PHYSICAL_SIDES = 256;
+
+interface ResolvedPhysicalSlot {
+  kind: DraftrollDieKind | null;
+  sides: number;
+  outcomeIndex: number;
+}
+
 function maximumPhysicalValue(kind: DraftrollDieKind): number {
   return kind === 'coin' ? 2 : Number(kind.slice(1));
 }
 
-function resolvePhysicalFace(
+function numericPhysicalSides(type: string, sides?: number): number | null {
+  if (Number.isSafeInteger(sides) && (sides ?? 0) >= 1) return sides!;
+  const match = /^d(\d+)$/i.exec(type);
+  const parsed = match ? Number(match[1]) : NaN;
+  return Number.isSafeInteger(parsed) && parsed >= 1 ? parsed : null;
+}
+
+function resolveCustomFaceIndex(
   die: NormalizedDieResult,
-  definition: CustomDiceDefinition | undefined,
-): { kind: DraftrollDieKind; value: number } | null {
-  const kind = normalizeKind(definition?.renderAs ?? '', undefined);
-  if (!definition || !kind) return null;
-  const maximum = maximumPhysicalValue(kind);
+  definition: CustomDiceDefinition,
+): number | null {
   let faceIndex = die.faceIndex;
   if (faceIndex === undefined) {
     const matches = definition.faces
@@ -1633,8 +1729,74 @@ function resolvePhysicalFace(
       );
     if (matches.length === 1) faceIndex = matches[0].index;
   }
-  if (faceIndex === undefined || !Number.isInteger(faceIndex) || faceIndex < 0) return null;
-  return { kind, value: (faceIndex % maximum) + 1 };
+  return faceIndex !== undefined && Number.isInteger(faceIndex) && faceIndex >= 0
+    ? faceIndex
+    : null;
+}
+
+function resolvePhysicalSlot(
+  die: NormalizedDieResult,
+  definition: CustomDiceDefinition | undefined,
+): ResolvedPhysicalSlot | null {
+  if (definition && !definition.renderAs) return null;
+  if (!definition && isDistinctFallbackType(die.type)) return null;
+  const sourceType = definition?.renderAs ?? die.type;
+  const kind = normalizeKind(sourceType, definition ? undefined : die.sides);
+  const sides = kind
+    ? maximumPhysicalValue(kind)
+    : numericPhysicalSides(sourceType, definition ? undefined : die.sides);
+  if (sides === null || sides > MAXIMUM_EXACT_PHYSICAL_SIDES) return null;
+
+  if (definition) {
+    const faceIndex = resolveCustomFaceIndex(die, definition);
+    return faceIndex === null ? null : { kind, sides, outcomeIndex: faceIndex % sides };
+  }
+
+  const value = typeof die.result === 'number' ? die.result : Number(die.result);
+  if (!Number.isInteger(value) || value < 1 || value > sides) return null;
+  return { kind, sides, outcomeIndex: value - 1 };
+}
+
+function physicalFaceContent(face: CustomDieFace, slot: number): PhysicalDieFaceContent {
+  const icon = typeof face.metadata?.icon === 'string' ? face.metadata.icon : undefined;
+  if (icon) return { kind: 'icon', icon, label: face.label };
+  const asset =
+    typeof face.metadata?.texture === 'string'
+      ? face.metadata.texture
+      : typeof face.metadata?.asset === 'string'
+        ? face.metadata.asset
+        : undefined;
+  if (asset) return { kind: 'texture', asset, label: face.label };
+  if (typeof face.result === 'number') {
+    return { kind: 'number', value: slot + 1, label: face.label ?? String(face.result) };
+  }
+  return { kind: 'text', text: face.label ?? face.result };
+}
+
+function createCustomPhysicalPresentation(
+  definition: CustomDiceDefinition,
+  sides: number,
+): PhysicalDiePresentation {
+  const contents: PhysicalDieFaceContent[] = Array.from({ length: sides }, (_entry, index) => ({
+    kind: 'number' as const,
+    value: index + 1,
+  }));
+  definition.faces.forEach((face, faceIndex) => {
+    const slot = faceIndex % sides;
+    contents[slot] = physicalFaceContent(face, slot);
+  });
+  return { contents };
+}
+
+function readPhysicalTitle(
+  die: NormalizedDieResult,
+  definition: CustomDiceDefinition | undefined,
+  sides: number,
+): string {
+  const metadataLabel = typeof die.metadata?.label === 'string' ? die.metadata.label : undefined;
+  const definitionLabel =
+    typeof definition?.metadata?.name === 'string' ? definition.metadata.name : undefined;
+  return metadataLabel ?? definitionLabel ?? (definition?.id || `d${sides}`);
 }
 
 function numericFaceValue(value: number | string): number {
@@ -1893,7 +2055,7 @@ function readDisplayLabel(die: NormalizedDieResult, kind: DraftrollFallbackKind)
 
 function defaultOutcomeForDie(
   die: NormalizedDieResult,
-  physicalKind: DraftrollDieKind | null,
+  physicalMaximum?: number,
 ): DraftrollEffectOutcome {
   if (!die.kept) return 'none';
   const value =
@@ -1904,7 +2066,7 @@ function defaultOutcomeForDie(
       if (value < 0) return 'negative';
       return 'neutral';
     }
-    const maximum = physicalKind ? maximumPhysicalValue(physicalKind) : die.sides;
+    const maximum = physicalMaximum ?? die.sides;
     if (maximum !== undefined && value === maximum) return 'positive';
     if (value === 1 && maximum !== 2) return 'negative';
   }

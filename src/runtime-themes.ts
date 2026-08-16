@@ -7,7 +7,6 @@ import {
   type ThemeMaterialDefinition,
   type ThemePhysicsDefinition,
 } from '../packages/themes/src/index';
-import type { DieKind } from './physics-shapes';
 import {
   THEMES,
   THEME_MANIFESTS,
@@ -107,7 +106,7 @@ export function getRuntimeThemeFont(themeId: string): string | undefined {
 
 export function getRuntimeThemeMesh(
   themeId: string,
-  kind: DieKind,
+  kind: string,
 ): THREE.BufferGeometry | undefined {
   return runtimeThemes.get(themeId)?.meshes.get(kind);
 }
@@ -277,7 +276,7 @@ async function loadThemeMeshes(
   resources: RuntimeThemeResources,
 ): Promise<void> {
   for (const [kind, definition] of Object.entries(resources.manifest.meshes ?? {})) {
-    if (!definition || !isPhysicalKind(kind)) continue;
+    if (!definition) continue;
     const asset = bundle.assets[definition.asset.src];
     if (!asset) continue;
     try {
@@ -460,16 +459,4 @@ function isImpactSet(
 function readFinite(value: unknown, fallback: number): number {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : fallback;
-}
-
-function isPhysicalKind(value: string): value is DieKind {
-  return (
-    value === 'coin' ||
-    value === 'd4' ||
-    value === 'd6' ||
-    value === 'd8' ||
-    value === 'd10' ||
-    value === 'd12' ||
-    value === 'd20'
-  );
 }
