@@ -21,6 +21,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22.14.0'
+      - name: Let validation report codemod leftovers
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/agent-unify-physical-plan.py')
+          source = path.read_text()
+          before = """if 'genericPhysicalReplay' in main or 'AdditionalPhysical' in main or 'additionalPhysical' in main:\n    raise SystemExit('legacy additional-physical replay naming remains in main.ts')\n"""
+          if source.count(before) != 1:
+              raise SystemExit('migration guard anchor missing')
+          path.write_text(source.replace(before, '', 1))
+          PY
       - name: Apply unified physical plan migration
         run: python scripts/agent-unify-physical-plan.py
       - name: Remove one-time migration files
