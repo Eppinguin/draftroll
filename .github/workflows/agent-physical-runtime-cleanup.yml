@@ -21,17 +21,29 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22.14.0'
-      - name: Fix embedded migration interpolation
+      - name: Fix guarded migration compatibility
         run: |
           python - <<'PY'
           from pathlib import Path
           path = Path('scripts/agent-physical-runtime-cleanup.mjs')
           source = path.read_text()
-          before = 'createSeededRandom(\\`${seed}:\\${group.groupId}\\`)'
-          after = 'createSeededRandom(\\`\\${seed}:\\${group.groupId}\\`)'
-          if source.count(before) != 1:
-              raise SystemExit(f'launch seed interpolation: expected one match, found {source.count(before)}')
-          path.write_text(source.replace(before, after, 1))
+          fixes = [
+              (
+                  'createSeededRandom(\\`${seed}:\\${group.groupId}\\`)',
+                  'createSeededRandom(\\`\\${seed}:\\${group.groupId}\\`)',
+                  'launch seed interpolation',
+              ),
+              (
+                  """smoke = replaceOnce(\n  smoke,\n  `const physicalVisuals = await readFile(join(root, 'src/physical-die-visuals.ts'), 'utf8');`,\n  `const physicalVisuals = await readFile(join(root, 'src/physical-die-visuals.ts'), 'utf8');\\nconst physicalMesh = await readFile(join(root, 'src/physical-die-mesh.ts'), 'utf8');\\nconst physicalLaunch = await readFile(join(root, 'src/physical-launch.ts'), 'utf8');`,\n  'smoke reads physical mesh and launch',\n);""",
+                  """smoke = replaceOnce(\n  smoke,\n  `  physicalVisuals,\\n  physicalPlanner,`,\n  `  physicalVisuals,\\n  physicalMesh,\\n  physicalLaunch,\\n  physicalPlanner,`,\n  'smoke result slots for physical mesh and launch',\n);\nsmoke = replaceOnce(\n  smoke,\n  `  readFile(new URL('../src/physical-die-visuals.ts', import.meta.url), 'utf8'),\\n  readFile(new URL('../src/physical-roll-planner.ts', import.meta.url), 'utf8'),`,\n  `  readFile(new URL('../src/physical-die-visuals.ts', import.meta.url), 'utf8'),\\n  readFile(new URL('../src/physical-die-mesh.ts', import.meta.url), 'utf8'),\\n  readFile(new URL('../src/physical-launch.ts', import.meta.url), 'utf8'),\\n  readFile(new URL('../src/physical-roll-planner.ts', import.meta.url), 'utf8'),`,\n  'smoke reads physical mesh and launch',\n);""",
+                  'smoke promise-all anchor',
+              ),
+          ]
+          for before, after, label in fixes:
+              if source.count(before) != 1:
+                  raise SystemExit(f'{label}: expected one match, found {source.count(before)}')
+              source = source.replace(before, after, 1)
+          path.write_text(source)
           PY
       - name: Check migration syntax
         run: node --check scripts/agent-physical-runtime-cleanup.mjs
