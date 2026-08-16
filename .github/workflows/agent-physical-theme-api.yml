@@ -21,7 +21,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22.14.0'
-      - name: Remove overlapping one-time renames
+      - name: Normalize one-time migration guards
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -34,6 +34,11 @@ jobs:
               "replace_all('src/physical-die-visuals.ts', 'physical fallback', 'additional physical')\n",
           ]:
               source = source.replace(line, '')
+          old = 'r"  roll\\(\\n    request\\?:\\n      \\| \\{.*?\\n      \\| number\\[],\\n  \\): Promise<RendererCompletion>;"'
+          new = 'r"  roll\\(\\n    request\\?:.*?\\n  \\): Promise<RendererCompletion>;"'
+          if source.count(old) != 1:
+              raise SystemExit(f'bridge-contract regex: expected one match, found {source.count(old)}')
+          source = source.replace(old, new, 1)
           path.write_text(source)
           PY
       - name: Apply breaking pre-release migration
