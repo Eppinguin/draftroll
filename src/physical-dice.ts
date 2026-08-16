@@ -64,11 +64,7 @@ function subtract(a: PolyhedronVertex, b: PolyhedronVertex): [number, number, nu
 }
 
 function cross(a: PolyhedronVertex, b: PolyhedronVertex): [number, number, number] {
-  return [
-    a[1] * b[2] - a[2] * b[1],
-    a[2] * b[0] - a[0] * b[2],
-    a[0] * b[1] - a[1] * b[0],
-  ];
+  return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 }
 
 function dot(a: PolyhedronVertex, b: PolyhedronVertex): number {
@@ -118,7 +114,14 @@ function faceNormal(
 
 function generatedSupportFaces(shape: ReadablePolyhedron, outcomeIndex: number): number[] {
   if (shape.family === 'd1-cylinder') return [0, 1];
-  if (shape.family === 'd3-cube') return [[0, 1], [2, 3], [4, 5]][outcomeIndex] ?? [];
+  if (shape.family === 'd3-cube')
+    return (
+      [
+        [0, 1],
+        [2, 3],
+        [4, 5],
+      ][outcomeIndex] ?? []
+    );
   return [shape.outcomes[outcomeIndex]?.supportFace ?? 0];
 }
 
@@ -182,7 +185,9 @@ function canonicalConvexDefinition(
 }
 
 /** Returns the canonical definition used by the established standard dice. */
-export function createCanonicalPhysicalDieDefinition(kind: CanonicalDieKind): PhysicalDieDefinition {
+export function createCanonicalPhysicalDieDefinition(
+  kind: CanonicalDieKind,
+): PhysicalDieDefinition {
   const cached = canonicalDefinitionCache.get(kind);
   if (cached) return cached;
 
@@ -307,15 +312,15 @@ export function createCustomPhysicalDieDefinition(
     throw new Error('Physical die collision scale must be greater than 0.9 and at most 1.2');
   }
   if (input.collider.kind === 'convex') {
-    if (input.collider.vertices.length < 4 || input.collider.faces.length < 4) {
+    const collider = input.collider;
+    if (collider.vertices.length < 4 || collider.faces.length < 4) {
       throw new Error('Convex physical dice require at least four vertices and four faces');
     }
-    for (const face of input.collider.faces) {
+    for (const face of collider.faces) {
       if (
         face.length < 3 ||
         face.some(
-          (index) =>
-            !Number.isSafeInteger(index) || index < 0 || index >= input.collider.vertices.length,
+          (index) => !Number.isSafeInteger(index) || index < 0 || index >= collider.vertices.length,
         )
       ) {
         throw new Error('Physical die collider contains an invalid face');
@@ -398,7 +403,7 @@ export function createPhysicalDieCollider(
     ([x, y, z]) => new CANNON.Vec3(x * scale, y * scale, z * scale),
   );
   const faces = collider.faces.map((source) => {
-    const face = [...source];
+    const face = source.slice();
     const a = collider.vertices[face[0]];
     const b = collider.vertices[face[1]];
     const c = collider.vertices[face[2]];
@@ -501,7 +506,9 @@ export function findPhysicalOutcomeIndex(
   const exact = definition.outcomes.findIndex((outcome) => outcome.result === result);
   if (exact >= 0) return exact;
   if (numericValue !== undefined) {
-    const numeric = definition.outcomes.findIndex((outcome) => outcome.numericValue === numericValue);
+    const numeric = definition.outcomes.findIndex(
+      (outcome) => outcome.numericValue === numericValue,
+    );
     if (numeric >= 0) return numeric;
   }
   if (typeof result === 'number') {

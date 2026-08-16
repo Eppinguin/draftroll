@@ -25,6 +25,15 @@ import {
 } from './resting-physics';
 import { THEME_MANIFESTS, type ThemeManifest } from './themes';
 import { FallbackVisualInstance } from './fallback-visuals';
+import {
+  capturePhysicalFallbackReplay,
+  commitPhysicalFallbackPlan,
+  getPhysicalFallbackPlanEntries,
+  hasConfiguredPhysicalFallbackDice,
+  hasPendingPhysicalFallbackDice,
+  restorePhysicalFallbackReplay,
+  type PhysicalFallbackReplay,
+} from './physical-die-visuals';
 import { consumeSettledVisualIndexes, deriveDieSettleTimes } from './settlement';
 import type {
   DraftrollFallbackVisual,
@@ -204,6 +213,8 @@ export interface RollReplay {
   results: number[];
   outcomes: EffectOutcome[];
   fallbacks?: DraftrollFallbackVisual[];
+  /** Recorded arbitrary physical-die trajectories owned by the shared planner. */
+  physicalFallbackReplay?: PhysicalFallbackReplay;
   visualOrder?: DraftrollVisualOrderEntry[];
   context: Record<string, unknown>;
   effectTimeline: RollReplayEvent[];
@@ -1068,6 +1079,15 @@ function cloneReplay(replay: RollReplay): RollReplay {
       ...fallback,
       metadata: fallback.metadata ? { ...fallback.metadata } : undefined,
     })),
+    physicalFallbackReplay: replay.physicalFallbackReplay
+      ? {
+          ids: replay.physicalFallbackReplay.ids.slice(),
+          step: replay.physicalFallbackReplay.step,
+          frameCount: replay.physicalFallbackReplay.frameCount,
+          transforms: replay.physicalFallbackReplay.transforms.slice(),
+          landings: replay.physicalFallbackReplay.landings.slice(),
+        }
+      : undefined,
     visualOrder: replay.visualOrder?.map((entry) => ({ ...entry })),
     themes: replay.themes?.slice(),
     dieKinds: replay.dieKinds?.slice(),
@@ -2569,6 +2589,8 @@ interface WorkerPlanResponse {
   settleReason: string;
   physicsSteps: number;
   diagnostics?: RollPlanDiagnostics;
+  additionalTransforms?: ArrayBuffer;
+  additionalLandings?: ArrayBuffer;
 }
 
 interface PendingPlan {
@@ -2609,6 +2631,14 @@ function getRollWorker(): Worker | null {
     const pending = pendingPlans.get(response.id);
     if (!pending) return;
     pendingPlans.delete(response.id);
+    if (response.additionalTransforms && response.additionalLandings) {
+      commitPhysicalFallbackPlan(
+        new Float32Array(response.additionalTransforms),
+        response.frameCount,
+        response.step,
+        new Int32Array(response.additionalLandings),
+      );
+    }
     const impactData = new Float32Array(response.impacts);
     const impacts: RollImpact[] = Array.from(
       { length: Math.floor(impactData.length / 3) },
@@ -2799,9 +2829,12 @@ async function buildRollPlan(
   preservedCount = 0,
   lockedTrajectory?: LockedTableTrajectory,
 ): Promise<RollPlan> {
+  const additional = getPhysicalFallbackPlanEntries();
   const worker = getRollWorker();
   if (!worker) {
-    if (preservedCount > 0) throw new Error('Additive table physics requires Web Worker support.');
+    if (preservedCount > 0 || additional.length > 0) {
+      throw new Error('Shared physical dice require Web Worker support.');
+    }
     return applyShapeSymmetryTargets(buildRollPlanSync(states));
   }
   const lockedCount = lockedTrajectory ? preservedCount : 0;
@@ -2824,6 +2857,7 @@ async function buildRollPlan(
         lockedTrajectory: lockedTransforms?.buffer,
         lockedTrajectoryStep: lockedTrajectory?.step,
         lockedTrajectoryFrameCount: lockedTrajectory?.frameCount,
+        additional,
       },
       transfer,
     );
@@ -2985,6 +3019,7 @@ function captureReplay(plan: RollPlan): void {
       ...fallback,
       metadata: fallback.metadata ? { ...fallback.metadata } : undefined,
     })),
+    physicalFallbackReplay: capturePhysicalFallbackReplay(),
     visualOrder: activeVisualOrder.map((entry) => ({ ...entry })),
     context: { ...activeContext },
     effectTimeline: createEffectTimeline(plan, activeOutcomes),
@@ -3154,6 +3189,9 @@ function playRecordedReplay(
   if (activeVisualOrder.length !== totalVisuals)
     return Promise.reject(new Error('Replay visual ordering is invalid'));
   spawnFallbackVisuals(activeFallbackSpecs, activeSeed);
+  if (replay.physicalFallbackReplay) {
+    restorePhysicalFallbackReplay(replay.physicalFallbackReplay);
+  }
   dice.forEach((die, index) => {
     die.setTheme(activeThemes[index] ?? replay.theme);
     applyDiePhysicsRuntime(die, activePhysicsPreset);
@@ -3825,10 +3863,10 @@ async function appendTableRoll(request: DiceRollRequest): Promise<DraftrollRollC
     tableReplanPaused = true;
     isPlanning = true;
     setStatus(`${readActiveTableRolls().length} rollers sharing the table`, true);
-    const plan =
-      newStates.length > 0
-        ? await buildRollPlan([...existingStates, ...newStates], existingCount, lockedTrajectory)
-        : createStaticTablePlan(createFallbackOnlyPlan(normalized.fallbacks).duration);
+    const needsSharedPhysicalPlan = newStates.length > 0 || hasPendingPhysicalFallbackDice();
+    const plan = needsSharedPhysicalPlan
+      ? await buildRollPlan([...existingStates, ...newStates], existingCount, lockedTrajectory)
+      : createStaticTablePlan(createFallbackOnlyPlan(normalized.fallbacks).duration);
     assertPresentationGeneration(generation);
     appended.forEach((die) => {
       die.group.visible = true;
@@ -3894,11 +3932,12 @@ async function castDice(
   const totalVisuals = quantity + activeFallbackSpecs.length;
   applyRuntimeQuality(totalVisuals);
   let plan: RollPlan;
-  if (quantity === 0) {
+  const hasArbitraryPhysicalDice = hasConfiguredPhysicalFallbackDice();
+  if (quantity === 0 && !hasArbitraryPhysicalDice) {
     activeOutcomes = [];
     plan = createFallbackOnlyPlan(activeFallbackSpecs);
   } else {
-    const states = createLaunchStates(swipe, activeSeed);
+    const states = quantity > 0 ? createLaunchStates(swipe, activeSeed) : [];
     // Never leave preview/layout transforms visible while an off-screen plan is
     // being calculated. The first visible transform belongs to the single
     // committed trajectory, which removes large-pool grid/cluster flicker.
@@ -3914,7 +3953,11 @@ async function castDice(
       plan = await buildRollPlan(states);
     } catch (error) {
       assertPresentationGeneration(generation);
-      console.error('Roll planner failed; using local fallback.', error);
+      if (hasArbitraryPhysicalDice) {
+        setPhysicalDiceVisible(true);
+        throw error;
+      }
+      console.error('Roll planner failed; using local canonical fallback.', error);
       try {
         plan = applyShapeSymmetryTargets(buildRollPlanSync(states));
       } catch (fallbackError) {

@@ -32,7 +32,11 @@ const [
 ]);
 
 for (const kind of ['coin', 'percentile', 'fate', 'spinner', 'token', 'card']) {
-  assert.match(renderer, new RegExp(`['"]${kind}['"]`), `renderer fallback kind ${kind} is missing`);
+  assert.match(
+    renderer,
+    new RegExp(`['"]${kind}['"]`),
+    `renderer fallback kind ${kind} is missing`,
+  );
 }
 assert.match(renderer, /DraftrollFallbackVisual/);
 assert.match(renderer, /visualOrder/);
@@ -92,7 +96,10 @@ assert.match(physicalPlanner, /class PhysicalRollPlanner/);
 assert.match(physicalPlanner, /private cache: PlannerCache \| null/);
 assert.match(physicalPlanner, /cacheKey/);
 assert.match(physicalPlanner, /createPhysicalDieCollider/);
-assert.match(physicalPlanner, /new CANNON\.ContactMaterial\(this\.diceMaterial, this\.diceMaterial/);
+assert.match(
+  physicalPlanner,
+  /new CANNON\.ContactMaterial\(this\.diceMaterial, this\.diceMaterial/,
+);
 assert.match(physicalPlanner, /lockedMotion/);
 assert.match(physicalPlanner, /updateLockedBodies/);
 assert.match(physicalPlanner, /world\.step\(PHYSICAL_PLANNER_STEP\)/);
@@ -121,15 +128,22 @@ assert.match(physicalVisuals, /createGeneratedPhysicalDieDefinition/);
 assert.match(physicalVisuals, /createDefaultPhysicalDiePresentation/);
 assert.match(physicalVisuals, /remapPhysicalDiePresentation/);
 assert.match(physicalVisuals, /physicalDieColliderRadius/);
-assert.match(physicalVisuals, /localPlanner\.simulate/);
-assert.match(physicalVisuals, /installPhysicalWorkerBridge/);
-assert.match(physicalVisuals, /additional:\s*entries\.map/);
-assert.match(physicalVisuals, /owner\.addEventListener\('message'/);
-assert.match(physicalVisuals, /nativePostMessage\.call\(\s*owner/);
+assert.match(physicalVisuals, /getPhysicalFallbackPlanEntries/);
+assert.match(physicalVisuals, /commitPhysicalFallbackPlan/);
+assert.match(physicalVisuals, /capturePhysicalFallbackReplay/);
+assert.match(physicalVisuals, /restorePhysicalFallbackReplay/);
 assert.match(physicalVisuals, /activePhysicalDice/);
 assert.match(physicalVisuals, /pendingPhysicalDice/);
+assert.doesNotMatch(physicalVisuals, /Worker\.prototype/);
+assert.doesNotMatch(physicalVisuals, /PhysicalRollPlanner/);
+assert.doesNotMatch(physicalVisuals, /localPlanner/);
 assert.doesNotMatch(physicalVisuals, /new Worker\(/);
 assert.doesNotMatch(physicalVisuals, /new CANNON\.World/);
+assert.match(engine, /getPhysicalFallbackPlanEntries/);
+assert.match(engine, /commitPhysicalFallbackPlan/);
+assert.match(engine, /additional,/);
+assert.match(engine, /hasPendingPhysicalFallbackDice/);
+assert.match(engine, /physicalFallbackReplay/);
 assert.doesNotMatch(physicalVisuals, /settledRotation/);
 
 // Runtime themes can paint arbitrary artwork into generated physical outcome slots.
@@ -189,28 +203,36 @@ for (const legacy of [
   await assert.rejects(access(new URL(legacy, import.meta.url)));
 }
 
-console.log(JSON.stringify({
-  ok: true,
-  publicPhysicalDieContract: true,
-  physicalDieArchitecture: true,
-  canonicalGeneratedAndCustomDefinitions: true,
-  systemAgnosticOutcomes: true,
-  extensibleFaceContent: ['number', 'text', 'icon', 'texture'],
-  targetingModes: ['symmetry', 'relabel', 'fixed'],
-  sharedPhysicalPlanner: true,
-  unifiedRollWorkerProtocol: true,
-  onePhysicalWorker: true,
-  cachedPlannerWorlds: true,
-  additiveLockedMotion: true,
-  genericRestingPhysics: true,
-  generatedGeneratedCollisions: true,
-  generatedStandardCollisions: true,
-  runtimeThemeArtwork: true,
-  noParallelGeneratedPhysicsEngine: true,
-  automaticFaceEdgeVertexLabels: true,
-  generatedFaceLabelCoverage: true,
-  naturalGeneratedPhysics: true,
-  roundedCardGeometry: true,
-  collisionFreeCardLayout: true,
-  cardDealAnimation: true,
-}, null, 2));
+console.log(
+  JSON.stringify(
+    {
+      ok: true,
+      publicPhysicalDieContract: true,
+      physicalDieArchitecture: true,
+      canonicalGeneratedAndCustomDefinitions: true,
+      systemAgnosticOutcomes: true,
+      extensibleFaceContent: ['number', 'text', 'icon', 'texture'],
+      targetingModes: ['symmetry', 'relabel', 'fixed'],
+      sharedPhysicalPlanner: true,
+      unifiedRollWorkerProtocol: true,
+      explicitPhysicalWorkerIntegration: true,
+      deterministicArbitraryPhysicalReplay: true,
+      onePhysicalWorker: true,
+      cachedPlannerWorlds: true,
+      additiveLockedMotion: true,
+      genericRestingPhysics: true,
+      generatedGeneratedCollisions: true,
+      generatedStandardCollisions: true,
+      runtimeThemeArtwork: true,
+      noParallelGeneratedPhysicsEngine: true,
+      automaticFaceEdgeVertexLabels: true,
+      generatedFaceLabelCoverage: true,
+      naturalGeneratedPhysics: true,
+      roundedCardGeometry: true,
+      collisionFreeCardLayout: true,
+      cardDealAnimation: true,
+    },
+    null,
+    2,
+  ),
+);

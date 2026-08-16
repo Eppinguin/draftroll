@@ -2,25 +2,32 @@ import { Draftroll } from '../packages/sdk/src/index';
 import { createStandardDeck } from '../packages/sdk/src/cards';
 import type { DraftrollCard } from '../packages/sdk/src/deck';
 
-function requireElement<T extends Element>(selector: string): T {
-  const element = document.querySelector<T>(selector);
-  if (!element) throw new Error(`Missing cards demo element: ${selector}`);
+type ElementConstructor<T extends Element> = new () => T;
+
+function requireElement<T extends Element>(
+  selector: string,
+  constructor: ElementConstructor<T>,
+): T {
+  const element = document.querySelector(selector);
+  if (!(element instanceof constructor)) {
+    throw new Error(`Missing or invalid cards demo element: ${selector}`);
+  }
   return element;
 }
 
-const remaining = requireElement<HTMLElement>('#card-remaining');
-const discarded = requireElement<HTMLElement>('#card-discarded');
-const discardTop = requireElement<HTMLElement>('#discard-top');
-const drawCount = requireElement<HTMLSelectElement>('#card-draw-count');
-const theme = requireElement<HTMLSelectElement>('#card-theme');
-const jokers = requireElement<HTMLInputElement>('#card-jokers');
-const drawButton = requireElement<HTMLButtonElement>('#card-draw');
-const deckButton = requireElement<HTMLButtonElement>('#card-deck');
-const shuffleButton = requireElement<HTMLButtonElement>('#card-shuffle');
-const resetButton = requireElement<HTMLButtonElement>('#card-reset');
-const hand = requireElement<HTMLElement>('#card-hand');
-const handTitle = requireElement<HTMLElement>('#hand-title');
-const status = requireElement<HTMLElement>('#card-status');
+const remaining = requireElement('#card-remaining', HTMLElement);
+const discarded = requireElement('#card-discarded', HTMLElement);
+const discardTop = requireElement('#discard-top', HTMLElement);
+const drawCount = requireElement('#card-draw-count', HTMLSelectElement);
+const theme = requireElement('#card-theme', HTMLSelectElement);
+const jokers = requireElement('#card-jokers', HTMLInputElement);
+const drawButton = requireElement('#card-draw', HTMLButtonElement);
+const deckButton = requireElement('#card-deck', HTMLButtonElement);
+const shuffleButton = requireElement('#card-shuffle', HTMLButtonElement);
+const resetButton = requireElement('#card-reset', HTMLButtonElement);
+const hand = requireElement('#card-hand', HTMLElement);
+const handTitle = requireElement('#hand-title', HTMLElement);
+const status = requireElement('#card-status', HTMLElement);
 
 const draftroll = await Draftroll.createOverlay({
   overlay: {
@@ -71,7 +78,8 @@ function renderHand(): void {
     rank.textContent = typeof card.metadata?.rank === 'string' ? card.metadata.rank : card.label;
     const suit = document.createElement('div');
     suit.className = 'card-suit';
-    suit.textContent = typeof card.metadata?.suitSymbol === 'string' ? card.metadata.suitSymbol : '✦';
+    suit.textContent =
+      typeof card.metadata?.suitSymbol === 'string' ? card.metadata.suitSymbol : '✦';
     const name = document.createElement('div');
     name.className = 'card-name';
     name.textContent = cardName(card);

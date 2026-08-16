@@ -10,11 +10,7 @@ import {
   type PhysicalDieDefinition,
   type PhysicalDiePresentation,
 } from './physical-dice';
-import {
-  extractPhysicalTransforms,
-  PhysicalRollPlanner,
-  type PhysicalRollEntry,
-} from './physical-roll-planner';
+import { extractPhysicalTransforms } from './physical-roll-planner';
 import { getRuntimeThemeMaterial, getRuntimeThemeTexture } from './runtime-themes';
 
 export interface PhysicalVisualBounds {
@@ -29,40 +25,14 @@ interface RecordedTrajectory {
   step: number;
 }
 
-interface PlannerRequest {
-  id: number;
-  kinds?: string[];
-  count?: number;
-  boundsX: number;
-  boundsZ: number;
-  states: ArrayBuffer;
-  lockedCount?: number;
-  lockedTrajectory?: ArrayBuffer;
-  lockedTrajectoryStep?: number;
-  lockedTrajectoryFrameCount?: number;
-}
-
-interface PhysicalWorkerResponse {
-  id: number;
-  step: number;
-  frameCount: number;
-  additionalTransforms?: ArrayBuffer;
-  additionalLandings?: ArrayBuffer;
-}
-
-interface BridgePending {
-  owner: Worker;
-  entries: PhysicalDieVisualInstance[];
-}
-
 const MAXIMUM_EXACT_GENERATED_SIDES = 256;
 const LABEL_ATLAS_COLUMNS = 5;
 const LABEL_ATLAS_ROWS = 4;
 const LABEL_ATLAS_PADDING = 0.055;
 const activePhysicalDice = new Set<PhysicalDieVisualInstance>();
 const pendingPhysicalDice = new Set<PhysicalDieVisualInstance>();
-const bridgePending = new Map<number, BridgePending>();
-const localPlanner = new PhysicalRollPlanner();
+let plannedPhysicalDice: PhysicalDieVisualInstance[] = [];
+let lastPhysicalFallbackReplay: PhysicalFallbackReplay | null = null;
 
 export function numericPhysicalSides(spec: DraftrollFallbackVisual): number | null {
   if (Number.isSafeInteger(spec.sides) && (spec.sides ?? 0) >= 1) return spec.sides!;
@@ -212,10 +182,7 @@ function targetPosition(
   let best = new THREE.Vector2();
   let bestDistance = -1;
   for (let attempt = 0; attempt < 80; attempt += 1) {
-    const candidate = new THREE.Vector2(
-      (random() * 2 - 1) * rangeX,
-      (random() * 2 - 1) * rangeZ,
-    );
+    const candidate = new THREE.Vector2((random() * 2 - 1) * rangeX, (random() * 2 - 1) * rangeZ);
     const nearest = occupied.reduce(
       (value, point) => Math.min(value, candidate.distanceTo(point)),
       Number.POSITIVE_INFINITY,
@@ -251,11 +218,7 @@ function buildLaunchState(
   const velocityZ = (target.y - startZ) / flightTime + (random() - 0.5) * 0.6;
   const velocityY = 1.65 + random() * 1.35;
   const rotation = new THREE.Quaternion().setFromEuler(
-    new THREE.Euler(
-      random() * Math.PI * 2,
-      random() * Math.PI * 2,
-      random() * Math.PI * 2,
-    ),
+    new THREE.Euler(random() * Math.PI * 2, random() * Math.PI * 2, random() * Math.PI * 2),
   );
   const axis = new THREE.Vector3(random() * 2 - 1, random() * 2 - 1, random() * 2 - 1);
   if (axis.lengthSq() < 1e-6) axis.set(1, 0.4, 0.2);
@@ -283,21 +246,6 @@ function buildLaunchState(
     angularZ,
     delay,
   ];
-}
-
-function isPlannerRequest(message: unknown): message is PlannerRequest {
-  if (!message || typeof message !== 'object') return false;
-  const candidate = message as Partial<PlannerRequest>;
-  return (
-    Number.isInteger(candidate.id) &&
-    typeof candidate.boundsX === 'number' &&
-    typeof candidate.boundsZ === 'number' &&
-    candidate.states instanceof ArrayBuffer
-  );
-}
-
-function configuredPhysicalDice(): PhysicalDieVisualInstance[] {
-  return [...activePhysicalDice].filter((entry) => entry.configured);
 }
 
 function trajectoryForIndex(
@@ -331,87 +279,6 @@ function commitAdditionalTrajectories(
       landings[index] ?? 0,
     );
   });
-}
-
-/**
- * Transitional bridge from the legacy canonical-only request shape to the generic physical worker.
- * It augments the existing worker request and observes that same worker's response; no second
- * worker or second physics simulation is created. Once main.ts accepts PhysicalDieDefinition[]
- * directly this adapter can disappear.
- */
-function installPhysicalWorkerBridge(): void {
-  if (typeof Worker === 'undefined') return;
-  const prototype = Worker.prototype as Worker & {
-    __draftrollPhysicalDiceBridge?: boolean;
-  };
-  if (prototype.__draftrollPhysicalDiceBridge) return;
-  prototype.__draftrollPhysicalDiceBridge = true;
-
-  const nativePostMessage = Worker.prototype.postMessage as unknown as (
-    this: Worker,
-    message: unknown,
-    transferOrOptions?: Transferable[] | StructuredSerializeOptions,
-  ) => void;
-  const nativeTerminate = Worker.prototype.terminate;
-
-  Worker.prototype.postMessage = function postMessage(
-    this: Worker,
-    message: unknown,
-    transferOrOptions?: Transferable[] | StructuredSerializeOptions,
-  ): void {
-    const entries = configuredPhysicalDice();
-    if (entries.length === 0 || !isPlannerRequest(message)) {
-      nativePostMessage.call(this, message, transferOrOptions);
-      return;
-    }
-
-    const owner = this;
-    const requestId = message.id;
-    bridgePending.set(requestId, { owner, entries });
-    const onMessage = (event: MessageEvent<PhysicalWorkerResponse>): void => {
-      const response = event.data;
-      if (response?.id !== requestId) return;
-      owner.removeEventListener('message', onMessage as EventListener);
-      owner.removeEventListener('error', onError as EventListener);
-      const pending = bridgePending.get(requestId);
-      if (!pending || pending.owner !== owner) return;
-      bridgePending.delete(requestId);
-      if (!(response.additionalTransforms instanceof ArrayBuffer)) return;
-      if (!(response.additionalLandings instanceof ArrayBuffer)) return;
-      commitAdditionalTrajectories(
-        new Float32Array(response.additionalTransforms),
-        response.frameCount,
-        response.step,
-        pending.entries,
-        new Int32Array(response.additionalLandings),
-      );
-    };
-    const onError = (): void => {
-      owner.removeEventListener('message', onMessage as EventListener);
-      bridgePending.delete(requestId);
-    };
-    owner.addEventListener('message', onMessage as EventListener);
-    owner.addEventListener('error', onError as EventListener, { once: true });
-
-    nativePostMessage.call(
-      owner,
-      {
-        ...message,
-        additional: entries.map((entry) => ({
-          sides: entry.sides,
-          state: entry.plannerState(),
-        })),
-      },
-      transferOrOptions,
-    );
-  } as Worker['postMessage'];
-
-  Worker.prototype.terminate = function terminate(this: Worker): void {
-    for (const [id, pending] of bridgePending) {
-      if (pending.owner === this) bridgePending.delete(id);
-    }
-    nativeTerminate.call(this);
-  };
 }
 
 export class PhysicalDieVisualInstance {
@@ -460,13 +327,17 @@ export class PhysicalDieVisualInstance {
       if (normal) body.material.normalMap = normal;
       if (roughness) body.material.roughnessMap = roughness;
       if (runtimeMaterial?.color !== undefined) body.material.color.set(runtimeMaterial.color);
-      if (runtimeMaterial?.emissive !== undefined) body.material.emissive.set(runtimeMaterial.emissive);
+      if (runtimeMaterial?.emissive !== undefined)
+        body.material.emissive.set(runtimeMaterial.emissive);
       if (runtimeMaterial?.emissiveIntensity !== undefined) {
         body.material.emissiveIntensity = runtimeMaterial.emissiveIntensity;
       }
-      if (runtimeMaterial?.roughness !== undefined) body.material.roughness = runtimeMaterial.roughness;
-      if (runtimeMaterial?.metalness !== undefined) body.material.metalness = runtimeMaterial.metalness;
-      if (runtimeMaterial?.clearcoat !== undefined) body.material.clearcoat = runtimeMaterial.clearcoat;
+      if (runtimeMaterial?.roughness !== undefined)
+        body.material.roughness = runtimeMaterial.roughness;
+      if (runtimeMaterial?.metalness !== undefined)
+        body.material.metalness = runtimeMaterial.metalness;
+      if (runtimeMaterial?.clearcoat !== undefined)
+        body.material.clearcoat = runtimeMaterial.clearcoat;
       if (runtimeMaterial?.clearcoatRoughness !== undefined) {
         body.material.clearcoatRoughness = runtimeMaterial.clearcoatRoughness;
       }
@@ -608,9 +479,9 @@ export class PhysicalDieVisualInstance {
       if (halfSin > 1e-6) {
         const angle = 2 * Math.atan2(halfSin, THREE.MathUtils.clamp(delta.w, -1, 1));
         const speed = Math.min(28, angle / dt);
-        angularX = delta.x / halfSin * speed;
-        angularY = delta.y / halfSin * speed;
-        angularZ = delta.z / halfSin * speed;
+        angularX = (delta.x / halfSin) * speed;
+        angularY = (delta.y / halfSin) * speed;
+        angularZ = (delta.z / halfSin) * speed;
       }
     }
 
@@ -680,9 +551,7 @@ export class PhysicalDieVisualInstance {
   }
 
   update(progress: number, _duration = 1): void {
-    if (this.settled) return;
-    if (pendingPhysicalDice.size > 0 && bridgePending.size === 0) finalizePhysicalFallbackBatch();
-    if (!this.trajectory) return;
+    if (this.settled || !this.trajectory) return;
     const normalized = THREE.MathUtils.clamp(progress, 0, 1);
     this.lastProgress = normalized;
     const wasPresented = this.presented;
@@ -730,31 +599,115 @@ export class PhysicalDieVisualInstance {
   }
 }
 
+export interface PhysicalFallbackPlanEntry {
+  definition: PhysicalDieDefinition;
+  state: number[];
+}
+
+/** Recorded arbitrary-physical-die transforms retained alongside a legacy replay. */
+export interface PhysicalFallbackReplay {
+  ids: string[];
+  step: number;
+  frameCount: number;
+  transforms: Float32Array;
+  landings: Int32Array;
+}
+
+function configuredPhysicalDice(): PhysicalDieVisualInstance[] {
+  return [...activePhysicalDice].filter((entry) => entry.configured);
+}
+
+/** True when at least one arbitrary numeric die is participating in the physical table. */
+export function hasConfiguredPhysicalFallbackDice(): boolean {
+  return configuredPhysicalDice().length > 0;
+}
+
+/** True when a newly configured arbitrary die still needs a committed physical trajectory. */
+export function hasPendingPhysicalFallbackDice(): boolean {
+  return pendingPhysicalDice.size > 0;
+}
+
 /**
- * Fallback-only numeric dice have no canonical planner request to augment. They still use the
- * exact same PhysicalRollPlanner and PhysicalDieDefinition pipeline, starting existing dice from
- * their current pose/momentum and newly configured dice from their launch state.
+ * Captures the arbitrary physical entries that main.ts appends to the normal roll-worker request.
+ * This is an explicit compatibility boundary; no Worker prototype interception is involved.
  */
-export function finalizePhysicalFallbackBatch(): void {
-  if (pendingPhysicalDice.size === 0 || bridgePending.size > 0) return;
-  const entries = configuredPhysicalDice();
-  if (entries.length === 0) return;
-  const bounds = entries[0].bounds;
-  const planEntries: PhysicalRollEntry[] = entries.map((entry) => ({
+export function getPhysicalFallbackPlanEntries(): PhysicalFallbackPlanEntry[] {
+  plannedPhysicalDice = configuredPhysicalDice();
+  return plannedPhysicalDice.map((entry) => ({
     definition: entry.definition,
     state: entry.plannerState(),
   }));
-  const plan = localPlanner.simulate({
-    entries: planEntries,
-    boundsX: bounds.x,
-    boundsZ: bounds.z,
-  });
-  entries.forEach((entry, index) => {
-    entry.commitTrajectory(
-      trajectoryForIndex(plan.transforms, plan.frameCount, plan.step, entries.length, index),
-      plan.landings[index] ?? 0,
-    );
-  });
 }
 
-installPhysicalWorkerBridge();
+/** Commits the additional trajectories returned by the one shared physical roll worker. */
+export function commitPhysicalFallbackPlan(
+  transforms: Float32Array,
+  frameCount: number,
+  step: number,
+  landings: Int32Array,
+): void {
+  const entries = plannedPhysicalDice.length > 0 ? plannedPhysicalDice : configuredPhysicalDice();
+  plannedPhysicalDice = [];
+  if (entries.length === 0) {
+    lastPhysicalFallbackReplay = null;
+    return;
+  }
+  const expected = frameCount * entries.length * 7;
+  if (frameCount < 1 || transforms.length !== expected || landings.length !== entries.length) {
+    throw new Error('Physical fallback trajectory buffers do not match the planned dice.');
+  }
+  commitAdditionalTrajectories(transforms, frameCount, step, entries, landings);
+  lastPhysicalFallbackReplay = {
+    ids: entries.map((entry) => entry.spec.id),
+    step,
+    frameCount,
+    transforms: transforms.slice(),
+    landings: landings.slice(),
+  };
+}
+
+export function capturePhysicalFallbackReplay(): PhysicalFallbackReplay | undefined {
+  const replay = lastPhysicalFallbackReplay;
+  return replay
+    ? {
+        ids: replay.ids.slice(),
+        step: replay.step,
+        frameCount: replay.frameCount,
+        transforms: replay.transforms.slice(),
+        landings: replay.landings.slice(),
+      }
+    : undefined;
+}
+
+/** Restores arbitrary physical trajectories without re-running physics during replay. */
+export function restorePhysicalFallbackReplay(replay: PhysicalFallbackReplay): void {
+  const entries = new Map(configuredPhysicalDice().map((entry) => [entry.spec.id, entry] as const));
+  if (replay.ids.length !== replay.landings.length) {
+    throw new Error('Physical fallback replay landing data is invalid.');
+  }
+  const expected = replay.frameCount * replay.ids.length * 7;
+  if (replay.frameCount < 1 || replay.transforms.length !== expected) {
+    throw new Error('Physical fallback replay transform data is invalid.');
+  }
+  replay.ids.forEach((id, index) => {
+    const entry = entries.get(id);
+    if (!entry) throw new Error(`Physical fallback replay die is missing: ${id}`);
+    entry.commitTrajectory(
+      trajectoryForIndex(
+        replay.transforms,
+        replay.frameCount,
+        replay.step,
+        replay.ids.length,
+        index,
+      ),
+      replay.landings[index] ?? 0,
+    );
+  });
+  lastPhysicalFallbackReplay = {
+    ids: replay.ids.slice(),
+    step: replay.step,
+    frameCount: replay.frameCount,
+    transforms: replay.transforms.slice(),
+    landings: replay.landings.slice(),
+  };
+}
