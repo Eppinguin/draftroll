@@ -17,12 +17,7 @@ import {
   type ThemeName,
 } from './dice';
 import { DIE_COLLIDER_RADIUS, DIE_RADIUS, isDieKind } from './physics-shapes';
-import {
-  markUnobstructedTableDice,
-  minimumRestingAlignment,
-  readRestingAlignment,
-  releaseUnstableRestPose,
-} from './resting-physics';
+import { PhysicalRollPlanner, type PhysicalRollPlanResult } from './physical-roll-planner';
 import { THEME_MANIFESTS, type ThemeManifest } from './themes';
 import { FallbackVisualInstance } from './fallback-visuals';
 import {
@@ -311,9 +306,6 @@ scene.fog = OVERLAY_MODE ? null : new THREE.FogExp2(0x070912, 0.045);
 const VIEW_HEIGHT = 10;
 const CAMERA_HEIGHT = 14;
 const FIXED_STEP = 1 / 60;
-const PLANNER_STEP = 1 / 120;
-const PLANNER_RECORD_EVERY = 1;
-const PLANNER_RECORD_STEP = PLANNER_STEP * PLANNER_RECORD_EVERY;
 type DicePhysicsPreset = NonNullable<DiceRollRequest['physicsPreset']>;
 const PHYSICS_PRESETS: Record<
   DicePhysicsPreset,
@@ -1102,17 +1094,12 @@ function clearDice(): void {
   clearFallbackVisuals();
 }
 
-function spawnGenericPhysicalVisuals(
-  specs: readonly DraftrollPhysicalVisual[],
-  seed: string,
-): void {
+function spawnGenericPhysicalVisuals(specs: readonly DraftrollPhysicalVisual[]): void {
   clearGenericPhysicalVisuals();
   if (specs.length === 0) return;
-  const random = createSeededRandom(`${seed}:additional-physical`);
-  const occupied: THREE.Vector2[] = [];
-  genericPhysicalVisuals = specs.map((spec, index) => {
+  genericPhysicalVisuals = specs.map((spec) => {
     const visual = new PhysicalDieVisualInstance(spec);
-    visual.configureTrajectory(index, specs.length, screenBounds, random, occupied);
+    visual.prepare();
     scene.add(visual.group);
     return visual;
   });
@@ -1688,7 +1675,7 @@ function prepareTargets(): boolean {
   queuedContext = {};
   activeSeed = normalizeSeed(queuedSeed);
   queuedSeed = null;
-  spawnGenericPhysicalVisuals(currentGenericPhysicalSpecs(), activeSeed);
+  spawnGenericPhysicalVisuals(currentGenericPhysicalSpecs());
   spawnFallbackVisuals(activeFallbackSpecs, activeSeed);
   activeStartAtMs = queuedStartAtMs;
   activeSeekToMs = queuedSeekToMs;
@@ -1903,302 +1890,6 @@ function createLaunchStates(swipe: THREE.Vector2 | undefined, seed: string): Lau
   return createMixedPhysicalLaunchStates(canonical, generic, random, throwDirection, handBias);
 }
 
-function cloneDynamicBody(source: CANNON.Body, state: LaunchState): CANNON.Body {
-  const clone = new CANNON.Body({ mass: source.mass, material: dicePhysicsMaterial });
-  for (let index = 0; index < source.shapes.length; index += 1) {
-    clone.addShape(
-      source.shapes[index],
-      source.shapeOffsets[index].clone(),
-      source.shapeOrientations[index].clone(),
-    );
-  }
-  clone.linearDamping = source.linearDamping;
-  clone.angularDamping = source.angularDamping;
-  clone.allowSleep = source.allowSleep;
-  clone.sleepSpeedLimit = source.sleepSpeedLimit;
-  clone.sleepTimeLimit = source.sleepTimeLimit;
-  clone.position.copy(state.position);
-  clone.quaternion.copy(state.quaternion);
-  clone.velocity.copy(state.velocity);
-  clone.angularVelocity.copy(state.angularVelocity);
-  clone.wakeUp();
-  return clone;
-}
-
-function appendFrame(buffer: number[], bodies: CANNON.Body[]): void {
-  for (const body of bodies) {
-    buffer.push(
-      body.position.x,
-      body.position.y,
-      body.position.z,
-      body.quaternion.x,
-      body.quaternion.y,
-      body.quaternion.z,
-      body.quaternion.w,
-    );
-  }
-}
-
-/** Jaccard-style overlap of two sorted contact-index lists, used to detect settled dice. */
-function contactSimilarity(a: number[], b: number[]): number {
-  if (a.length === 0 && b.length === 0) return 1;
-  let left = 0;
-  let right = 0;
-  let intersection = 0;
-  while (left < a.length && right < b.length) {
-    if (a[left] === b[right]) {
-      intersection += 1;
-      left += 1;
-      right += 1;
-    } else if (a[left] < b[right]) left += 1;
-    else right += 1;
-  }
-  return intersection / Math.max(1, Math.max(a.length, b.length));
-}
-
-function buildRollPlanSync(states: LaunchState[]): RollPlan {
-  const planner = new CANNON.World({
-    gravity: new CANNON.Vec3(0, -PHYSICS_PRESETS[activePhysicsPreset].gravity, 0),
-  });
-  configureWorld(planner);
-  const plannerFloor = new CANNON.Body({
-    mass: 0,
-    material: tablePhysicsMaterial,
-    shape: new CANNON.Plane(),
-  });
-  plannerFloor.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
-  planner.addBody(plannerFloor);
-  const staticBodies = [plannerFloor, ...addCurrentWalls(planner)];
-
-  const plannerDice = dice.map((die, index) => cloneDynamicBody(die.body, states[index]));
-  const plannerCrowd = THREE.MathUtils.clamp((plannerDice.length - 8) / 22, 0, 1);
-  for (const body of plannerDice) {
-    body.linearDamping = 0.095 + plannerCrowd * 0.025;
-    body.angularDamping = 0.085 + plannerCrowd * 0.045;
-    body.sleepSpeedLimit = 0.09 + plannerCrowd * 0.015;
-    body.sleepTimeLimit = 0.72;
-  }
-  const plannerMasses = plannerDice.map((body) => body.mass);
-  const activeFlags = Array.from({ length: plannerDice.length }, () => false);
-  const impacts: RollImpact[] = [];
-  let currentStep = 0;
-  const activate = (body: CANNON.Body, index: number): void => {
-    body.type = CANNON.Body.DYNAMIC;
-    body.mass = plannerMasses[index] ?? 1.12;
-    body.updateMassProperties();
-    body.collisionResponse = true;
-    body.velocity.copy(states[index].velocity);
-    body.angularVelocity.copy(states[index].angularVelocity);
-    body.wakeUp();
-    activeFlags[index] = true;
-  };
-  plannerDice.forEach((body, dieIndex) => {
-    body.addEventListener('collide', (event: { contact: CANNON.ContactEquation }) => {
-      if (!activeFlags[dieIndex]) return;
-      const strength = Math.abs(event.contact.getImpactVelocityAlongNormal());
-      if (strength > 1.5) impacts.push({ time: currentStep * PLANNER_STEP, dieIndex, strength });
-    });
-    planner.addBody(body);
-    if (states[dieIndex].delay > 0) {
-      body.type = CANNON.Body.KINEMATIC;
-      body.mass = 0;
-      body.updateMassProperties();
-      body.collisionResponse = false;
-      body.velocity.setZero();
-      body.angularVelocity.setZero();
-    } else activate(body, dieIndex);
-  });
-
-  const bodyKeys = new Map<number, number>();
-  plannerDice.forEach((body, index) => bodyKeys.set(body.id, index));
-  staticBodies.forEach((body, index) => bodyKeys.set(body.id, plannerDice.length + index));
-  const getContacts = (): number[] => {
-    const keys: number[] = [];
-    for (const contact of planner.contacts) {
-      const a = bodyKeys.get(contact.bi.id);
-      const b = bodyKeys.get(contact.bj.id);
-      if (a === undefined || b === undefined) continue;
-      keys.push(Math.min(a, b) * 128 + Math.max(a, b));
-    }
-    return Array.from(new Set(keys)).toSorted((a, b) => a - b);
-  };
-  const stablePositions = new Float32Array(plannerDice.length * 3);
-  const copyStablePositions = (): void =>
-    plannerDice.forEach((body, index) => {
-      stablePositions[index * 3] = body.position.x;
-      stablePositions[index * 3 + 1] = body.position.y;
-      stablePositions[index * 3 + 2] = body.position.z;
-    });
-  const maxDisplacementSquared = (): number =>
-    plannerDice.reduce((maximum, body, index) => {
-      if (!activeFlags[index]) return maximum;
-      const dx = body.position.x - stablePositions[index * 3];
-      const dy = body.position.y - stablePositions[index * 3 + 1];
-      const dz = body.position.z - stablePositions[index * 3 + 2];
-      return Math.max(maximum, dx * dx + dy * dy + dz * dz);
-    }, 0);
-
-  const frameData: number[] = [];
-  appendFrame(frameData, plannerDice);
-  let frameCount = 1;
-  let slowTime = 0;
-  let contactStableTime = 0;
-  let displacementStableTime = 0;
-  let wellSeatedTime = 0;
-  let previousContacts: number[] = [];
-  const restingAxes = plannerDice.map(() => new CANNON.Vec3());
-  const restingAlignments = new Float32Array(plannerDice.length);
-  const unobstructedTableDice = new Uint8Array(plannerDice.length);
-  const lastUnstableReleaseTimes = new Float32Array(plannerDice.length);
-  lastUnstableReleaseTimes.fill(Number.NEGATIVE_INFINITY);
-  let settleReason = 'timeout';
-  const maxSteps = 1_080;
-  const minSteps = 120;
-  const recordEvery = PLANNER_RECORD_EVERY;
-  const maximumDelay = Math.max(0, ...states.map((state) => state.delay));
-  copyStablePositions();
-
-  for (currentStep = 1; currentStep <= maxSteps; currentStep += 1) {
-    const simulationTime = currentStep * PLANNER_STEP;
-    let activated = false;
-    plannerDice.forEach((body, index) => {
-      if (!activeFlags[index] && simulationTime + 1e-6 >= states[index].delay) {
-        activate(body, index);
-        activated = true;
-      }
-    });
-    if (activated) {
-      contactStableTime = 0;
-      displacementStableTime = 0;
-      wellSeatedTime = 0;
-      previousContacts = [];
-      copyStablePositions();
-    }
-
-    planner.step(PLANNER_STEP);
-    enforceBodiesBounds(plannerDice, simulationTime);
-    markUnobstructedTableDice(
-      planner.contacts,
-      bodyKeys,
-      plannerDice.length,
-      plannerFloor.id,
-      unobstructedTableDice,
-    );
-    let linearSum = 0;
-    let angularSum = 0;
-    let allSlow = activeFlags.every(Boolean);
-    let allWellSeated = activeFlags.every(Boolean);
-    let activeCount = 0;
-    plannerDice.forEach((body, index) => {
-      if (!activeFlags[index]) return;
-      activeCount += 1;
-      const speed = body.velocity.length();
-      const angularSpeed = body.angularVelocity.length();
-      linearSum += speed;
-      angularSum += angularSpeed;
-      if (!(body.sleepState === CANNON.Body.SLEEPING || (speed < 0.2 && angularSpeed < 0.28)))
-        allSlow = false;
-      if (unobstructedTableDice[index] === 0) {
-        restingAlignments[index] = 1;
-        return;
-      }
-      const kind = activeKinds[index] ?? selectedKind;
-      const alignment = readRestingAlignment(kind, body.quaternion, restingAxes[index]);
-      restingAlignments[index] = alignment;
-      if (alignment < minimumRestingAlignment(kind)) allWellSeated = false;
-    });
-    slowTime = allSlow ? slowTime + PLANNER_STEP : 0;
-    wellSeatedTime = allWellSeated ? wellSeatedTime + PLANNER_STEP : 0;
-    const contacts = getContacts();
-    if (contactSimilarity(contacts, previousContacts) >= 0.82) contactStableTime += PLANNER_STEP;
-    else {
-      previousContacts = contacts;
-      contactStableTime = 0;
-    }
-    if (maxDisplacementSquared() <= 0.009 * 0.009) displacementStableTime += PLANNER_STEP;
-    else {
-      copyStablePositions();
-      displacementStableTime = 0;
-    }
-
-    if (currentStep % recordEvery === 0) {
-      appendFrame(frameData, plannerDice);
-      frameCount += 1;
-      const afterLastActivation = simulationTime >= maximumDelay + 0.3;
-      if (afterLastActivation && !allWellSeated) {
-        plannerDice.forEach((body, index) => {
-          if (!activeFlags[index]) return;
-          if (unobstructedTableDice[index] === 0) return;
-          const kind = activeKinds[index] ?? selectedKind;
-          if (restingAlignments[index] >= minimumRestingAlignment(kind)) return;
-          if (simulationTime - lastUnstableReleaseTimes[index] < 0.45) return;
-          if (releaseUnstableRestPose(body, restingAxes[index])) {
-            lastUnstableReleaseTimes[index] = simulationTime;
-          }
-        });
-      }
-      const averageLinear = linearSum / Math.max(1, activeCount);
-      const averageAngular = angularSum / Math.max(1, activeCount);
-      const sleepSettled = afterLastActivation && slowTime > 0.5;
-      const contactSettled =
-        afterLastActivation &&
-        averageLinear < 0.11 &&
-        averageAngular < 0.18 &&
-        contactStableTime > 0.24 &&
-        displacementStableTime > 0.22;
-      const microMotionSettled =
-        afterLastActivation &&
-        averageLinear < 0.035 &&
-        averageAngular < 0.065 &&
-        displacementStableTime > 0.2;
-      if (
-        currentStep >= minSteps &&
-        allWellSeated &&
-        wellSeatedTime > 0.18 &&
-        (sleepSettled || contactSettled || microMotionSettled)
-      ) {
-        settleReason = contactSettled
-          ? 'stable-contact-graph'
-          : microMotionSettled
-            ? 'micro-motion-stable'
-            : 'sleep-threshold';
-        break;
-      }
-    }
-  }
-
-  const transforms = new Float32Array(frameData);
-  const stride = plannerDice.length * 7;
-  const lastFrameOffset = (frameCount - 1) * stride;
-  const results: number[] = [];
-  dice.forEach((die, index) => {
-    die.resetNumbering();
-    const offset = lastFrameOffset + index * 7;
-    const quaternion = {
-      x: transforms[offset + 3],
-      y: transforms[offset + 4],
-      z: transforms[offset + 5],
-      w: transforms[offset + 6],
-    };
-    const landingFace = die.getTopFaceIndex(quaternion);
-    results.push(die.getValueForFaceIndex(landingFace));
-  });
-
-  return {
-    step: PLANNER_RECORD_STEP,
-    frameCount,
-    dieCount: plannerDice.length,
-    transforms,
-    landings: Int32Array.from(results, (value) => Math.max(0, value - 1)),
-    activationDelays: Float32Array.from(states, (state) => state.delay),
-    impacts,
-    duration: (frameCount - 1) * PLANNER_RECORD_STEP,
-    results,
-    settleReason,
-    physicsSteps: currentStep,
-  };
-}
-
 interface WorkerPhysicalPlanEntry {
   definition: PhysicalDieDefinition;
   state: number[];
@@ -2355,12 +2046,10 @@ function createWorkerPhysicalEntries(states: readonly LaunchState[]): WorkerPhys
   if (genericEntries.length !== activeGenericPhysicalIndexes.length) {
     throw new Error('Generic physical visuals do not match the active physical descriptors.');
   }
-  const genericByPhysicalIndex = new Map(
-    activeGenericPhysicalIndexes.map((physicalIndex, index) => [
-      physicalIndex,
-      genericEntries[index],
-    ]),
-  );
+  const genericById = new Map(genericEntries.map((entry) => [entry.id, entry] as const));
+  if (genericById.size !== genericEntries.length) {
+    throw new Error('Generic physical visual ids must be unique.');
+  }
   return activePhysicalSpecs.map((spec, physicalIndex) => {
     const canonicalIndex = activeCanonicalPhysicalIndexes.indexOf(physicalIndex);
     if (canonicalIndex >= 0) {
@@ -2383,7 +2072,7 @@ function createWorkerPhysicalEntries(states: readonly LaunchState[]): WorkerPhys
         captureImpacts: true,
       };
     }
-    const generic = genericByPhysicalIndex.get(physicalIndex);
+    const generic = genericById.get(spec.id);
     if (!generic) throw new Error(`Generic physical state is missing at ${physicalIndex}.`);
     return {
       definition: generic.definition,
@@ -2514,20 +2203,106 @@ function applyShapeSymmetryTargets(plan: RollPlan, preservedPhysicalCount = 0): 
   return completedPlan;
 }
 
+const mainThreadPhysicalPlanner = new PhysicalRollPlanner();
+
+function activeGenericPlanAssignments() {
+  return activeGenericPhysicalIndexes.map((physicalIndex) => {
+    const spec = activePhysicalSpecs[physicalIndex];
+    if (!spec) throw new Error(`Generic physical descriptor is missing at ${physicalIndex}.`);
+    return { id: spec.id, physicalIndex };
+  });
+}
+
+function plannerResultAsRollPlan(
+  result: PhysicalRollPlanResult,
+  dieCount: number,
+  lockedCount: number,
+): Omit<RollPlan, 'results'> {
+  const impacts: RollImpact[] = [];
+  for (let offset = 0; offset + 2 < result.impacts.length; offset += 3) {
+    impacts.push({
+      time: result.impacts[offset],
+      dieIndex: Math.round(result.impacts[offset + 1]),
+      strength: result.impacts[offset + 2],
+    });
+  }
+  return {
+    step: result.step,
+    frameCount: result.frameCount,
+    dieCount,
+    transforms: result.transforms,
+    landings: result.landings,
+    impacts,
+    duration: result.duration,
+    settleReason: result.settleReason,
+    physicsSteps: result.physicsSteps,
+    diagnostics: {
+      planningMs: result.planningMs,
+      naturalTrajectory: true,
+      naturalMatches: dieCount,
+      targetSuccess: true,
+      lockedKinematicDice: lockedCount,
+    },
+  };
+}
+
+function completePhysicalPlan(
+  basePlan: Omit<RollPlan, 'results'>,
+  entries: readonly WorkerPhysicalPlanEntry[],
+  preservedPhysicalCount: number,
+): RollPlan {
+  const completed = applyShapeSymmetryTargets(
+    {
+      ...basePlan,
+      results: [],
+      activationDelays: Float32Array.from(entries, (entry) => entry.state[13] ?? 0),
+    },
+    preservedPhysicalCount,
+  );
+  commitPhysicalVisualPlan(
+    completed.transforms,
+    completed.frameCount,
+    completed.step,
+    completed.dieCount,
+    activeGenericPlanAssignments(),
+    completed.landings,
+    completed.activationDelays,
+  );
+  return completed;
+}
+
 async function buildRollPlan(
   states: LaunchState[],
   preservedPhysicalCount = 0,
   lockedTrajectory?: LockedTableTrajectory,
 ): Promise<RollPlan> {
-  const worker = getRollWorker();
-  if (!worker) {
-    if (preservedPhysicalCount > 0 || hasConfiguredPhysicalVisuals()) {
-      throw new Error('Shared physical dice require Web Worker support.');
-    }
-    return applyShapeSymmetryTargets(buildRollPlanSync(states));
-  }
   const entries = createWorkerPhysicalEntries(states);
   const lockedCount = lockedTrajectory ? preservedPhysicalCount : 0;
+  const worker = getRollWorker();
+  if (!worker) {
+    const result = mainThreadPhysicalPlanner.simulate({
+      entries,
+      boundsX: screenBounds.x,
+      boundsZ: screenBounds.z,
+      lockedCount,
+      lockedMotion:
+        lockedTrajectory && lockedCount > 0
+          ? {
+              count: lockedCount,
+              step: lockedTrajectory.step,
+              frameCount: lockedTrajectory.frameCount,
+              transforms: lockedTrajectory.transforms,
+            }
+          : undefined,
+      gravity: PHYSICS_PRESETS[activePhysicsPreset].gravity,
+    });
+    return completePhysicalPlan(
+      plannerResultAsRollPlan(result, entries.length, lockedCount),
+      entries,
+      preservedPhysicalCount,
+    );
+  }
+
   const id = nextPlanId++;
   const lockedTransforms = lockedTrajectory?.transforms.slice();
   const transfer: Transferable[] = [];
@@ -2544,31 +2319,26 @@ async function buildRollPlan(
         lockedTrajectory: lockedTransforms?.buffer,
         lockedTrajectoryStep: lockedTrajectory?.step,
         lockedTrajectoryFrameCount: lockedTrajectory?.frameCount,
+        gravity: PHYSICS_PRESETS[activePhysicsPreset].gravity,
       },
       transfer,
     );
   });
-  const completed = applyShapeSymmetryTargets(
-    {
-      ...basePlan,
-      results: [],
-      activationDelays: Float32Array.from(entries, (entry) => entry.state[13] ?? 0),
-    },
-    preservedPhysicalCount,
-  );
-  commitPhysicalVisualPlan(
-    completed.transforms,
-    completed.frameCount,
-    completed.step,
-    completed.dieCount,
-    activeGenericPhysicalIndexes,
-    completed.landings,
-    completed.activationDelays,
-  );
-  return completed;
+  return completePhysicalPlan(basePlan, entries, preservedPhysicalCount);
 }
 
-function applyPlanTransform(plan: RollPlan, time: number): void {
+function planDisplayScale(plan: RollPlan): { x: number; z: number } {
+  return {
+    x: plan.sourceBounds
+      ? Math.min(1, (screenBounds.x - 0.15) / Math.max(0.01, plan.sourceBounds.x))
+      : 1,
+    z: plan.sourceBounds
+      ? Math.min(1, (screenBounds.z - 0.15) / Math.max(0.01, plan.sourceBounds.z))
+      : 1,
+  };
+}
+
+function applyPlanTransform(plan: RollPlan, time: number, scaleX: number, scaleZ: number): void {
   const framePosition = THREE.MathUtils.clamp(time / plan.step, 0, plan.frameCount - 1);
   const firstIndex = Math.floor(framePosition);
   const secondIndex = Math.min(firstIndex + 1, plan.frameCount - 1);
@@ -2577,12 +2347,6 @@ function applyPlanTransform(plan: RollPlan, time: number): void {
   const firstFrameOffset = firstIndex * frameStride;
   const secondFrameOffset = secondIndex * frameStride;
 
-  const scaleX = plan.sourceBounds
-    ? Math.min(1, (screenBounds.x - 0.15) / Math.max(0.01, plan.sourceBounds.x))
-    : 1;
-  const scaleZ = plan.sourceBounds
-    ? Math.min(1, (screenBounds.z - 0.15) / Math.max(0.01, plan.sourceBounds.z))
-    : 1;
   dice.forEach((die, canonicalIndex) => {
     const physicalIndex = activeCanonicalPhysicalIndexes[canonicalIndex] ?? canonicalIndex;
     const activationDelay = plan.activationDelays?.[physicalIndex] ?? 0;
@@ -2724,9 +2488,10 @@ function captureReplay(plan: RollPlan): void {
 }
 
 function updatePlanVisuals(plan: RollPlan, time: number): void {
-  applyPlanTransform(plan, time);
+  const scale = planDisplayScale(plan);
+  applyPlanTransform(plan, time, scale.x, scale.z);
+  genericPhysicalVisuals.forEach((visual) => visual.update(time, scale.x, scale.z));
   const progress = plan.duration > 0 ? time / plan.duration : 1;
-  genericPhysicalVisuals.forEach((visual) => visual.update(progress, plan.duration));
   fallbackVisuals.forEach((visual) => visual.update(progress, plan.duration));
 }
 
@@ -2893,7 +2658,7 @@ function playRecordedReplay(
   );
   if (activeVisualOrder.length !== totalVisuals)
     return Promise.reject(new Error('Replay visual ordering is invalid'));
-  spawnGenericPhysicalVisuals(generic, activeSeed);
+  spawnGenericPhysicalVisuals(generic);
   spawnFallbackVisuals(activeFallbackSpecs, activeSeed);
   dice.forEach((die, index) => {
     die.setTheme(activeThemes[index] ?? selectedTheme);
@@ -2933,7 +2698,7 @@ function playRecordedReplay(
     plan.frameCount,
     plan.step,
     plan.dieCount,
-    activeGenericPhysicalIndexes,
+    activeGenericPlanAssignments(),
     plan.landings,
     plan.activationDelays,
   );
@@ -3263,16 +3028,11 @@ function appendPhysicalDice(
 
 function appendGenericPhysicalVisuals(
   specs: readonly DraftrollPhysicalVisual[],
-  seed: string,
 ): PhysicalDieVisualInstance[] {
   if (specs.length === 0) return [];
-  const start = genericPhysicalVisuals.length;
-  const total = start + specs.length;
-  const random = createSeededRandom(`${seed}:additive-physical`);
-  const occupied = genericPhysicalVisuals.map((visual) => visual.getSettledPosition());
-  const appended = specs.map((spec, offset) => {
+  const appended = specs.map((spec) => {
     const visual = new PhysicalDieVisualInstance(spec);
-    visual.configureTrajectory(start + offset, total, screenBounds, random, occupied);
+    visual.prepare();
     scene.add(visual.group);
     genericPhysicalVisuals.push(visual);
     return visual;
@@ -3556,10 +3316,7 @@ async function appendTableRoll(request: DiceRollRequest): Promise<DraftrollRollC
     normalized.canonicalThemes,
     normalized.canonicalPhysics,
   );
-  const appendedAdditional = appendGenericPhysicalVisuals(
-    normalized.genericPhysical,
-    String(normalized.seed ?? `table-add:${Date.now()}`),
-  );
+  const appendedAdditional = appendGenericPhysicalVisuals(normalized.genericPhysical);
   const appendedFallbacks = appendFallbackVisuals(
     normalized.fallbacks,
     String(normalized.seed ?? `table-add:${Date.now()}`),
@@ -3733,13 +3490,20 @@ async function castDice(
       plan = await buildRollPlan(states);
     } catch (error) {
       assertPresentationGeneration(generation);
-      if (hasArbitraryPhysicalDice) {
-        setPhysicalDiceVisible(true);
-        throw error;
-      }
-      console.error('Roll planner failed; using local canonical fallback.', error);
+      console.error('Roll worker failed; using shared main-thread planner.', error);
       try {
-        plan = applyShapeSymmetryTargets(buildRollPlanSync(states));
+        const fallbackEntries = createWorkerPhysicalEntries(states);
+        const fallbackResult = mainThreadPhysicalPlanner.simulate({
+          entries: fallbackEntries,
+          boundsX: screenBounds.x,
+          boundsZ: screenBounds.z,
+          gravity: PHYSICS_PRESETS[activePhysicsPreset].gravity,
+        });
+        plan = completePhysicalPlan(
+          plannerResultAsRollPlan(fallbackResult, fallbackEntries.length, 0),
+          fallbackEntries,
+          0,
+        );
       } catch (fallbackError) {
         // Planning is intentionally invisible. Restore the current meshes if
         // neither planner can produce a committed trajectory so a failed roll

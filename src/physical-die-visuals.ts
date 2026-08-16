@@ -69,7 +69,8 @@ function sampleTrajectory(
   position.set(
     THREE.MathUtils.lerp(trajectory.transforms[a], trajectory.transforms[b], blend) * scaleX,
     THREE.MathUtils.lerp(trajectory.transforms[a + 1], trajectory.transforms[b + 1], blend),
-    THREE.MathUtils.lerp(trajectory.transforms[a + 2], trajectory.transforms[b + 2], blend) * scaleZ,
+    THREE.MathUtils.lerp(trajectory.transforms[a + 2], trajectory.transforms[b + 2], blend) *
+      scaleZ,
   );
   quaternion.set(
     trajectory.transforms[a + 3],
@@ -289,8 +290,7 @@ export class PhysicalDieVisualInstance {
       );
       if (halfSin > 1e-6) {
         const angle =
-          2 *
-          Math.atan2(halfSin, THREE.MathUtils.clamp(this.plannerQuaternionDelta.w, -1, 1));
+          2 * Math.atan2(halfSin, THREE.MathUtils.clamp(this.plannerQuaternionDelta.w, -1, 1));
         const speed = Math.min(28, angle / dt);
         angularX = (this.plannerQuaternionDelta.x / halfSin) * speed;
         angularY = (this.plannerQuaternionDelta.y / halfSin) * speed;

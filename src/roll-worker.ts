@@ -21,6 +21,7 @@ interface PlanRequest {
   lockedTrajectory?: ArrayBuffer;
   lockedTrajectoryStep?: number;
   lockedTrajectoryFrameCount?: number;
+  gravity?: number;
 }
 
 const planner = new PhysicalRollPlanner();
@@ -53,6 +54,7 @@ self.addEventListener('message', (event: MessageEvent<PlanRequest>) => {
     boundsZ: request.boundsZ,
     lockedCount,
     lockedMotion: readLockedMotion(request, lockedCount),
+    gravity: request.gravity,
   });
   const transforms = result.transforms;
   const impacts = result.impacts;

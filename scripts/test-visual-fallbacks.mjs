@@ -60,7 +60,7 @@ assert.match(engine, /collectOrderedVisualResults/);
 assert.match(engine, /function updatePlanVisuals/);
 assert.match(
   engine,
-  /genericPhysicalVisuals\.forEach\(\(visual\) => visual\.update\(progress, plan\.duration\)\)/,
+  /genericPhysicalVisuals\.forEach\(\(visual\) => visual\.update\(time, scale\.x, scale\.z\)\)/,
 );
 assert.match(engine, /updatePlanVisuals\(activePlan, planTime\)/);
 assert.match(engine, /fallbacks:\s*activeFallbackSpecs/);
@@ -123,7 +123,9 @@ assert.match(physicalPlanner, /world\.step\(PHYSICAL_PLANNER_STEP\)/);
 assert.match(physicalPlanner, /readPhysicalRestingAlignment/);
 assert.match(physicalPlanner, /releaseUnstableRestPose/);
 assert.match(physicalPlanner, /resolveLandedPhysicalOutcome/);
-assert.match(physicalPlanner, /extractPhysicalTransforms/);
+assert.doesNotMatch(physicalPlanner, /extractPhysicalTransforms/);
+assert.match(physicalPlanner, /const transformBuffer = new Float32Array/);
+assert.doesNotMatch(physicalPlanner, /activeFlags\.slice/);
 
 // The roll worker consumes one ordered physical-entry array and returns one transform/landing stream.
 assert.match(rollWorker, /PhysicalRollPlanner/);
@@ -153,7 +155,13 @@ assert.match(physicalVisuals, /physicalDieColliderRadius/);
 assert.match(physicalVisuals, /getPhysicalVisualPlanEntries/);
 assert.match(physicalVisuals, /commitPhysicalVisualPlan/);
 assert.match(physicalVisuals, /private activationDelay = 0/);
-assert.match(physicalVisuals, /elapsed \+ this\.trajectory\.step \* 0\.5 >= this\.activationDelay/);
+assert.match(
+  physicalVisuals,
+  /this\.lastTime \+ this\.trajectory\.step \* 0\.5 >= this\.activationDelay/,
+);
+assert.match(physicalVisuals, /new Map<string, PhysicalDieVisualInstance>/);
+assert.match(physicalVisuals, /physicalIndex: number/);
+assert.doesNotMatch(physicalVisuals, /extractPhysicalTransforms|trajectoryForIndex/);
 assert.doesNotMatch(physicalVisuals, /AdditionalPhysical|additionalPhysical/);
 assert.match(physicalVisuals, /activePhysicalDice/);
 assert.match(physicalVisuals, /pendingPhysicalDice/);
