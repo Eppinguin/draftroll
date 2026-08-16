@@ -42,7 +42,7 @@ assert.match(planner, /lastUnstableReleaseTimes/);
 assert.match(planner, /minimumPhysicalRestingAlignment/);
 assert.match(planner, /releaseUnstableRestPose/);
 assert.match(main, /single[\s\S]*?committed trajectory/);
-assert.match(main, /applyPlanTransform\(plan, planTime\)[\s\S]*?requestRender\(\)/);
+assert.match(main, /updatePlanVisuals\(plan, planTime\)[\s\S]*?requestRender\(\)/);
 assert.match(main, /setPhysicalDiceVisible\(true\)[\s\S]*?throw fallbackError/);
 assert.match(main, /Register completion only after a valid committed plan exists/);
 assert.doesNotMatch(main, /intentionally allows projected\s+overlap/);
