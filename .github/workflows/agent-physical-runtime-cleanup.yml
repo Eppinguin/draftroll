@@ -103,6 +103,20 @@ jobs:
               raise SystemExit(f'stale fallback die assertions: expected one block, found {source.count(stale_block)}')
           source = source.replace(stale_block, replacement_block, 1)
           path.write_text(source)
+
+          path = Path('scripts/test-natural-target-physics.mjs')
+          source = path.read_text()
+          import_anchor = "const physicsShapes = await readFile(join(root, 'src/physics-shapes.ts'), 'utf8');"
+          import_replacement = import_anchor + "\nconst physicalDice = await readFile(join(root, 'src/physical-dice.ts'), 'utf8');"
+          if source.count(import_anchor) != 1:
+              raise SystemExit(f'natural physical dice import: expected one match, found {source.count(import_anchor)}')
+          source = source.replace(import_anchor, import_replacement, 1)
+          old_assert = "assert.match(physicsShapes, /kind === 'coin'[\\s\\S]*?new CANNON\\.Cylinder/);"
+          new_assert = """assert.match(\n  physicsShapes,\n  /createPhysicalDieCollider\\(createCanonicalPhysicalDieDefinition\\(kind\\), sizeScale\\)/,\n);\nassert.match(physicalDice, /collider\\.kind === 'cylinder'[\\s\\S]*?new CANNON\\.Cylinder/);"""
+          if source.count(old_assert) != 1:
+              raise SystemExit(f'natural shared collider assertion: expected one match, found {source.count(old_assert)}')
+          source = source.replace(old_assert, new_assert, 1)
+          path.write_text(source)
           PY
       - name: Remove one-time migration files
         run: rm -f scripts/agent-physical-runtime-cleanup.mjs .github/workflows/agent-physical-runtime-cleanup.yml .agent-physical-runtime-cleanup-trigger
