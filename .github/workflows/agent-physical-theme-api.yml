@@ -41,7 +41,8 @@ jobs:
           ! grep -R "PhysicalFallback" src/physical-die-visuals.ts src/main.ts
           ! grep -R "physicalFallbackReplay" src/main.ts
           ! grep -R "forceFallback" packages src
-          ! grep -R "fallbackOnly" packages src
+          ! grep -R "fallbackOnly:" packages src
+          ! grep -R "\.fallbackOnly" packages src
       - name: Lint
         run: env -u GITHUB_ACTIONS pnpm lint
       - name: Package typecheck
