@@ -61,6 +61,7 @@ jobs:
           src/roll-worker.ts
           scripts/test-late-events.mjs
           scripts/test-mixed-renderer.mjs
+          scripts/test-natural-target-physics.mjs
           scripts/test-visual-fallbacks.mjs
           tests/browser/specs/overlay.spec.ts
 
