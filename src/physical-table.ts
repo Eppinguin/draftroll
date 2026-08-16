@@ -4,6 +4,11 @@ import type { PhysicalDieVisualInstance } from './physical-die-visuals';
 
 export type PhysicalTableImplementation = 'canonical' | 'visual';
 
+export interface PhysicalTableSpec {
+  id: string;
+  implementation: PhysicalTableImplementation;
+}
+
 export interface PhysicalTableEntry {
   id: string;
   physicalIndex: number;
@@ -40,7 +45,7 @@ export class PhysicalTableRegistry {
     return this.visualEntriesInOrder.length;
   }
 
-  reset(specs: readonly { id: string; canonicalKind?: string }[]): void {
+  reset(specs: readonly PhysicalTableSpec[]): void {
     this.entriesById.clear();
     this.entriesInOrder.length = 0;
     this.canonicalEntriesInOrder.length = 0;
@@ -48,24 +53,23 @@ export class PhysicalTableRegistry {
     this.append(specs);
   }
 
-  append(specs: readonly { id: string; canonicalKind?: string }[]): void {
+  append(specs: readonly PhysicalTableSpec[]): void {
     for (const spec of specs) {
       if (this.entriesById.has(spec.id)) {
         throw new Error(`Physical table already contains die id: ${spec.id}`);
       }
-      const implementation: PhysicalTableImplementation = spec.canonicalKind ? 'canonical' : 'visual';
       const entry: PhysicalTableEntry = {
         id: spec.id,
         physicalIndex: this.entriesInOrder.length,
-        implementation,
+        implementation: spec.implementation,
         canonicalIndex:
-          implementation === 'canonical' ? this.canonicalEntriesInOrder.length : null,
-        visualIndex: implementation === 'visual' ? this.visualEntriesInOrder.length : null,
+          spec.implementation === 'canonical' ? this.canonicalEntriesInOrder.length : null,
+        visualIndex: spec.implementation === 'visual' ? this.visualEntriesInOrder.length : null,
         die: null,
         visual: null,
       };
       this.entriesInOrder.push(entry);
-      if (implementation === 'canonical') this.canonicalEntriesInOrder.push(entry);
+      if (spec.implementation === 'canonical') this.canonicalEntriesInOrder.push(entry);
       else this.visualEntriesInOrder.push(entry);
       this.entriesById.set(entry.id, entry);
     }
