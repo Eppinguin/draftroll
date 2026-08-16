@@ -7,6 +7,24 @@ function replaceOnce(source, search, replacement, label) {
 }
 
 {
+  const path = 'src/main.ts';
+  let source = await readFile(path, 'utf8');
+  source = replaceOnce(
+    source,
+    `function resetPhysicalTable(specs: DraftrollPhysicalVisual[]): void {\n  activePhysicalSpecs = specs;\n  physicalTable.reset(specs);\n  rebindPhysicalTableRuntime();\n}`,
+    `function physicalTableSpec(spec: DraftrollPhysicalVisual) {\n  return {\n    id: spec.id,\n    implementation: usesCanonicalPhysicalImplementation(spec)\n      ? ('canonical' as const)\n      : ('visual' as const),\n  };\n}\n\nfunction resetPhysicalTable(specs: DraftrollPhysicalVisual[]): void {\n  activePhysicalSpecs = specs;\n  physicalTable.reset(specs.map(physicalTableSpec));\n  rebindPhysicalTableRuntime();\n}`,
+    'physical table implementation derivation',
+  );
+  source = replaceOnce(
+    source,
+    `  physicalTable.append(normalized.physical);`,
+    `  physicalTable.append(normalized.physical.map(physicalTableSpec));`,
+    'additive physical table implementation derivation',
+  );
+  await writeFile(path, source);
+}
+
+{
   const path = 'scripts/test-late-events.mjs';
   let source = await readFile(path, 'utf8');
   source = replaceOnce(
