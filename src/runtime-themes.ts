@@ -2,11 +2,17 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import {
   decodeDiceTheme,
+  listThemeAssetReferences,
   type DiceTheme,
   type RuntimeThemeBundle,
+  type ThemeLabelStyleDefinition,
   type ThemeMaterialDefinition,
   type ThemePhysicsDefinition,
 } from '../packages/themes/src/index';
+import type {
+  PhysicalDieFaceContent,
+  PhysicalDiePresentation,
+} from '../packages/renderer/src/physical';
 import {
   THEMES,
   THEME_MANIFESTS,
@@ -74,8 +80,8 @@ export function getRuntimeThemeMaterial(
   kind: string,
 ): ThemeMaterialDefinition | undefined {
   const manifest = runtimeThemes.get(themeId)?.manifest;
-  if (!manifest) return undefined;
-  return mergeMaterial(manifest.material, manifest.materials?.[kind]);
+  if (!manifest?.physical) return undefined;
+  return mergeMaterial(manifest.physical.material, manifest.physical.dice?.[kind]?.material);
 }
 
 export function getRuntimeThemeTexture(
@@ -87,7 +93,10 @@ export function getRuntimeThemeTexture(
   if (!resources) return undefined;
   const manifest = resources.manifest;
   if (slot === 'label') {
-    const reference = manifest.labels?.atlases?.[kind]?.src ?? manifest.labels?.atlas?.src;
+    const reference =
+      manifest.physical?.dice?.[kind]?.labels?.atlas?.src ??
+      manifest.physical?.labels?.atlases?.[kind]?.src ??
+      manifest.physical?.labels?.atlas?.src;
     return reference ? resources.textures.get(reference) : undefined;
   }
   const material = getRuntimeThemeMaterial(themeId, kind);
@@ -100,8 +109,58 @@ export function getRuntimeThemeTexture(
   return reference ? resources.textures.get(reference) : undefined;
 }
 
-export function getRuntimeThemeFont(themeId: string): string | undefined {
-  return runtimeThemes.get(themeId)?.fontFamily;
+export function getRuntimeThemeLabelStyle(
+  themeId: string,
+  kind: string,
+  fallbackKind?: string,
+): ThemeLabelStyleDefinition | undefined {
+  const manifest = runtimeThemes.get(themeId)?.manifest;
+  if (!manifest?.physical) return undefined;
+  let style = mergeLabelStyle(undefined, manifest.physical.labels);
+  if (fallbackKind && fallbackKind !== kind)
+    style = mergeLabelStyle(style, manifest.physical.dice?.[fallbackKind]?.labels);
+  return mergeLabelStyle(style, manifest.physical.dice?.[kind]?.labels);
+}
+
+export function getRuntimeThemeFont(
+  themeId: string,
+  kind?: string,
+  fallbackKind?: string,
+): string | undefined {
+  const resources = runtimeThemes.get(themeId);
+  if (!resources) return undefined;
+  if (kind) {
+    const style = getRuntimeThemeLabelStyle(themeId, kind, fallbackKind);
+    if (style?.fontFamily) return style.fontFamily;
+  }
+  return resources.fontFamily;
+}
+
+export function getRuntimeThemePresentation(
+  themeId: string,
+  kind: string,
+  fallbackKind?: string,
+): PhysicalDiePresentation | undefined {
+  const manifest = runtimeThemes.get(themeId)?.manifest;
+  const source =
+    manifest?.physical?.dice?.[kind]?.presentation ??
+    (fallbackKind ? manifest?.physical?.dice?.[fallbackKind]?.presentation : undefined);
+  if (!source) return undefined;
+  const contents: PhysicalDieFaceContent[] = source.contents.map((content) => {
+    if (content.kind === 'number')
+      return { kind: 'number', value: content.value, label: content.label };
+    if (content.kind === 'text') return { kind: 'text', text: content.text };
+    if (content.kind === 'icon') return { kind: 'icon', icon: content.icon, label: content.label };
+    return { kind: 'texture', asset: content.asset.src, label: content.label };
+  });
+  return { contents };
+}
+
+export function getRuntimeThemeAssetTexture(
+  themeId: string,
+  reference: string,
+): THREE.Texture | undefined {
+  return runtimeThemes.get(themeId)?.textures.get(reference);
 }
 
 export function getRuntimeThemeMesh(
@@ -116,12 +175,8 @@ export function getRuntimeThemePhysics(
   kind: string,
 ): ThemePhysicsDefinition | undefined {
   const manifest = runtimeThemes.get(themeId)?.manifest;
-  if (!manifest?.physics) return undefined;
-  return {
-    sizeScale: manifest.physics.dice?.[kind]?.sizeScale ?? manifest.physics.sizeScale,
-    massScale: manifest.physics.dice?.[kind]?.massScale ?? manifest.physics.massScale,
-    inertiaScale: manifest.physics.dice?.[kind]?.inertiaScale ?? manifest.physics.inertiaScale,
-  };
+  if (!manifest?.physical) return undefined;
+  return mergePhysics(manifest.physical.physics, manifest.physical.dice?.[kind]?.physics);
 }
 
 export function getRuntimeThemeEffects(themeId: string): ThemeEffectSlots | undefined {
@@ -154,8 +209,8 @@ export function invalidateRuntimeThemeMaterials(themeId: string): void {
 
 function createPalette(theme: DiceTheme): ThemePalette {
   const fallback = THEMES.dragon;
-  const material = theme.material ?? {};
-  const labels = theme.labels ?? {};
+  const material = theme.physical?.material ?? {};
+  const labels = theme.physical?.labels ?? {};
   return {
     name: theme.name,
     surface: 'dragon-scale',
@@ -198,7 +253,7 @@ function createRendererManifest(theme: DiceTheme): ThemeManifest {
       positiveEffect: theme.effects?.positive !== undefined,
       neutralEffect: theme.effects?.neutral !== undefined,
       negativeEffect: theme.effects?.negative !== undefined,
-      customModel: Object.keys(theme.meshes ?? {}).length > 0,
+      customModel: Object.values(theme.physical?.dice ?? {}).some((entry) => Boolean(entry?.mesh)),
       customCollider: false,
       customAudio: Boolean(theme.audio?.impact || theme.audio?.roll),
     },
@@ -223,26 +278,12 @@ async function loadThemeTextures(
   bundle: RuntimeThemeBundle,
   resources: RuntimeThemeResources,
 ): Promise<void> {
-  const references = new Set<string>();
-  const add = (reference?: string) => {
-    if (reference) references.add(reference);
-  };
-  const manifest = resources.manifest;
-  const materials = [manifest.material, ...Object.values(manifest.materials ?? {})];
-  for (const material of materials) {
-    add(material?.surfaceTexture?.src);
-    add(material?.normalTexture?.src);
-    add(material?.roughnessTexture?.src);
-  }
-  add(manifest.labels?.atlas?.src);
-  for (const atlas of Object.values(manifest.labels?.atlases ?? {})) add(atlas?.src);
-
-  for (const reference of references) {
-    const asset = bundle.assets[reference];
+  for (const reference of listThemeAssetReferences(resources.manifest)) {
+    const asset = bundle.assets[reference.src];
     if (!asset || !asset.mimeType.startsWith('image/')) continue;
     try {
       const texture = await loadTexture(asset.data, asset.mimeType);
-      resources.textures.set(reference, texture);
+      resources.textures.set(reference.src, texture);
     } catch {
       // Invalid optional resources fall back to generated surfaces and labels.
     }
@@ -253,8 +294,8 @@ async function loadThemeFont(
   bundle: RuntimeThemeBundle,
   resources: RuntimeThemeResources,
 ): Promise<void> {
-  const font = resources.manifest.labels?.font;
-  const family = resources.manifest.labels?.fontFamily;
+  const font = resources.manifest.physical?.labels?.font;
+  const family = resources.manifest.physical?.labels?.fontFamily;
   if (!font || !family || typeof FontFace === 'undefined' || typeof document === 'undefined') {
     resources.fontFamily = family;
     return;
@@ -275,7 +316,8 @@ async function loadThemeMeshes(
   bundle: RuntimeThemeBundle,
   resources: RuntimeThemeResources,
 ): Promise<void> {
-  for (const [kind, definition] of Object.entries(resources.manifest.meshes ?? {})) {
+  for (const [kind, override] of Object.entries(resources.manifest.physical?.dice ?? {})) {
+    const definition = override?.mesh;
     if (!definition) continue;
     const asset = bundle.assets[definition.asset.src];
     if (!asset) continue;
@@ -288,7 +330,7 @@ async function loadThemeMeshes(
       );
       resources.meshes.set(kind, geometry);
     } catch {
-      // Standard geometry remains the safe fallback.
+      // Canonical/generated geometry remains the safe fallback.
     }
   }
 }
@@ -366,6 +408,33 @@ function mergeMaterial(
 ): ThemeMaterialDefinition | undefined {
   if (!base && !override) return undefined;
   return { ...base, ...override };
+}
+
+function mergeLabelStyle(
+  base?: ThemeLabelStyleDefinition,
+  override?: ThemeLabelStyleDefinition,
+): ThemeLabelStyleDefinition | undefined {
+  if (!base && !override) return undefined;
+  return {
+    color: override?.color ?? base?.color,
+    glowColor: override?.glowColor ?? base?.glowColor,
+    fontFamily: override?.fontFamily ?? base?.fontFamily,
+    outlineColor: override?.outlineColor ?? base?.outlineColor,
+    outlineWidth: override?.outlineWidth ?? base?.outlineWidth,
+    scale: override?.scale ?? base?.scale,
+  };
+}
+
+function mergePhysics(
+  base?: ThemePhysicsDefinition,
+  override?: ThemePhysicsDefinition,
+): ThemePhysicsDefinition | undefined {
+  if (!base && !override) return undefined;
+  return {
+    sizeScale: override?.sizeScale ?? base?.sizeScale,
+    massScale: override?.massScale ?? base?.massScale,
+    inertiaScale: override?.inertiaScale ?? base?.inertiaScale,
+  };
 }
 
 function cloneAsset(bundle: RuntimeThemeBundle, reference?: string): ArrayBuffer | undefined {

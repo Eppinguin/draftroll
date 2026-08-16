@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { DraftrollFallbackVisual } from '../packages/renderer/src/index';
+import type { DraftrollPhysicalVisual } from '../packages/renderer/src/index';
 import type { PolyhedronLabelAnchor, ReadablePolyhedron } from '../packages/renderer/src/polyhedra';
 import type {
   PhysicalDieDefinition,
@@ -7,11 +7,14 @@ import type {
   PhysicalDiePresentation,
 } from './physical-dice';
 import {
+  getRuntimeThemeAssetTexture,
   getRuntimeThemeFont,
+  getRuntimeThemeLabelStyle,
   getRuntimeThemeMaterial,
   getRuntimeThemeMesh,
   getRuntimeThemeTexture,
 } from './runtime-themes';
+import type { ThemeLabelStyleDefinition } from '../packages/themes/src/index';
 import { THEMES, type ThemeName } from './themes';
 
 const LABEL_ATLAS_COLUMNS = 5;
@@ -30,7 +33,7 @@ export interface PhysicalDieMesh {
 }
 
 export interface PhysicalDieMeshOptions {
-  spec: DraftrollFallbackVisual;
+  spec: DraftrollPhysicalVisual;
   definition: PhysicalDieDefinition;
   presentation: PhysicalDiePresentation;
   explicitPresentation: boolean;
@@ -62,7 +65,7 @@ function getShadowTexture(): THREE.CanvasTexture {
   return shadowTexture;
 }
 
-function createSurfaceTexture(spec: DraftrollFallbackVisual): THREE.CanvasTexture {
+function createSurfaceTexture(spec: DraftrollPhysicalVisual): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
   canvas.width = 512;
   canvas.height = 512;
@@ -218,9 +221,19 @@ function atlasCellTexture(atlas: THREE.Texture, value: number): THREE.Texture {
 }
 
 function presentationTexture(
-  spec: DraftrollFallbackVisual,
+  spec: DraftrollPhysicalVisual,
   content: PhysicalDieFaceContent,
-): THREE.CanvasTexture {
+  style: ThemeLabelStyleDefinition | undefined,
+  fontFamily: string | undefined,
+): THREE.Texture {
+  if (content.kind === 'texture') {
+    const source = getRuntimeThemeAssetTexture(spec.theme, content.asset);
+    if (source) {
+      const texture = source.clone();
+      texture.needsUpdate = true;
+      return texture;
+    }
+  }
   const canvas = document.createElement('canvas');
   canvas.width = 256;
   canvas.height = 256;
@@ -240,14 +253,19 @@ function presentationTexture(
   context.textAlign = 'center';
   context.textBaseline = 'middle';
   context.lineJoin = 'round';
-  context.font = `800 ${fontSize}px ${getRuntimeThemeFont(spec.theme) ?? 'system-ui, sans-serif'}`;
-  context.lineWidth = Math.max(7, Math.round(fontSize * 0.08));
-  context.strokeStyle = 'rgba(0,0,0,.72)';
+  context.font = `800 ${fontSize}px ${fontFamily ?? 'system-ui, sans-serif'}`;
+  context.lineWidth = Math.max(1, Math.round(fontSize * (style?.outlineWidth ?? 0.08)));
+  context.strokeStyle = style?.outlineColor ?? 'rgba(0,0,0,.72)';
+  if (style?.glowColor) {
+    context.shadowColor = style.glowColor;
+    context.shadowBlur = Math.max(4, Math.round(fontSize * 0.08));
+  }
   context.strokeText(text, 128, 126);
-  context.fillStyle = palette.label;
+  context.fillStyle = style?.color ?? palette.label;
   context.fillText(text, 128, 126);
+  context.shadowBlur = 0;
   if (content.kind === 'number' && (text === '6' || text === '9')) {
-    context.strokeStyle = palette.label;
+    context.strokeStyle = style?.color ?? palette.label;
     context.lineWidth = 8;
     context.beginPath();
     context.moveTo(93, 202);
@@ -343,9 +361,13 @@ export function createPhysicalDieMesh(options: PhysicalDieMeshOptions): Physical
   edges.renderOrder = 2;
   visualRoot.add(edges);
 
+  const fallbackKind = `d${definition.sides}`;
   const runtimeAtlas =
     getRuntimeThemeTexture(spec.theme, spec.type, 'label') ??
-    getRuntimeThemeTexture(spec.theme, `d${definition.sides}`, 'label');
+    getRuntimeThemeTexture(spec.theme, fallbackKind, 'label');
+  const labelStyle = getRuntimeThemeLabelStyle(spec.theme, spec.type, fallbackKind);
+  const labelScale = labelStyle?.scale ?? 1;
+  const fontFamily = getRuntimeThemeFont(spec.theme, spec.type, fallbackKind);
   const labelMaps = definition.outcomes.map((outcome, index): THREE.Texture | null => {
     if (!explicitPresentation && runtimeAtlas && definition.sides <= 20) {
       const texture = atlasCellTexture(runtimeAtlas, outcome.value);
@@ -356,7 +378,7 @@ export function createPhysicalDieMesh(options: PhysicalDieMeshOptions): Physical
       kind: 'number' as const,
       value: outcome.value,
     };
-    const texture = presentationTexture(spec, content);
+    const texture = presentationTexture(spec, content, labelStyle, fontFamily);
     ownedTextures.push(texture);
     return texture;
   });
@@ -371,7 +393,10 @@ export function createPhysicalDieMesh(options: PhysicalDieMeshOptions): Physical
     });
     ownedMaterials.push(material);
     for (const anchor of outcome.labelAnchors) {
-      const labelGeometry = new THREE.PlaneGeometry(anchor.scale, anchor.scale);
+      const labelGeometry = new THREE.PlaneGeometry(
+        anchor.scale * labelScale,
+        anchor.scale * labelScale,
+      );
       ownedGeometries.push(labelGeometry);
       const label = new THREE.Mesh(labelGeometry, material);
       label.position
@@ -402,7 +427,10 @@ export function createPhysicalDieMesh(options: PhysicalDieMeshOptions): Physical
       .toSorted((left, right) => right.score - left.score)[0]?.index;
     if (outcomeIndex === undefined) continue;
     const anchor = secondaryAnchor(shape, faceIndex);
-    const labelGeometry = new THREE.PlaneGeometry(anchor.scale, anchor.scale);
+    const labelGeometry = new THREE.PlaneGeometry(
+      anchor.scale * labelScale,
+      anchor.scale * labelScale,
+    );
     ownedGeometries.push(labelGeometry);
     const label = new THREE.Mesh(labelGeometry, labelMaterials[outcomeIndex]);
     label.position

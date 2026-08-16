@@ -577,7 +577,6 @@ export class DraftrollOverlayRenderer implements DiceRenderer {
       table: options.table ? { ...options.table } : undefined,
       autoClearMs: options.autoClearMs,
       reducedMotion: options.reducedMotion,
-      forceFallback: options.forceFallback,
       physicsPreset: options.physicsPreset,
       modifierSequence: options.modifierSequence,
     };

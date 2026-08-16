@@ -68,7 +68,7 @@ export type DraftrollDieKind = 'coin' | 'd4' | 'd6' | 'd8' | 'd10' | 'd12' | 'd2
  *
  * @public
  */
-export type DraftrollFallbackKind = 'coin' | 'percentile' | 'fate' | 'spinner' | 'token' | 'card';
+export type DraftrollFallbackKind = 'token' | 'card';
 /**
  * Game-supplied semantic outcome used to choose a theme effect.
  *
@@ -145,8 +145,6 @@ export interface DraftrollFallbackVisual {
   sides?: number;
   title: string;
   label: string;
-  /** Label painted on the reverse side when the fallback is a two-sided coin. */
-  oppositeLabel?: string;
   theme: string;
   outcome: DraftrollEffectOutcome;
   metadata?: Record<string, unknown>;
@@ -247,10 +245,8 @@ export interface RendererPlayOptions {
   signal?: AbortSignal;
   /** Automatically dissolve and clear this presentation after the given delay. */
   autoClearMs?: number;
-  /** Prefer a concise non-3D/final-state presentation for reduced-motion users. */
+  /** Prefer a concise final-state presentation for reduced-motion users. */
   reducedMotion?: boolean;
-  /** Force all components through the synchronized fallback layer. */
-  forceFallback?: boolean;
   /** Shared physical tuning selected by room policy or the host. */
   physicsPreset?: 'standard' | 'compact' | 'heavy' | 'low-gravity';
   /**
@@ -416,43 +412,23 @@ export interface DraftrollThemeManifest {
  * @public
  */
 export interface DraftrollBridge {
-  roll(
-    request?:
-      | {
-          /** First-class physical dice. New integrations should use this instead of legacy parallel arrays. */
-          physical?: DraftrollPhysicalVisual[];
-          /** @deprecated Legacy canonical-only physical results. */
-          results?: number[] | number;
-          outcomes?: DraftrollEffectOutcome[] | DraftrollEffectOutcome;
-          themes?: string[] | string;
-          /** Physical die type for each physical result. A single value is repeated. */
-          kinds?: DraftrollDieKind[] | DraftrollDieKind;
-          /** Non-polyhedral or symbolic components animated alongside physical dice. */
-          fallbacks?: DraftrollFallbackVisual[];
-          /** Restores the normalized die order when physical and fallback visuals are mixed. */
-          visualOrder?: DraftrollVisualOrderEntry[];
-          context?: Record<string, unknown>;
-          seed?: string | number;
-          startAtMs?: number;
-          /** Seek into the deterministic replay after planning rather than starting at frame zero. */
-          seekToMs?: number;
-          /** Duration used to translate authoritative elapsed time to local replay progress. */
-          animationDurationMs?: number;
-          /** Present the final settled state immediately. */
-          settleImmediately?: boolean;
-          lateMode?: RendererLateEventMode;
-          settleAfterProgress?: number;
-          /** Add to an active persistent table throw instead of waiting for it to clear. */
-          tableMode?: 'replace' | 'add';
-          signal?: AbortSignal;
-          reducedMotion?: boolean;
-          /** Per-physical-die size, mass, and inertia overrides aligned with results/kinds. */
-          physics?: DicePhysicsProperties[];
-          physicsPreset?: 'standard' | 'compact' | 'heavy' | 'low-gravity';
-        }
-      | number[]
-      | number,
-  ): Promise<RendererCompletion>;
+  roll(request?: {
+    physical?: DraftrollPhysicalVisual[];
+    fallbacks?: DraftrollFallbackVisual[];
+    visualOrder?: DraftrollVisualOrderEntry[];
+    context?: Record<string, unknown>;
+    seed?: string | number;
+    startAtMs?: number;
+    seekToMs?: number;
+    animationDurationMs?: number;
+    settleImmediately?: boolean;
+    lateMode?: RendererLateEventMode;
+    settleAfterProgress?: number;
+    tableMode?: 'replace' | 'add';
+    signal?: AbortSignal;
+    reducedMotion?: boolean;
+    physicsPreset?: 'standard' | 'compact' | 'heavy' | 'low-gravity';
+  }): Promise<RendererCompletion>;
   setDie(kind: DraftrollDieKind): void;
   setQuantity(count: number): void;
   setTheme(theme: string): void;
@@ -988,7 +964,7 @@ export class DraftrollRenderer implements DiceRenderer {
       const outcome =
         options.outcomeResolver?.(die, result) ?? defaultOutcomeForDie(die, physicalSlot?.sides);
 
-      if (options.forceFallback !== true && physicalSlot) {
+      if (physicalSlot) {
         const index = physical.length;
         physical.push({
           die,
@@ -1007,7 +983,7 @@ export class DraftrollRenderer implements DiceRenderer {
           physics: die.physics,
           presentation: definition
             ? createCustomPhysicalPresentation(definition, physicalSlot.sides)
-            : undefined,
+            : intrinsicPhysicalPresentation(die, physicalSlot.sides),
           metadata: {
             ...definition?.metadata,
             ...die.metadata,
@@ -1019,6 +995,13 @@ export class DraftrollRenderer implements DiceRenderer {
         continue;
       }
 
+      const numericSides = numericPhysicalSides(die.type, die.sides);
+      if (numericSides !== null) {
+        throw new UnsupportedRollError(
+          `Physical d${numericSides} exceeds the exact physical-die budget`,
+          result,
+        );
+      }
       const index = fallbacks.length;
       fallbacks.push(createFallbackVisual(die, theme, outcome, definition));
       visualOrder.push({ kind: 'fallback', index, dieId: die.id });
@@ -1185,13 +1168,6 @@ export class DraftrollRenderer implements DiceRenderer {
     }
     this.assertPresentationGeneration(presentationGeneration);
     const physical: DraftrollPhysicalVisual[] = [];
-    // Deprecated canonical arrays remain populated for older custom bridges. Built-in Draftroll
-    // treats physical[] as authoritative and ignores these when the new field is present.
-    const numericResults: number[] = [];
-    const physicalKinds: DraftrollDieKind[] = [];
-    const themes: string[] = [];
-    const outcomes: DraftrollEffectOutcome[] = [];
-    const physics: DicePhysicsProperties[] = [];
     const fallbacks: DraftrollFallbackVisual[] = [];
     const visualOrder: DraftrollVisualOrderEntry[] = [];
     const tableRolls: TableRollContextEntry[] = [];
@@ -1201,13 +1177,6 @@ export class DraftrollRenderer implements DiceRenderer {
       const fallbackStart = fallbacks.length;
       entry.physical.forEach((visual) => {
         physical.push(clonePreparedPhysicalVisual(visual));
-        if (visual.canonicalKind) {
-          numericResults.push(visual.outcomeIndex + 1);
-          physicalKinds.push(visual.canonicalKind);
-          themes.push(visual.theme);
-          outcomes.push(visual.outcome);
-          physics.push({ ...visual.physics });
-        }
       });
       entry.fallbacks.forEach((fallback) => fallbacks.push({ ...fallback }));
       entry.visualOrder.forEach((visual) =>
@@ -1298,11 +1267,6 @@ export class DraftrollRenderer implements DiceRenderer {
     }
     const bridgePromise = this.bridge.roll({
       physical,
-      results: numericResults,
-      outcomes,
-      themes,
-      kinds: physicalKinds,
-      physics,
       physicsPreset: entries[0].options.physicsPreset,
       fallbacks,
       visualOrder,
@@ -1671,7 +1635,7 @@ function getWindowBridge(): DraftrollBridge | null {
 
 function normalizeKind(type: string, sides?: number): DraftrollDieKind | null {
   const normalized = type.toLowerCase();
-  if (normalized === 'd2') return 'coin';
+  if (normalized === 'd2' || normalized === 'coin') return 'coin';
   if (
     normalized === 'd4' ||
     normalized === 'd6' ||
@@ -1738,13 +1702,30 @@ function resolvePhysicalSlot(
   die: NormalizedDieResult,
   definition: CustomDiceDefinition | undefined,
 ): ResolvedPhysicalSlot | null {
-  if (definition && !definition.renderAs) return null;
-  if (!definition && isDistinctFallbackType(die.type)) return null;
-  const sourceType = definition?.renderAs ?? die.type;
+  const renderAs = definition?.renderAs?.toLowerCase();
+  if (renderAs === 'card' || renderAs === 'token') return null;
+
+  if (!definition) {
+    const normalized = die.type.toLowerCase();
+    if (normalized === 'df' || normalized === 'fate') {
+      const numeric = die.numericValue ?? Number(die.result);
+      const outcomeIndex = numeric < 0 ? 0 : numeric > 0 ? 4 : 2;
+      return Number.isFinite(numeric) ? { kind: 'd6', sides: 6, outcomeIndex } : null;
+    }
+    if (normalized === 'd10x') {
+      const value = typeof die.result === 'number' ? die.result : Number(die.result);
+      return Number.isInteger(value) && value >= 1 && value <= 10
+        ? { kind: 'd10', sides: 10, outcomeIndex: value - 1 }
+        : null;
+    }
+  }
+
+  const sourceType =
+    definition?.renderAs ?? (definition ? `d${definition.faces.length}` : die.type);
   const kind = normalizeKind(sourceType, definition ? undefined : die.sides);
   const sides = kind
     ? maximumPhysicalValue(kind)
-    : numericPhysicalSides(sourceType, definition ? undefined : die.sides);
+    : numericPhysicalSides(sourceType, definition ? definition.faces.length : die.sides);
   if (sides === null || sides > MAXIMUM_EXACT_PHYSICAL_SIDES) return null;
 
   if (definition) {
@@ -1752,9 +1733,43 @@ function resolvePhysicalSlot(
     return faceIndex === null ? null : { kind, sides, outcomeIndex: faceIndex % sides };
   }
 
+  if (die.type.toLowerCase() === 'coin') {
+    const label = String(die.result).toLowerCase();
+    if (label === 'heads') return { kind: 'coin', sides: 2, outcomeIndex: 0 };
+    if (label === 'tails') return { kind: 'coin', sides: 2, outcomeIndex: 1 };
+  }
   const value = typeof die.result === 'number' ? die.result : Number(die.result);
   if (!Number.isInteger(value) || value < 1 || value > sides) return null;
   return { kind, sides, outcomeIndex: value - 1 };
+}
+
+function intrinsicPhysicalPresentation(
+  die: NormalizedDieResult,
+  sides: number,
+): PhysicalDiePresentation | undefined {
+  const normalized = die.type.toLowerCase();
+  if (normalized === 'df' || normalized === 'fate') {
+    return {
+      contents: ['−', '−', '0', '0', '+', '+'].map((text) => ({ kind: 'text', text })),
+    };
+  }
+  if (normalized === 'd10x') {
+    return {
+      contents: Array.from({ length: 10 }, (_entry, index) => ({
+        kind: 'text' as const,
+        text: index === 9 ? '00' : String((index + 1) * 10),
+      })),
+    };
+  }
+  if (normalized === 'coin' && sides === 2) {
+    return {
+      contents: [
+        { kind: 'text', text: 'Heads' },
+        { kind: 'text', text: 'Tails' },
+      ],
+    };
+  }
+  return undefined;
 }
 
 function physicalFaceContent(face: CustomDieFace, slot: number): PhysicalDieFaceContent {
@@ -1913,18 +1928,6 @@ function stageGenerationSource(
   return sources.size === 1 ? [...sources][0] : 'mixed';
 }
 
-function isDistinctFallbackType(type: string): boolean {
-  const normalized = type.toLowerCase();
-  return (
-    normalized === 'coin' ||
-    normalized === 'd10x' ||
-    normalized === 'd%' ||
-    normalized === 'd100' ||
-    normalized === 'df' ||
-    normalized === 'fate'
-  );
-}
-
 function createFallbackVisual(
   die: NormalizedDieResult,
   theme: string,
@@ -1945,7 +1948,6 @@ function createFallbackVisual(
     sides: die.sides,
     title,
     label,
-    oppositeLabel: kind === 'coin' ? readOppositeCoinLabel(die, definition) : undefined,
     theme,
     outcome,
     metadata: {
@@ -1957,100 +1959,27 @@ function createFallbackVisual(
   };
 }
 
-function readOppositeCoinLabel(
-  die: NormalizedDieResult,
-  definition: CustomDiceDefinition | undefined,
-): string | undefined {
-  if (definition?.faces.length === 2) {
-    const selectedIndex =
-      die.faceIndex !== undefined
-        ? die.faceIndex
-        : definition.faces.findIndex((face) => face.result === die.result);
-    if (selectedIndex === 0 || selectedIndex === 1) {
-      const opposite = definition.faces[1 - selectedIndex];
-      return opposite.label ?? String(opposite.result);
-    }
-  }
-
-  const normalizedType = die.type.toLowerCase();
-  if (typeof die.result === 'number') {
-    if (normalizedType === 'd2' || (die.sides === 2 && die.result >= 1)) {
-      if (die.result === 1 || die.result === 2) return String(3 - die.result);
-    }
-    if (normalizedType === 'coin' && (die.result === 0 || die.result === 1)) {
-      return String(1 - die.result);
-    }
-  }
-
-  const result = String(die.result).toLowerCase();
-  if (result === 'heads') return 'Tails';
-  if (result === 'tails') return 'Heads';
-  return undefined;
-}
-
 function normalizeFallbackKind(
   renderAs: string | undefined,
-  normalizedType: string,
-  die: NormalizedDieResult,
+  _normalizedType: string,
+  _die: NormalizedDieResult,
 ): DraftrollFallbackKind {
-  if (
-    renderAs === 'coin' ||
-    renderAs === 'percentile' ||
-    renderAs === 'fate' ||
-    renderAs === 'spinner' ||
-    renderAs === 'token' ||
-    renderAs === 'card'
-  ) {
-    return renderAs;
-  }
-  if (normalizedType === 'd2' || normalizedType === 'coin' || die.sides === 2) return 'coin';
-  if (
-    normalizedType === 'd10x' ||
-    normalizedType === 'd%' ||
-    normalizedType === 'd100' ||
-    die.sides === 100
-  )
-    return 'percentile';
-  if (normalizedType === 'df' || normalizedType === 'fate') return 'fate';
-  if (die.customDiceId || typeof die.result === 'string') return 'card';
-  if (typeof die.sides === 'number' && Number.isFinite(die.sides)) return 'spinner';
-  return 'token';
+  return renderAs === 'card' ? 'card' : 'token';
 }
 
 function readDisplayTitle(
   die: NormalizedDieResult,
   definition: CustomDiceDefinition | undefined,
-  kind: DraftrollFallbackKind,
+  _kind: DraftrollFallbackKind,
 ): string {
   const metadataLabel = typeof die.metadata?.label === 'string' ? die.metadata.label : undefined;
   const definitionLabel =
     typeof definition?.metadata?.name === 'string' ? definition.metadata.name : undefined;
-  if (metadataLabel) return metadataLabel;
-  if (definitionLabel) return definitionLabel;
-  if (kind === 'coin') return 'Coin';
-  if (kind === 'percentile')
-    return die.type.toLowerCase() === 'd10x' ? 'Percentile tens' : 'Percentile';
-  if (kind === 'fate') return 'Fate die';
-  if (kind === 'spinner' && die.sides) return `d${die.sides}`;
-  return die.customDiceId ?? die.type;
+  return metadataLabel ?? definitionLabel ?? die.customDiceId ?? die.type;
 }
 
-function readDisplayLabel(die: NormalizedDieResult, kind: DraftrollFallbackKind): string {
-  if (die.faceLabel) return die.faceLabel;
-  if (kind === 'fate') {
-    const numeric = typeof die.result === 'number' ? die.result : Number(die.numericValue);
-    if (numeric === 1) return '+';
-    if (numeric === -1) return '−';
-    if (numeric === 0) return '0';
-  }
-  if (
-    kind === 'percentile' &&
-    die.type.toLowerCase() === 'd10x' &&
-    typeof die.result === 'number'
-  ) {
-    return String(die.result === 10 ? 0 : die.result * 10).padStart(2, '0');
-  }
-  return String(die.result);
+function readDisplayLabel(die: NormalizedDieResult, _kind: DraftrollFallbackKind): string {
+  return die.faceLabel ?? String(die.result);
 }
 
 function defaultOutcomeForDie(

@@ -7,6 +7,7 @@ export type { DieKind } from './physics-shapes';
 import { THEMES, type ThemeGeometryProfile, type ThemeName, type ThemePalette } from './themes';
 import {
   getRuntimeThemeFont,
+  getRuntimeThemeLabelStyle,
   getRuntimeThemeMaterial,
   getRuntimeThemeMesh,
   getRuntimeThemeTexture,
@@ -621,6 +622,7 @@ function createNumberAtlas(theme: ThemeName): THREE.CanvasTexture {
   const cached = numberAtlasCache.get(theme);
   if (cached) return cached;
   const palette = THEMES[theme] ?? THEMES.dragon;
+  const style = getRuntimeThemeLabelStyle(theme, 'default');
   const size = 1024;
   const cellWidth = size / ATLAS_COLUMNS;
   const cellHeight = size / ATLAS_ROWS;
@@ -652,12 +654,12 @@ function createNumberAtlas(theme: ThemeName): THREE.CanvasTexture {
     const fontSize = value >= 10 ? cellHeight * 0.48 : cellHeight * 0.57;
     const runtimeFont = getRuntimeThemeFont(theme);
     context.font = `700 ${fontSize}px ${runtimeFont ? `'${runtimeFont}', ` : ''}Cinzel, Georgia, serif`;
-    context.lineWidth = cellHeight * 0.055;
-    context.strokeStyle = outline;
-    context.shadowColor = palette.labelGlow;
+    context.lineWidth = fontSize * (style?.outlineWidth ?? 0.1);
+    context.strokeStyle = style?.outlineColor ?? outline;
+    context.shadowColor = style?.glowColor ?? palette.labelGlow;
     context.shadowBlur = engraved ? 3 : theme === 'tempest' ? 18 : 10;
     context.strokeText(String(value), x, y - cellHeight * 0.015);
-    context.fillStyle = palette.label;
+    context.fillStyle = style?.color ?? palette.label;
     context.fillText(String(value), x, y - cellHeight * 0.015);
     if (value === 6 || value === 9) {
       context.shadowBlur = engraved ? 2 : 4;

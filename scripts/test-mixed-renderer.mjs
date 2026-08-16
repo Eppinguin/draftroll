@@ -182,33 +182,33 @@ try {
   assert.equal(calls.length, 2);
   assert.deepEqual(
     calls[1].physical.map((visual) => visual.type),
-    ['d20', 'd2', 'd9'],
+    ['d20', 'd2', 'coin', 'dF', 'd9', 'd100'],
   );
   assert.deepEqual(
     calls[1].physical.map((visual) => visual.outcomeIndex),
-    [16, 1, 6],
+    [16, 1, 0, 0, 6, 81],
   );
   assert.deepEqual(
     calls[1].fallbacks.map((fallback) => fallback.kind),
-    ['coin', 'fate', 'percentile', 'card', 'token'],
+    ['card', 'token'],
   );
   assert.deepEqual(
     calls[1].visualOrder.map((entry) => entry.kind),
     [
       'physical',
       'physical',
-      'fallback',
-      'fallback',
       'physical',
-      'fallback',
+      'physical',
+      'physical',
+      'physical',
       'fallback',
       'fallback',
     ],
   );
-  assert.equal(calls[1].fallbacks[0].oppositeLabel, 'Tails');
-  assert.equal(calls[1].fallbacks[1].label, '−');
-  assert.equal(calls[1].fallbacks[3].label, 'Success');
-  assert.equal(calls[1].fallbacks[4].label, 'Storm');
+  assert.equal(calls[1].physical[2].presentation.contents[0].text, 'Heads');
+  assert.equal(calls[1].physical[3].presentation.contents[0].text, '−');
+  assert.equal(calls[1].fallbacks[0].label, 'Success');
+  assert.equal(calls[1].fallbacks[1].label, 'Storm');
 
   const totalOnly = {
     authority: 'local',

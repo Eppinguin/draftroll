@@ -73,15 +73,41 @@ export interface ThemeMaterialDefinition {
  *
  * @public
  */
-export interface ThemeLabelDefinition {
+export interface ThemeLabelStyleDefinition {
+  /** Main face-content color. */
   color?: string;
+  /** Optional glow around generated labels. */
   glowColor?: string;
+  /** CSS font family used for generated text and icon glyphs. */
   fontFamily?: string;
+  /** Outline color used for generated text and icon glyphs. */
+  outlineColor?: string;
+  /** Outline width relative to glyph size. Defaults to 0.08. */
+  outlineWidth?: number;
+  /** Physical label-plane scale multiplier. Defaults to 1. */
+  scale?: number;
+}
+
+/**
+ * Default physical label atlas and typography supplied by a theme.
+ *
+ * @public
+ */
+export interface ThemeLabelDefinition extends ThemeLabelStyleDefinition {
   font?: ThemeAssetReference;
-  /** A 5x4 atlas containing physical outcome slots 1 through 20; cells may be numbers or icons. */
+  /** A 5x4 atlas containing physical outcome slots 1 through 20. */
   atlas?: ThemeAssetReference;
-  /** Optional die-specific outcome-slot atlas override, including arbitrary dN identifiers. */
+  /** Optional die-specific atlas override. */
   atlases?: Partial<Record<ThemeDieType, ThemeAssetReference>>;
+}
+
+/**
+ * Label override for one physical die identifier.
+ *
+ * @public
+ */
+export interface ThemeDieLabelDefinition extends ThemeLabelStyleDefinition {
+  atlas?: ThemeAssetReference;
 }
 
 /**
@@ -133,6 +159,55 @@ export interface ThemePhysicsDefinition {
 }
 
 /**
+ * Semantic-agnostic content assigned to one physical outcome slot.
+ *
+ * @public
+ */
+export type ThemePhysicalFaceContent =
+  | { kind: 'number'; value: number; label?: string }
+  | { kind: 'text'; text: string }
+  | { kind: 'icon'; icon: string; label?: string }
+  | { kind: 'texture'; asset: ThemeAssetReference; label?: string };
+
+/**
+ * One-to-one presentation for a physical die's outcome slots.
+ *
+ * @public
+ */
+export interface ThemePhysicalPresentationDefinition {
+  contents: ThemePhysicalFaceContent[];
+}
+
+/**
+ * Independent overrides for one canonical, generated, or custom physical die.
+ *
+ * @public
+ */
+export interface ThemePhysicalDieOverride {
+  material?: ThemeMaterialDefinition;
+  labels?: ThemeDieLabelDefinition;
+  mesh?: ThemeMeshDefinition;
+  physics?: ThemePhysicsDefinition;
+  presentation?: ThemePhysicalPresentationDefinition;
+}
+
+/**
+ * Physical-die theme model.
+ *
+ * @remarks
+ * Geometry, material, label styling, physics, and semantic face content are independent. Themes
+ * may override any subset globally or for any physical die identifier without changing game rules.
+ *
+ * @public
+ */
+export interface ThemePhysicalDefinition {
+  material?: ThemeMaterialDefinition;
+  labels?: ThemeLabelDefinition;
+  physics?: ThemePhysicsDefinition;
+  dice?: Partial<Record<ThemeDieType, ThemePhysicalDieOverride>>;
+}
+
+/**
  * Optional feature flags advertised by a theme.
  *
  * @public
@@ -146,6 +221,7 @@ export interface DiceThemeCapabilities {
   effects?: boolean;
   meshes?: boolean;
   physics?: boolean;
+  faceContent?: boolean;
 }
 
 /**
@@ -164,15 +240,9 @@ export interface DiceTheme {
   previews?: Partial<Record<ThemeDieType | 'default', string>>;
   availableDice?: ThemeDieType[];
   capabilities?: DiceThemeCapabilities;
-  material?: ThemeMaterialDefinition;
-  materials?: Partial<Record<ThemeDieType, ThemeMaterialDefinition>>;
-  labels?: ThemeLabelDefinition;
-  meshes?: Partial<Record<ThemeDieType, ThemeMeshDefinition>>;
+  physical?: ThemePhysicalDefinition;
   audio?: ThemeAudioDefinition;
   effects?: Partial<Record<ThemeEffectOutcome, ThemeEffectPreset>>;
-  physics?: ThemePhysicsDefinition & {
-    dice?: Partial<Record<ThemeDieType, ThemePhysicsDefinition>>;
-  };
   metadata?: Record<string, unknown>;
 }
 
@@ -317,21 +387,9 @@ export function decodeDiceTheme(value: unknown): DiceTheme {
       readIdentifier(entry, `availableDice.${index}`),
     );
   }
-  validateMaterial(theme.material, 'material');
-  for (const [die, material] of Object.entries(theme.materials ?? {}))
-    validateMaterial(material, `materials.${die}`);
-  validateLabels(theme.labels);
+  validatePhysicalTheme(theme.physical);
   validateAsset(theme.audio?.impact, 'audio.impact');
   validateAsset(theme.audio?.roll, 'audio.roll');
-  for (const [die, mesh] of Object.entries(theme.meshes ?? {})) {
-    if (!mesh) continue;
-    validateAsset(mesh.asset, `meshes.${die}.asset`);
-    validateRange(mesh.scale, 0.05, 20, `meshes.${die}.scale`);
-    validateRange(mesh.maxVertices, 3, 250_000, `meshes.${die}.maxVertices`);
-  }
-  validatePhysics(theme.physics, 'physics');
-  for (const [die, physics] of Object.entries(theme.physics?.dice ?? {}))
-    validatePhysics(physics, `physics.dice.${die}`);
   return theme;
 }
 
@@ -346,19 +404,23 @@ export function listThemeAssetReferences(theme: DiceTheme): ThemeAssetReference[
     if (reference && !references.some((candidate) => candidate.src === reference.src))
       references.push(reference);
   };
-  add(theme.material?.surfaceTexture);
-  add(theme.material?.normalTexture);
-  add(theme.material?.roughnessTexture);
-  for (const material of Object.values(theme.materials ?? {})) {
-    if (!material) continue;
-    add(material.surfaceTexture);
-    add(material.normalTexture);
-    add(material.roughnessTexture);
+  add(theme.physical?.material?.surfaceTexture);
+  add(theme.physical?.material?.normalTexture);
+  add(theme.physical?.material?.roughnessTexture);
+  add(theme.physical?.labels?.font);
+  add(theme.physical?.labels?.atlas);
+  for (const atlas of Object.values(theme.physical?.labels?.atlases ?? {})) add(atlas);
+  for (const override of Object.values(theme.physical?.dice ?? {})) {
+    if (!override) continue;
+    add(override.material?.surfaceTexture);
+    add(override.material?.normalTexture);
+    add(override.material?.roughnessTexture);
+    add(override.labels?.atlas);
+    add(override.mesh?.asset);
+    for (const content of override.presentation?.contents ?? []) {
+      if (content.kind === 'texture') add(content.asset);
+    }
   }
-  add(theme.labels?.font);
-  add(theme.labels?.atlas);
-  for (const atlas of Object.values(theme.labels?.atlases ?? {})) add(atlas);
-  for (const mesh of Object.values(theme.meshes ?? {})) if (mesh) add(mesh.asset);
   add(theme.audio?.impact);
   add(theme.audio?.roll);
   return references;
@@ -386,8 +448,8 @@ export async function prepareRuntimeTheme(
   const manifest = decodeDiceTheme(await provider.getTheme(themeId, { signal: options.signal }));
   options.onEvent?.({ type: 'manifest', themeId });
   const references = listThemeAssetReferences(manifest);
-  if (references.length > 128)
-    throw new InvalidThemeError('A theme may reference at most 128 assets');
+  if (references.length > 512)
+    throw new InvalidThemeError('A theme may reference at most 512 assets');
   const assets: Record<string, ThemeResourceAsset> = {};
   const maxAsset = options.maximumAssetBytes ?? 8 * 1024 * 1024;
   const maxTotal = options.maximumTotalBytes ?? 24 * 1024 * 1024;
@@ -733,13 +795,89 @@ function validateMaterial(material: ThemeMaterialDefinition | undefined, path: s
   validateAsset(material.roughnessTexture, `${path}.roughnessTexture`);
 }
 
-function validateLabels(labels: ThemeLabelDefinition | undefined): void {
+function validateLabelStyle(labels: ThemeLabelStyleDefinition | undefined, path: string): void {
   if (!labels) return;
-  if (labels.fontFamily !== undefined) readText(labels.fontFamily, 'labels.fontFamily', 128);
-  validateAsset(labels.font, 'labels.font');
-  validateAsset(labels.atlas, 'labels.atlas');
+  if (labels.color !== undefined) readText(labels.color, `${path}.color`, 128);
+  if (labels.glowColor !== undefined) readText(labels.glowColor, `${path}.glowColor`, 128);
+  if (labels.fontFamily !== undefined) readText(labels.fontFamily, `${path}.fontFamily`, 128);
+  if (labels.outlineColor !== undefined) readText(labels.outlineColor, `${path}.outlineColor`, 128);
+  validateRange(labels.outlineWidth, 0, 0.25, `${path}.outlineWidth`);
+  validateRange(labels.scale, 0.25, 2, `${path}.scale`);
+}
+
+function validateLabels(labels: ThemeLabelDefinition | undefined, path: string): void {
+  if (!labels) return;
+  validateLabelStyle(labels, path);
+  validateAsset(labels.font, `${path}.font`);
+  validateAsset(labels.atlas, `${path}.atlas`);
   for (const [die, atlas] of Object.entries(labels.atlases ?? {}))
-    validateAsset(atlas, `labels.atlases.${die}`);
+    validateAsset(atlas, `${path}.atlases.${die}`);
+}
+
+function validateDieLabels(labels: ThemeDieLabelDefinition | undefined, path: string): void {
+  if (!labels) return;
+  validateLabelStyle(labels, path);
+  validateAsset(labels.atlas, `${path}.atlas`);
+}
+
+function validatePhysicalPresentation(
+  presentation: ThemePhysicalPresentationDefinition | undefined,
+  path: string,
+): void {
+  if (!presentation) return;
+  if (
+    !Array.isArray(presentation.contents) ||
+    presentation.contents.length < 1 ||
+    presentation.contents.length > 10_000
+  ) {
+    throw new InvalidThemeError(
+      'Physical presentation contents must contain 1 to 10000 entries',
+      `${path}.contents`,
+    );
+  }
+  presentation.contents.forEach((content, index) => {
+    const contentPath = `${path}.contents.${index}`;
+    if (!isRecord(content))
+      throw new InvalidThemeError('Physical face content must be an object', contentPath);
+    if (content.kind === 'number') {
+      if (typeof content.value !== 'number' || !Number.isFinite(content.value))
+        throw new InvalidThemeError(
+          'Physical number content requires a finite value',
+          `${contentPath}.value`,
+        );
+    } else if (content.kind === 'text') {
+      readText(content.text, `${contentPath}.text`, 128);
+    } else if (content.kind === 'icon') {
+      readText(content.icon, `${contentPath}.icon`, 128);
+    } else if (content.kind === 'texture') {
+      validateAsset(content.asset, `${contentPath}.asset`);
+    } else {
+      throw new InvalidThemeError('Unsupported physical face content kind', `${contentPath}.kind`);
+    }
+    if ('label' in content && content.label !== undefined)
+      readText(content.label, `${contentPath}.label`, 128);
+  });
+}
+
+function validatePhysicalTheme(physical: ThemePhysicalDefinition | undefined): void {
+  if (!physical) return;
+  validateMaterial(physical.material, 'physical.material');
+  validateLabels(physical.labels, 'physical.labels');
+  validatePhysics(physical.physics, 'physical.physics');
+  for (const [die, override] of Object.entries(physical.dice ?? {})) {
+    if (!override) continue;
+    readIdentifier(die, `physical.dice.${die}`);
+    const path = `physical.dice.${die}`;
+    validateMaterial(override.material, `${path}.material`);
+    validateDieLabels(override.labels, `${path}.labels`);
+    if (override.mesh) {
+      validateAsset(override.mesh.asset, `${path}.mesh.asset`);
+      validateRange(override.mesh.scale, 0.05, 20, `${path}.mesh.scale`);
+      validateRange(override.mesh.maxVertices, 3, 250_000, `${path}.mesh.maxVertices`);
+    }
+    validatePhysics(override.physics, `${path}.physics`);
+    validatePhysicalPresentation(override.presentation, `${path}.presentation`);
+  }
 }
 
 function validatePhysics(physics: ThemePhysicsDefinition | undefined, path: string): void {

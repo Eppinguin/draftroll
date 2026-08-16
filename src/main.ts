@@ -26,15 +26,16 @@ import {
 import { THEME_MANIFESTS, type ThemeManifest } from './themes';
 import { FallbackVisualInstance } from './fallback-visuals';
 import {
+  PhysicalDieVisualInstance,
   assignPendingPhysicalLaunchStates,
-  capturePhysicalFallbackReplay,
-  commitPhysicalFallbackPlan,
+  captureAdditionalPhysicalReplay,
+  commitAdditionalPhysicalPlan,
+  getAdditionalPhysicalPlanEntries,
   getPendingPhysicalLaunchParticipants,
-  getPhysicalFallbackPlanEntries,
-  hasConfiguredPhysicalFallbackDice,
-  hasPendingPhysicalFallbackDice,
-  restorePhysicalFallbackReplay,
-  type PhysicalFallbackReplay,
+  hasConfiguredAdditionalPhysicalDice,
+  hasPendingAdditionalPhysicalDice,
+  restoreAdditionalPhysicalReplay,
+  type AdditionalPhysicalReplay,
 } from './physical-die-visuals';
 import {
   createPhysicalLaunchStates,
@@ -66,6 +67,7 @@ import {
   getRuntimeThemeAudio,
   getRuntimeThemeEffects,
   getRuntimeThemePhysics,
+  getRuntimeThemePresentation,
   installRuntimeThemeBundle,
   isRecord,
   uninstallRuntimeTheme,
@@ -81,16 +83,8 @@ export interface RollEffectContext {
 }
 
 export interface DiceRollRequest {
-  /** First-class physical dice. Legacy results/kinds remain accepted for backwards compatibility. */
   physical?: DraftrollPhysicalVisual[];
-  results?: number[] | number;
-  outcomes?: EffectOutcome[] | EffectOutcome;
-  themes?: ThemeName[] | ThemeName;
-  /** Physical die type for each physical result. A single value is repeated. */
-  kinds?: DieKind[] | DieKind;
-  /** Token/card fallbacks animated alongside supported physical dice. */
   fallbacks?: DraftrollFallbackVisual[];
-  /** Normalized ordering across physical dice and fallback visuals. */
   visualOrder?: DraftrollVisualOrderEntry[];
   context?: Record<string, unknown>;
   seed?: string | number;
@@ -100,11 +94,9 @@ export interface DiceRollRequest {
   settleImmediately?: boolean;
   lateMode?: RendererLateEventMode;
   settleAfterProgress?: number;
-  /** Add this roll to the active table simulation when possible. */
   tableMode?: 'replace' | 'add';
   signal?: AbortSignal;
   reducedMotion?: boolean;
-  physics?: DicePhysicsProperties[];
   physicsPreset?: 'standard' | 'compact' | 'heavy' | 'low-gravity';
 }
 
@@ -200,31 +192,18 @@ export interface RollReplay {
   engineVersion: string;
   seed: string;
   createdAt: string;
-  dieKind: DieKind;
-  /** Per-die physical kinds. Missing in legacy homogeneous replays. */
-  dieKinds?: DieKind[];
-  theme: ThemeName;
-  themes?: ThemeName[];
-  /** Per-die physical overrides captured for deterministic replay. */
-  physics?: DicePhysicsProperties[];
-  /** Room/application-selected physical behavior preset. */
+  physical: DraftrollPhysicalVisual[];
   physicsPreset?: DicePhysicsPreset;
-  quantity: number;
   bounds: { x: number; z: number };
   step: number;
   frameCount: number;
   duration: number;
   transforms: Float32Array;
-  /** Per-die release time used by large-pool pours. Missing in legacy replays. */
   activationDelays?: Float32Array;
-  /** Earliest time each die remains at its authoritative final pose. */
   settleTimes?: Float32Array;
   impacts: Float32Array;
-  results: number[];
-  outcomes: EffectOutcome[];
   fallbacks?: DraftrollFallbackVisual[];
-  /** Recorded arbitrary physical-die trajectories owned by the shared planner. */
-  physicalFallbackReplay?: PhysicalFallbackReplay;
+  additionalPhysicalReplay?: AdditionalPhysicalReplay;
   visualOrder?: DraftrollVisualOrderEntry[];
   context: Record<string, unknown>;
   effectTimeline: RollReplayEvent[];
@@ -235,7 +214,7 @@ export interface RollReplay {
 declare global {
   interface Window {
     draftrollDice: {
-      roll: (request?: DiceRollRequest | number[] | number) => Promise<DraftrollRollCompletion>;
+      roll: (request?: DiceRollRequest) => Promise<DraftrollRollCompletion>;
       setResults: (results: number[] | number) => void;
       clearResults: () => void;
       setDie: (kind: DieKind) => void;
@@ -713,6 +692,7 @@ let selectedKind: DieKind = 'd20';
 let selectedTheme: ThemeName = 'dragon';
 let quantity = 1;
 let dice: DieInstance[] = [];
+let additionalPhysicalVisuals: PhysicalDieVisualInstance[] = [];
 let fallbackVisuals: FallbackVisualInstance[] = [];
 let isRolling = false;
 let isPlanning = false;
@@ -720,6 +700,7 @@ let hasCast = false;
 let dissolveAnimation: Animation | null = null;
 let dissolveGeneration = 0;
 let collisionSparkBudget = 0;
+let queuedPhysical: DraftrollPhysicalVisual[] | null = null;
 let queuedApiResults: number[] | null = null;
 let queuedOutcomes: EffectOutcome[] | null = null;
 let queuedContext: Record<string, unknown> = {};
@@ -757,6 +738,9 @@ let activeOutcomes: EffectOutcome[] = [];
 const playedOutcomeEffectIds = new Set<string>();
 const outcomeHeroCounts = new Map<string, number>();
 const announcedOutcomeGroupIds = new Set<string>();
+let activePhysicalSpecs: DraftrollPhysicalVisual[] = [];
+let activeCanonicalPhysicalIndexes: number[] = [];
+let activeAdditionalPhysicalIndexes: number[] = [];
 let activeFallbackSpecs: DraftrollFallbackVisual[] = [];
 let activeVisualOrder: DraftrollVisualOrderEntry[] = [];
 let activeContext: Record<string, unknown> = {};
@@ -976,7 +960,7 @@ function currentPerformanceBudget(): { maximumPixelRatio: number; activeFramesPe
     profile: performanceProfile,
     overlay: OVERLAY_MODE,
     reducedMotion: REDUCED_MOTION,
-    visualCount: quantity + activeFallbackSpecs.length,
+    visualCount: activePhysicalSpecs.length + activeFallbackSpecs.length,
     devicePixelRatio: window.devicePixelRatio || 1,
     maximumPixelRatio: configuredMaximumPixelRatio ?? undefined,
     activeFramesPerSecond: configuredActiveFramesPerSecond ?? undefined,
@@ -1075,36 +1059,54 @@ function createSeededRandom(seed: string): () => number {
   };
 }
 
+function clonePhysicalVisual(visual: DraftrollPhysicalVisual): DraftrollPhysicalVisual {
+  return {
+    ...visual,
+    physics: visual.physics ? { ...visual.physics } : undefined,
+    presentation: visual.presentation
+      ? { contents: visual.presentation.contents.map((content) => ({ ...content })) }
+      : undefined,
+    metadata: visual.metadata ? { ...visual.metadata } : undefined,
+  };
+}
+
+function cloneFallbackVisual(fallback: DraftrollFallbackVisual): DraftrollFallbackVisual {
+  return Object.assign({}, fallback, {
+    metadata: fallback.metadata ? Object.assign({}, fallback.metadata) : undefined,
+  });
+}
+
 function cloneReplay(replay: RollReplay): RollReplay {
   return {
     ...replay,
+    physical: replay.physical.map(clonePhysicalVisual),
     bounds: { ...replay.bounds },
     transforms: replay.transforms.slice(),
     activationDelays: replay.activationDelays?.slice(),
     settleTimes: replay.settleTimes?.slice(),
     impacts: replay.impacts.slice(),
-    results: replay.results.slice(),
-    outcomes: replay.outcomes.slice(),
-    fallbacks: replay.fallbacks?.map((fallback) => ({
-      ...fallback,
-      metadata: fallback.metadata ? { ...fallback.metadata } : undefined,
-    })),
-    physicalFallbackReplay: replay.physicalFallbackReplay
+    fallbacks: replay.fallbacks?.map(cloneFallbackVisual),
+    additionalPhysicalReplay: replay.additionalPhysicalReplay
       ? {
-          ids: replay.physicalFallbackReplay.ids.slice(),
-          step: replay.physicalFallbackReplay.step,
-          frameCount: replay.physicalFallbackReplay.frameCount,
-          transforms: replay.physicalFallbackReplay.transforms.slice(),
-          landings: replay.physicalFallbackReplay.landings.slice(),
+          ids: replay.additionalPhysicalReplay.ids.slice(),
+          step: replay.additionalPhysicalReplay.step,
+          frameCount: replay.additionalPhysicalReplay.frameCount,
+          transforms: replay.additionalPhysicalReplay.transforms.slice(),
+          landings: replay.additionalPhysicalReplay.landings.slice(),
         }
       : undefined,
     visualOrder: replay.visualOrder?.map((entry) => ({ ...entry })),
-    themes: replay.themes?.slice(),
-    dieKinds: replay.dieKinds?.slice(),
-    physics: replay.physics?.map((entry) => ({ ...entry })),
     context: { ...replay.context },
     effectTimeline: replay.effectTimeline.map((event) => ({ ...event })),
   };
+}
+
+function clearAdditionalPhysicalVisuals(): void {
+  for (const visual of additionalPhysicalVisuals) {
+    scene.remove(visual.group);
+    visual.dispose();
+  }
+  additionalPhysicalVisuals = [];
 }
 
 function clearFallbackVisuals(): void {
@@ -1126,7 +1128,24 @@ function clearDice(): void {
     die.dispose();
   }
   dice = [];
+  clearAdditionalPhysicalVisuals();
   clearFallbackVisuals();
+}
+
+function spawnAdditionalPhysicalVisuals(
+  specs: readonly DraftrollPhysicalVisual[],
+  seed: string,
+): void {
+  clearAdditionalPhysicalVisuals();
+  if (specs.length === 0) return;
+  const random = createSeededRandom(`${seed}:additional-physical`);
+  const occupied: THREE.Vector2[] = [];
+  additionalPhysicalVisuals = specs.map((spec, index) => {
+    const visual = new PhysicalDieVisualInstance(spec);
+    visual.configureTrajectory(index, specs.length, screenBounds, random, occupied);
+    scene.add(visual.group);
+    return visual;
+  });
 }
 
 function spawnFallbackVisuals(specs: readonly DraftrollFallbackVisual[], seed: string): void {
@@ -1553,12 +1572,42 @@ function applyDiePhysicsRuntime(die: DieInstance, presetName: DicePhysicsPreset)
   die.body.angularDamping = preset.angularDamping;
 }
 
+function usesCanonicalPhysicalImplementation(visual: DraftrollPhysicalVisual): boolean {
+  if (!visual.canonicalKind || !isDieKind(visual.canonicalKind) || visual.presentation)
+    return false;
+  return !getRuntimeThemePresentation(visual.theme, visual.type, visual.canonicalKind);
+}
+
+function splitPhysicalSpecs(physical: readonly DraftrollPhysicalVisual[]): {
+  canonicalIndexes: number[];
+  additionalIndexes: number[];
+} {
+  const canonicalIndexes: number[] = [];
+  const additionalIndexes: number[] = [];
+  physical.forEach((visual, index) => {
+    (usesCanonicalPhysicalImplementation(visual) ? canonicalIndexes : additionalIndexes).push(
+      index,
+    );
+  });
+  return { canonicalIndexes, additionalIndexes };
+}
+
+function currentAdditionalPhysicalSpecs(): DraftrollPhysicalVisual[] {
+  return activeAdditionalPhysicalIndexes.flatMap((index) => {
+    const visual = activePhysicalSpecs[index];
+    return visual ? [visual] : [];
+  });
+}
+
 function prepareTargets(): boolean {
+  const requestedPhysical = queuedPhysical?.map(clonePhysicalVisual) ?? null;
+  queuedPhysical = null;
   const explicitResultCount = queuedApiResults !== null ? queuedApiResults.length : null;
   const explicitKindCount = Array.isArray(queuedKinds) ? queuedKinds.length : null;
   const fallbackOnlyRequest =
     queuedFallbacks !== null &&
     queuedFallbacks.length > 0 &&
+    (requestedPhysical?.length ?? 0) === 0 &&
     queuedApiResults === null &&
     queuedKinds === null;
   const requestedCount = fallbackOnlyRequest
@@ -1581,7 +1630,8 @@ function prepareTargets(): boolean {
     metadata: fallback.metadata ? { ...fallback.metadata } : undefined,
   }));
   queuedFallbacks = null;
-  if (kinds.length + fallbacks.length < 1 || kinds.length + fallbacks.length > 30) {
+  const physicalVisualCount = requestedPhysical?.length ?? kinds.length;
+  if (physicalVisualCount + fallbacks.length < 1 || physicalVisualCount + fallbacks.length > 30) {
     setStatus('A visual roll must contain between 1 and 30 components', false);
     return false;
   }
@@ -1624,8 +1674,43 @@ function prepareTargets(): boolean {
     requested.length > 0
       ? requested.map((value) => value)
       : Array.from({ length: quantity }, () => null);
+  if (requestedPhysical) {
+    activePhysicalSpecs = requestedPhysical;
+    const split = splitPhysicalSpecs(requestedPhysical);
+    activeCanonicalPhysicalIndexes = split.canonicalIndexes;
+    activeAdditionalPhysicalIndexes = split.additionalIndexes;
+    if (activeCanonicalPhysicalIndexes.length !== quantity) {
+      setStatus('Physical implementation split does not match canonical dice', false);
+      return false;
+    }
+  } else {
+    activePhysicalSpecs = kinds.map((kind, index) => {
+      const maximum = maximumDieValue(kind);
+      const target = requested[index] ?? 1;
+      return {
+        id: `physical_${index}`,
+        type: kind === 'coin' ? 'd2' : kind,
+        sides: maximum,
+        outcomeIndex: THREE.MathUtils.clamp(Math.round(target), 1, maximum) - 1,
+        result: target,
+        numericValue: target,
+        canonicalKind: kind,
+        title: kind === 'coin' ? 'Coin' : kind,
+        label: String(target),
+        theme: activeThemes[index] ?? selectedTheme,
+        outcome: 'neutral',
+        metadata: { draftrollManualPhysical: true },
+      };
+    });
+    activeCanonicalPhysicalIndexes = activePhysicalSpecs.map((_entry, index) => index);
+    activeAdditionalPhysicalIndexes = [];
+  }
   activeFallbackSpecs = fallbacks;
-  activeVisualOrder = normalizeVisualOrder(queuedVisualOrder, quantity, fallbacks.length);
+  activeVisualOrder = normalizeVisualOrder(
+    queuedVisualOrder,
+    activePhysicalSpecs.length,
+    fallbacks.length,
+  );
   queuedVisualOrder = null;
   if (activeVisualOrder.length !== quantity + fallbacks.length) {
     setStatus('Visual ordering does not match the roll components', false);
@@ -1636,6 +1721,7 @@ function prepareTargets(): boolean {
   queuedContext = {};
   activeSeed = normalizeSeed(queuedSeed);
   queuedSeed = null;
+  spawnAdditionalPhysicalVisuals(currentAdditionalPhysicalSpecs(), activeSeed);
   spawnFallbackVisuals(activeFallbackSpecs, activeSeed);
   activeStartAtMs = queuedStartAtMs;
   activeSeekToMs = queuedSeekToMs;
@@ -1791,7 +1877,11 @@ function createMixedPhysicalLaunchStates(
 }
 
 function allCanonicalLaunchParticipants(): CanonicalLaunchParticipant[] {
-  return dice.map((die, index) => ({ die, index, id: physicalVisualId(index) }));
+  return dice.map((die, index) => ({
+    die,
+    index,
+    id: physicalVisualId(activeCanonicalPhysicalIndexes[index] ?? index),
+  }));
 }
 
 function createLaunchStates(swipe: THREE.Vector2 | undefined, seed: string): LaunchState[] {
@@ -2195,7 +2285,7 @@ function getRollWorker(): Worker | null {
     if (!pending) return;
     pendingPlans.delete(response.id);
     if (response.additionalTransforms && response.additionalLandings) {
-      commitPhysicalFallbackPlan(
+      commitAdditionalPhysicalPlan(
         new Float32Array(response.additionalTransforms),
         response.frameCount,
         response.step,
@@ -2392,7 +2482,7 @@ async function buildRollPlan(
   preservedCount = 0,
   lockedTrajectory?: LockedTableTrajectory,
 ): Promise<RollPlan> {
-  const additional = getPhysicalFallbackPlanEntries();
+  const additional = getAdditionalPhysicalPlanEntries();
   const worker = getRollWorker();
   if (!worker) {
     if (preservedCount > 0 || additional.length > 0) {
@@ -2561,13 +2651,8 @@ function captureReplay(plan: RollPlan): void {
     engineVersion: ENGINE_VERSION,
     seed: activeSeed,
     createdAt: new Date().toISOString(),
-    dieKind: activeKinds[0] ?? selectedKind,
-    dieKinds: activeKinds.slice(),
-    theme: selectedTheme,
-    themes: activeThemes.slice(),
-    physics: activePhysics.map((entry) => ({ ...entry })),
+    physical: activePhysicalSpecs.map(clonePhysicalVisual),
     physicsPreset: activePhysicsPreset,
-    quantity,
     bounds: { x: screenBounds.x, z: screenBounds.z },
     step: plan.step,
     frameCount: plan.frameCount,
@@ -2576,13 +2661,8 @@ function captureReplay(plan: RollPlan): void {
     activationDelays: plan.activationDelays?.slice(),
     settleTimes: plan.settleTimes?.slice(),
     impacts: packImpacts(plan.impacts),
-    results: plan.results.slice(),
-    outcomes: activeOutcomes.slice(),
-    fallbacks: activeFallbackSpecs.map((fallback) => ({
-      ...fallback,
-      metadata: fallback.metadata ? { ...fallback.metadata } : undefined,
-    })),
-    physicalFallbackReplay: capturePhysicalFallbackReplay(),
+    fallbacks: activeFallbackSpecs.map(cloneFallbackVisual),
+    additionalPhysicalReplay: captureAdditionalPhysicalReplay(),
     visualOrder: activeVisualOrder.map((entry) => ({ ...entry })),
     context: { ...activeContext },
     effectTimeline: createEffectTimeline(plan, activeOutcomes),
@@ -2605,7 +2685,11 @@ function beginPlanPlayback(
   isRolling = true;
   collisionSparkBudget = Math.max(
     6,
-    Math.min(48, (quantity + activeFallbackSpecs.length) * runtimeQuality.impactEffectsPerDie),
+    Math.min(
+      48,
+      (activePhysicalSpecs.length + activeFallbackSpecs.length) *
+        runtimeQuality.impactEffectsPerDie,
+    ),
   );
   resultPanel.classList.remove('revealed', 'critical');
   resultTotal.textContent = '…';
@@ -2655,6 +2739,7 @@ function beginPlanPlayback(
   // a preview pose, a provisional spawn layout, or an earlier candidate.
   applyPlanTransform(plan, planTime);
   const fallbackProgress = plan.duration > 0 ? planTime / plan.duration : 1;
+  additionalPhysicalVisuals.forEach((visual) => visual.update(fallbackProgress, plan.duration));
   fallbackVisuals.forEach((visual) => visual.update(fallbackProgress, plan.duration));
   if (OVERLAY_MODE) {
     // Paint the first committed frame before notifying the host. The host keeps
@@ -2666,6 +2751,7 @@ function beginPlanPlayback(
   }
   requestRender();
   if (settleImmediately) {
+    additionalPhysicalVisuals.forEach((visual) => visual.settle());
     fallbackVisuals.forEach((visual) => visual.settle());
     if (document.hidden) markOutcomeEffectsThrough(plan, plan.duration);
     else playSettledOutcomeEffects(plan, plan.duration);
@@ -2701,62 +2787,61 @@ function playRecordedReplay(
     return Promise.reject(new Error('Renderer is busy or replay format is unsupported'));
   rebuildScreenBounds();
   applyRendererResolution();
-  // Defensive copy of the caller-supplied replay payload.
-  // oxlint-disable-next-line oxc/no-map-spread
-  const replayFallbacks = (replay.fallbacks ?? []).map((fallback) => ({
-    ...fallback,
-    metadata: fallback.metadata ? { ...fallback.metadata } : undefined,
-  }));
-  const replayKinds =
-    replay.dieKinds?.length === replay.quantity
-      ? replay.dieKinds.slice()
-      : Array.from({ length: replay.quantity }, () => replay.dieKind);
-  const supportedKinds = new Set<DieKind>(['coin', 'd4', 'd6', 'd8', 'd10', 'd12', 'd20']);
-  if (replayKinds.some((kind) => !supportedKinds.has(kind)))
-    return Promise.reject(new Error('Replay die type is unsupported'));
-  const totalVisuals = replay.quantity + replayFallbacks.length;
-  if (!THEME_MANIFESTS[replay.theme] || totalVisuals < 1 || totalVisuals > 30)
-    return Promise.reject(new Error('Replay theme or visual count is invalid'));
-  const expectedTransforms = replay.frameCount * replay.quantity * 7;
-  if (replay.transforms.length !== expectedTransforms || replay.results.length !== replay.quantity)
-    return Promise.reject(new Error('Replay buffers are invalid'));
 
-  selectedKind = replayKinds[0] ?? replay.dieKind;
-  selectedTheme = replay.theme;
-  activeThemes =
-    normalizeThemes(replay.themes ?? (replay.quantity > 0 ? replay.theme : []), replay.quantity) ??
-    Array.from({ length: replay.quantity }, () => replay.theme);
-  activeKinds = replayKinds;
+  const physical = replay.physical.map(clonePhysicalVisual);
+  const fallbacks = (replay.fallbacks ?? []).map(cloneFallbackVisual);
+  const split = splitPhysicalSpecs(physical);
+  const canonical = split.canonicalIndexes.map((index) => physical[index]);
+  const additional = split.additionalIndexes.map((index) => physical[index]);
+  const kinds = canonical.map((visual) => visual.canonicalKind).filter(isDieKind);
+  if (kinds.length !== canonical.length)
+    return Promise.reject(new Error('Replay canonical physical descriptors are invalid'));
+  const themes = canonical.map((visual) => visual.theme);
+  if (physical.some((visual) => !THEME_MANIFESTS[visual.theme]))
+    return Promise.reject(new Error('Replay references an unavailable theme'));
+  const totalVisuals = physical.length + fallbacks.length;
+  if (totalVisuals < 1 || totalVisuals > 30)
+    return Promise.reject(new Error('Replay visual count is invalid'));
+  const expectedTransforms = replay.frameCount * canonical.length * 7;
+  if (replay.transforms.length !== expectedTransforms)
+    return Promise.reject(new Error('Replay transform buffer is invalid'));
+
+  selectedKind = kinds[0] ?? 'd20';
+  selectedTheme = physical[0]?.theme ?? fallbacks[0]?.theme ?? 'dragon';
+  activePhysicalSpecs = physical;
+  activeCanonicalPhysicalIndexes = split.canonicalIndexes;
+  activeAdditionalPhysicalIndexes = split.additionalIndexes;
+  activeKinds = kinds;
+  quantity = canonical.length;
+  activeThemes = themes;
   activePhysicsPreset = replay.physicsPreset ?? 'standard';
   activePhysics =
     normalizePhysicalProperties(
-      replay.physics ?? null,
-      replayKinds,
+      canonical.map((visual) => visual.physics ?? {}),
+      activeKinds,
       activeThemes,
       activePhysicsPreset,
-    ) ?? Array.from({ length: replay.quantity }, () => ({}));
+    ) ?? Array.from({ length: quantity }, () => ({}));
   world.gravity.set(0, -PHYSICS_PRESETS[activePhysicsPreset].gravity, 0);
-  spawnPreview(replayKinds, true);
+  spawnPreview(activeKinds, true);
   applyRuntimeQuality(totalVisuals);
   activeSeed = replay.seed;
-  activeTargets = replay.results.slice();
-  activeOutcomes =
-    normalizeOutcomes(replay.outcomes, replay.quantity) ??
-    Array.from({ length: replay.quantity }, () => 'neutral');
-  activeFallbackSpecs = replayFallbacks;
+  activeTargets = canonical.map((visual) => visual.outcomeIndex + 1);
+  activeOutcomes = canonical.map((visual) => visual.outcome);
+  activeFallbackSpecs = fallbacks;
   activeVisualOrder = normalizeVisualOrder(
     replay.visualOrder ?? null,
-    replay.quantity,
-    replayFallbacks.length,
+    physical.length,
+    fallbacks.length,
   );
   if (activeVisualOrder.length !== totalVisuals)
     return Promise.reject(new Error('Replay visual ordering is invalid'));
+  spawnAdditionalPhysicalVisuals(additional, activeSeed);
   spawnFallbackVisuals(activeFallbackSpecs, activeSeed);
-  if (replay.physicalFallbackReplay) {
-    restorePhysicalFallbackReplay(replay.physicalFallbackReplay);
-  }
+  if (replay.additionalPhysicalReplay)
+    restoreAdditionalPhysicalReplay(replay.additionalPhysicalReplay);
   dice.forEach((die, index) => {
-    die.setTheme(activeThemes[index] ?? replay.theme);
+    die.setTheme(activeThemes[index] ?? selectedTheme);
     applyDiePhysicsRuntime(die, activePhysicsPreset);
   });
   activeContext = { ...replay.context };
@@ -2771,17 +2856,14 @@ function playRecordedReplay(
   const plan: RollPlan = {
     step: replay.step,
     frameCount: replay.frameCount,
-    dieCount: replay.quantity,
+    dieCount: quantity,
     transforms: replay.transforms.slice(),
     activationDelays:
-      replay.activationDelays?.length === replay.quantity
-        ? replay.activationDelays.slice()
-        : undefined,
-    settleTimes:
-      replay.settleTimes?.length === replay.quantity ? replay.settleTimes.slice() : undefined,
+      replay.activationDelays?.length === quantity ? replay.activationDelays.slice() : undefined,
+    settleTimes: replay.settleTimes?.length === quantity ? replay.settleTimes.slice() : undefined,
     impacts,
     duration: replay.duration,
-    results: replay.results.slice(),
+    results: canonical.map((visual) => visual.outcomeIndex + 1),
     settleReason: replay.settleReason,
     physicsSteps: replay.physicsSteps,
     sourceBounds: { ...replay.bounds },
@@ -2819,9 +2901,9 @@ function createRollCompletionPromise(): Promise<DraftrollRollCompletion> {
 
 function createFallbackOnlyPlan(specs: readonly DraftrollFallbackVisual[]): RollPlan {
   const count = specs.length;
-  const duration = specs.some((spec) => spec.kind === 'coin')
-    ? 2.05 + Math.min(0.2, count * 0.012)
-    : 1.45 + Math.min(0.85, count * 0.045);
+  const duration = specs.some((spec) => spec.kind === 'card')
+    ? 1.7 + Math.min(0.5, count * 0.04)
+    : 1.35 + Math.min(0.7, count * 0.04);
   const step = FIXED_STEP;
   return {
     step,
@@ -2870,299 +2952,105 @@ function createStaticTablePlan(duration: number): RollPlan {
   return plan;
 }
 
-function cloneBridgePhysicalPresentation(
-  presentation: DraftrollPhysicalVisual['presentation'],
-): DraftrollPhysicalVisual['presentation'] {
-  return presentation
-    ? { contents: presentation.contents.map((content) => ({ ...content })) }
-    : undefined;
+interface NormalizedPhysicalBridgeRequest {
+  physical: DraftrollPhysicalVisual[];
+  canonicalResults: number[];
+  canonicalKinds: DieKind[];
+  canonicalThemes: ThemeName[];
+  canonicalOutcomes: EffectOutcome[];
+  canonicalPhysics: DicePhysicsProperties[];
+  canonicalPhysicalIndexes: number[];
+  additionalPhysical: DraftrollPhysicalVisual[];
+  additionalPhysicalIndexes: number[];
+  fallbacks: DraftrollFallbackVisual[];
+  visualOrder: DraftrollVisualOrderEntry[];
+  context: Record<string, unknown>;
+  seed: string | number | undefined;
+  startAtMs: number | undefined;
+  seekToMs: number | undefined;
+  animationDurationMs: number | undefined;
+  settleImmediately: boolean | undefined;
+  lateMode: RendererLateEventMode | undefined;
+  settleAfterProgress: number | undefined;
+  tableMode: 'replace' | 'add' | undefined;
+  reducedMotion: boolean | undefined;
+  physicsPreset: DicePhysicsPreset;
 }
 
-function physicalBridgeFallback(visual: DraftrollPhysicalVisual): DraftrollFallbackVisual {
-  return {
-    id: visual.id,
-    type: visual.type,
-    kind: 'spinner',
-    result: visual.outcomeIndex + 1,
-    numericValue: visual.outcomeIndex + 1,
-    sides: visual.sides,
-    title: visual.title,
-    label: visual.label,
-    theme: visual.theme,
-    outcome: visual.outcome,
-    metadata: {
-      ...visual.metadata,
-      draftrollPhysicalModel: true,
-      draftrollPhysicalOutcomeIndex: visual.outcomeIndex,
-      draftrollPhysicalSemanticResult: visual.result,
-      ...(visual.presentation
-        ? { draftrollPhysicalPresentation: cloneBridgePhysicalPresentation(visual.presentation) }
-        : {}),
-    },
-  };
-}
-
-function translatePhysicalTableContext(
-  context: Record<string, unknown>,
-  visualOrder: readonly DraftrollVisualOrderEntry[],
-): Record<string, unknown> {
-  const raw = Array.isArray(context.tableRolls) ? context.tableRolls : null;
-  if (!raw) return context;
-  const tableRolls: unknown[] = [];
-  for (const value of raw) {
-    if (!isRecord(value) || !Array.isArray(value.dieIds)) {
-      tableRolls.push(value);
-      continue;
-    }
-    const dieIds = value.dieIds.filter((id): id is string => typeof id === 'string');
-    const ids = new Set(dieIds);
-    const physicalIndexes = visualOrder
-      .filter((entry) => entry.kind === 'physical' && ids.has(entry.dieId))
-      .map((entry) => entry.index);
-    const fallbackIndexes = visualOrder
-      .filter((entry) => entry.kind === 'fallback' && ids.has(entry.dieId))
-      .map((entry) => entry.index);
-    tableRolls.push(
-      Object.assign({}, value, {
-        dieIds,
-        physicalStart: physicalIndexes.length > 0 ? Math.min(...physicalIndexes) : 0,
-        physicalCount: physicalIndexes.length,
-        fallbackStart: fallbackIndexes.length > 0 ? Math.min(...fallbackIndexes) : 0,
-        fallbackCount: fallbackIndexes.length,
-        visualCount: physicalIndexes.length + fallbackIndexes.length,
-      }),
-    );
-  }
-  return { ...context, tableRolls };
-}
-
-/**
- * Converts the new all-physical bridge contract into the engine's temporary canonical/supplemental
- * storage layout. The distinction stops here: the shared worker receives both as physical bodies.
- */
-function normalizePhysicalBridgeRequest(request: DiceRollRequest): DiceRollRequest {
-  if (!request.physical) return request;
-  const physical = request.physical.map((visual) => ({
-    ...visual,
-    physics: visual.physics ? { ...visual.physics } : undefined,
-    presentation: cloneBridgePhysicalPresentation(visual.presentation),
-    metadata: visual.metadata ? { ...visual.metadata } : undefined,
-  }));
-  const canonicalResults: number[] = [];
-  const canonicalKinds: DieKind[] = [];
-  const canonicalThemes: ThemeName[] = [];
-  const canonicalOutcomes: EffectOutcome[] = [];
-  const canonicalPhysics: DicePhysicsProperties[] = [];
-  const canonicalByPublicIndex = new Map<number, number>();
-  const generatedByPublicIndex = new Map<number, number>();
-  const generatedFallbacks: DraftrollFallbackVisual[] = [];
-
-  physical.forEach((visual, publicIndex) => {
+function normalizePhysicalBridgeRequest(request: DiceRollRequest): NormalizedPhysicalBridgeRequest {
+  const physical = (request.physical ?? []).map(clonePhysicalVisual);
+  physical.forEach((visual) => {
     if (
       !Number.isSafeInteger(visual.sides) ||
       visual.sides < 1 ||
       visual.sides > 256 ||
       !Number.isSafeInteger(visual.outcomeIndex) ||
       visual.outcomeIndex < 0 ||
-      visual.outcomeIndex >= visual.sides
+      visual.outcomeIndex >= visual.sides ||
+      !THEME_MANIFESTS[visual.theme]
     ) {
       throw new Error(`Invalid physical die descriptor: ${visual.id}`);
     }
-    const canonicalKind =
-      visual.canonicalKind && isDieKind(visual.canonicalKind)
-        ? visual.canonicalKind
-        : isDieKind(visual.type)
-          ? visual.type
-          : null;
-    if (canonicalKind) {
-      canonicalByPublicIndex.set(publicIndex, canonicalResults.length);
-      canonicalResults.push(visual.outcomeIndex + 1);
-      canonicalKinds.push(canonicalKind);
-      canonicalThemes.push(visual.theme);
-      canonicalOutcomes.push(visual.outcome);
-      canonicalPhysics.push({ ...visual.physics });
-      return;
-    }
-    generatedByPublicIndex.set(publicIndex, generatedFallbacks.length);
-    generatedFallbacks.push(physicalBridgeFallback(visual));
   });
-
-  const ordinaryFallbacks =
-    request.fallbacks?.map((fallback) => ({
-      ...fallback,
-      metadata: fallback.metadata ? { ...fallback.metadata } : undefined,
-    })) ?? [];
-  const publicOrder = request.visualOrder ?? [
-    ...physical.map((visual, index) => ({
-      kind: 'physical' as const,
-      index,
-      dieId: visual.id,
-    })),
-    ...ordinaryFallbacks.map((fallback, index) => ({
-      kind: 'fallback' as const,
-      index,
-      dieId: fallback.id,
-    })),
-  ];
-  const visualOrder = publicOrder.map((entry): DraftrollVisualOrderEntry => {
-    if (entry.kind === 'fallback') {
-      return {
-        kind: 'fallback',
-        index: generatedFallbacks.length + entry.index,
-        dieId: entry.dieId,
-      };
-    }
-    const canonicalIndex = canonicalByPublicIndex.get(entry.index);
-    if (canonicalIndex !== undefined) {
-      return { kind: 'physical', index: canonicalIndex, dieId: entry.dieId };
-    }
-    const generatedIndex = generatedByPublicIndex.get(entry.index);
-    if (generatedIndex === undefined) throw new Error('Physical visual ordering is invalid');
-    return { kind: 'fallback', index: generatedIndex, dieId: entry.dieId };
-  });
-  const context = translatePhysicalTableContext({ ...request.context }, visualOrder);
+  const split = splitPhysicalSpecs(physical);
+  const canonical = split.canonicalIndexes.map((index) => physical[index]);
+  const canonicalKinds = canonical.map((visual) => visual.canonicalKind).filter(isDieKind);
+  if (canonicalKinds.length !== canonical.length)
+    throw new Error('Canonical physical descriptor is missing a supported canonicalKind');
+  const fallbacks = (request.fallbacks ?? []).map(cloneFallbackVisual);
+  const seed = request.seed;
+  const defaultVisualPrefix =
+    typeof request.context?.rollId === 'string'
+      ? `${request.context.rollId}:`
+      : `${String(seed ?? 'physical')}:`;
+  const visualOrder = normalizeVisualOrder(
+    request.visualOrder ?? null,
+    physical.length,
+    fallbacks.length,
+    defaultVisualPrefix,
+  );
+  if (visualOrder.length !== physical.length + fallbacks.length)
+    throw new Error('Physical visual ordering is invalid');
   return {
-    ...request,
-    physical: undefined,
-    results: canonicalResults,
-    kinds: canonicalKinds,
-    themes: canonicalThemes,
-    outcomes: canonicalOutcomes,
-    physics: canonicalPhysics,
-    fallbacks: [...generatedFallbacks, ...ordinaryFallbacks],
+    physical,
+    canonicalResults: canonical.map((visual) => visual.outcomeIndex + 1),
+    canonicalKinds,
+    canonicalThemes: canonical.map((visual) => visual.theme),
+    canonicalOutcomes: canonical.map((visual) => visual.outcome),
+    canonicalPhysics: canonical.map((visual) => Object.assign({}, visual.physics)),
+    canonicalPhysicalIndexes: split.canonicalIndexes,
+    additionalPhysical: split.additionalIndexes.map((index) => physical[index]),
+    additionalPhysicalIndexes: split.additionalIndexes,
+    fallbacks,
     visualOrder,
-    context,
+    context: { ...request.context },
+    seed,
+    startAtMs: request.startAtMs,
+    seekToMs: request.seekToMs,
+    animationDurationMs: request.animationDurationMs,
+    settleImmediately: request.settleImmediately,
+    lateMode: request.lateMode,
+    settleAfterProgress: request.settleAfterProgress,
+    tableMode: request.tableMode,
+    reducedMotion: request.reducedMotion,
+    physicsPreset: request.physicsPreset ?? 'standard',
   };
 }
 
-interface AdditivePhysicalRequest {
-  results: number[];
-  kinds: DieKind[];
-  themes: ThemeName[];
-  outcomes: EffectOutcome[];
-  physics: DicePhysicsProperties[];
-  physicsPreset: DicePhysicsPreset;
-  fallbacks: DraftrollFallbackVisual[];
-  visualOrder: DraftrollVisualOrderEntry[];
-  context: Record<string, unknown>;
-  seed: string;
-  startAtMs: number | null;
-  animationDurationMs: number | null;
-}
+interface AdditivePhysicalRequest extends NormalizedPhysicalBridgeRequest {}
 
 function normalizeAdditivePhysicalRequest(
   request: DiceRollRequest,
 ): AdditivePhysicalRequest | null {
   if (request.settleImmediately || request.lateMode === 'settled' || request.lateMode === 'replay')
     return null;
-  const rawResults = request.results;
-  const results =
-    rawResults === undefined
-      ? []
-      : (Array.isArray(rawResults) ? rawResults : [rawResults]).map((value) => Math.round(value));
-  if (results.some((value) => !Number.isFinite(value))) return null;
-  const fallbacks =
-    request.fallbacks?.map((fallback) => ({
-      ...fallback,
-      metadata: fallback.metadata ? { ...fallback.metadata } : undefined,
-    })) ?? [];
-  if (results.length === 0 && fallbacks.length === 0) return null;
-  const context = { ...request.context };
-  const seed = String(request.seed ?? `table-add:${Date.now()}`);
-  const defaultVisualPrefix =
-    typeof context.rollId === 'string' ? `${context.rollId}:` : `${seed}:`;
-  const visualOrder = normalizeVisualOrder(
-    request.visualOrder ?? null,
-    results.length,
-    fallbacks.length,
-    defaultVisualPrefix,
-  );
-  if (visualOrder.length !== results.length + fallbacks.length) return null;
-
-  const rawKinds =
-    request.kinds === undefined
-      ? [selectedKind]
-      : Array.isArray(request.kinds)
-        ? request.kinds
-        : [request.kinds];
-  const kinds =
-    rawKinds.length === 1
-      ? Array.from({ length: results.length }, () => rawKinds[0])
-      : rawKinds.slice();
-  if (kinds.length !== results.length) return null;
-  const supported = new Set<DieKind>(['coin', 'd4', 'd6', 'd8', 'd10', 'd12', 'd20']);
-  if (
-    kinds.some(
-      (kind, index) =>
-        !supported.has(kind) || results[index] < 1 || results[index] > maximumDieValue(kind),
-    )
-  )
+  try {
+    const normalized = normalizePhysicalBridgeRequest(request);
+    if (normalized.physical.length + normalized.fallbacks.length === 0) return null;
+    return normalized;
+  } catch {
     return null;
-
-  const rawThemes =
-    request.themes === undefined
-      ? [selectedTheme]
-      : Array.isArray(request.themes)
-        ? request.themes
-        : [request.themes];
-  const themes =
-    rawThemes.length === 1
-      ? Array.from({ length: results.length }, () => rawThemes[0])
-      : rawThemes.slice();
-  if (themes.length !== results.length || themes.some((theme) => !THEME_MANIFESTS[theme]))
-    return null;
-
-  const rawOutcomes =
-    request.outcomes === undefined
-      ? []
-      : Array.isArray(request.outcomes)
-        ? request.outcomes
-        : [request.outcomes];
-  const outcomes = results.map((value, index) => {
-    const explicit = rawOutcomes.length === 1 ? rawOutcomes[0] : rawOutcomes[index];
-    if (
-      explicit === 'positive' ||
-      explicit === 'negative' ||
-      explicit === 'neutral' ||
-      explicit === 'none'
-    )
-      return explicit;
-    const maximum = maximumDieValue(kinds[index]);
-    if (value === maximum) return 'positive';
-    if (value === 1 && maximum !== 2) return 'negative';
-    return 'neutral';
-  });
-
-  const physicsPreset = request.physicsPreset ?? activePhysicsPreset;
-  const physics = normalizePhysicalProperties(
-    request.physics ?? null,
-    kinds,
-    themes,
-    physicsPreset,
-  );
-  if (!physics) return null;
-
-  return {
-    results,
-    kinds,
-    themes,
-    outcomes,
-    physics,
-    physicsPreset,
-    fallbacks,
-    visualOrder,
-    context,
-    seed,
-    startAtMs:
-      typeof request.startAtMs === 'number' && Number.isFinite(request.startAtMs)
-        ? request.startAtMs
-        : null,
-    animationDurationMs:
-      typeof request.animationDurationMs === 'number' &&
-      Number.isFinite(request.animationDurationMs)
-        ? Math.max(1, request.animationDurationMs)
-        : null,
-  };
+  }
 }
 
 function samplePlanTransform(
@@ -3294,6 +3182,25 @@ function appendPhysicalDice(
   return appended;
 }
 
+function appendAdditionalPhysicalVisuals(
+  specs: readonly DraftrollPhysicalVisual[],
+  seed: string,
+): PhysicalDieVisualInstance[] {
+  if (specs.length === 0) return [];
+  const start = additionalPhysicalVisuals.length;
+  const total = start + specs.length;
+  const random = createSeededRandom(`${seed}:additive-physical`);
+  const occupied = additionalPhysicalVisuals.map((visual) => visual.getSettledPosition());
+  const appended = specs.map((spec, offset) => {
+    const visual = new PhysicalDieVisualInstance(spec);
+    visual.configureTrajectory(start + offset, total, screenBounds, random, occupied);
+    scene.add(visual.group);
+    additionalPhysicalVisuals.push(visual);
+    return visual;
+  });
+  return appended;
+}
+
 function appendFallbackVisuals(
   specs: readonly DraftrollFallbackVisual[],
   seed: string,
@@ -3311,6 +3218,19 @@ function appendFallbackVisuals(
     return visual;
   });
   return appended;
+}
+
+function removeAppendedAdditionalPhysicalVisuals(
+  appended: readonly PhysicalDieVisualInstance[],
+): void {
+  for (const visual of appended) {
+    scene.remove(visual.group);
+    visual.dispose();
+  }
+  additionalPhysicalVisuals.splice(
+    Math.max(0, additionalPhysicalVisuals.length - appended.length),
+    appended.length,
+  );
 }
 
 function removeAppendedFallbackVisuals(appended: readonly FallbackVisualInstance[]): void {
@@ -3508,22 +3428,23 @@ async function appendTableRoll(request: DiceRollRequest): Promise<DraftrollRollC
     !activePlan ||
     (!isRolling && !hasCast) ||
     isPlanning ||
-    (dice.length === 0 && activeFallbackSpecs.length === 0)
+    (activePhysicalSpecs.length === 0 && activeFallbackSpecs.length === 0)
   ) {
     throw new Error('Active table roll cannot accept this presentation');
   }
   if (dissolveAnimation) cancelDissolve(false);
-  const existingCount = dice.length;
+  const existingCanonicalCount = dice.length;
+  const existingPhysicalCount = activePhysicalSpecs.length;
+  const existingFallbackCount = activeFallbackSpecs.length;
   if (
-    existingCount +
+    existingPhysicalCount +
       activeFallbackSpecs.length +
-      normalized.results.length +
+      normalized.physical.length +
       normalized.fallbacks.length >
     30
   ) {
     throw new Error('Active table visual limit exceeded');
   }
-  const existingFallbackCount = activeFallbackSpecs.length;
 
   const registered = registerRollCompletion();
   const previous = {
@@ -3533,6 +3454,9 @@ async function appendTableRoll(request: DiceRollRequest): Promise<DraftrollRollC
     activePhysicsPreset,
     activeTargets: activeTargets.slice(),
     activeOutcomes: activeOutcomes.slice(),
+    activePhysicalSpecs: activePhysicalSpecs.map(clonePhysicalVisual),
+    activeCanonicalPhysicalIndexes: activeCanonicalPhysicalIndexes.slice(),
+    activeAdditionalPhysicalIndexes: activeAdditionalPhysicalIndexes.slice(),
     activeVisualOrder: activeVisualOrder.map((entry) => ({ ...entry })),
     activeFallbackSpecs: activeFallbackSpecs.map((entry) => ({
       ...entry,
@@ -3544,42 +3468,61 @@ async function appendTableRoll(request: DiceRollRequest): Promise<DraftrollRollC
   };
   const existingStates = sampleActiveLaunchStates(activePlan, planTime);
   const lockedTrajectory = isRolling
-    ? createLockedTableTrajectory(activePlan, planTime, existingCount)
+    ? createLockedTableTrajectory(activePlan, planTime, existingCanonicalCount)
     : undefined;
   activePhysicsPreset = normalized.physicsPreset;
   world.gravity.set(0, -PHYSICS_PRESETS[activePhysicsPreset].gravity, 0);
-  const appended = appendPhysicalDice(normalized.kinds, normalized.themes, normalized.physics);
-  const appendedFallbacks = appendFallbackVisuals(normalized.fallbacks, normalized.seed);
+  const appended = appendPhysicalDice(
+    normalized.canonicalKinds,
+    normalized.canonicalThemes,
+    normalized.canonicalPhysics,
+  );
+  const appendedAdditional = appendAdditionalPhysicalVisuals(
+    normalized.additionalPhysical,
+    String(normalized.seed ?? `table-add:${Date.now()}`),
+  );
+  const appendedFallbacks = appendFallbackVisuals(
+    normalized.fallbacks,
+    String(normalized.seed ?? `table-add:${Date.now()}`),
+  );
   try {
-    activeKinds.push(...normalized.kinds);
-    activeThemes.push(...normalized.themes);
-    activePhysics.push(...normalized.physics);
-    activeTargets.push(...normalized.results);
-    activeOutcomes.push(...normalized.outcomes);
+    activeKinds.push(...normalized.canonicalKinds);
+    activeThemes.push(...normalized.canonicalThemes);
+    activePhysics.push(...normalized.canonicalPhysics);
+    activeTargets.push(...normalized.canonicalResults);
+    activeOutcomes.push(...normalized.canonicalOutcomes);
+    activePhysicalSpecs.push(...normalized.physical.map(clonePhysicalVisual));
+    activeCanonicalPhysicalIndexes.push(
+      ...normalized.canonicalPhysicalIndexes.map((index) => existingPhysicalCount + index),
+    );
+    activeAdditionalPhysicalIndexes.push(
+      ...normalized.additionalPhysicalIndexes.map((index) => existingPhysicalCount + index),
+    );
     activeFallbackSpecs.push(...normalized.fallbacks);
     normalized.visualOrder.forEach((entry) =>
       activeVisualOrder.push(
         entry.kind === 'physical'
-          ? { kind: 'physical', index: existingCount + entry.index, dieId: entry.dieId }
-          : { kind: 'fallback', index: existingFallbackCount + entry.index, dieId: entry.dieId },
+          ? { ...entry, index: existingPhysicalCount + entry.index }
+          : { ...entry, index: existingFallbackCount + entry.index },
       ),
     );
     quantity = dice.length;
     quantityValue.textContent = String(quantity);
     mergeAdditiveContext(
       normalized.context,
-      existingCount,
-      normalized.results.length,
+      existingPhysicalCount,
+      normalized.physical.length,
       existingFallbackCount,
       normalized.fallbacks.length,
     );
-    activeSeed = `${activeSeed}|${normalized.seed}`;
+    const normalizedSeed = String(normalized.seed ?? `table-add:${Date.now()}`);
+    activeSeed = `${activeSeed}|${normalizedSeed}`;
     activeAnimationDurationMs =
       Math.max(activeAnimationDurationMs ?? 0, normalized.animationDurationMs ?? 0) || null;
-    applyRuntimeQuality(quantity + activeFallbackSpecs.length);
+    applyRuntimeQuality(activePhysicalSpecs.length + activeFallbackSpecs.length);
 
     const groupIndex = Math.max(0, readActiveTableRolls().length - 1);
-    const random = createSeededRandom(normalized.seed);
+    const random = createSeededRandom(normalizedSeed);
     const lane = THREE.MathUtils.clamp(
       ((groupIndex % 5) - 2) / 2.4 + (random() - 0.5) * 0.12,
       -0.88,
@@ -3589,11 +3532,13 @@ async function appendTableRoll(request: DiceRollRequest): Promise<DraftrollRollC
       .normalize()
       .rotateAround(new THREE.Vector2(), (random() - 0.5) * 0.1);
     const scheduledDelay =
-      normalized.startAtMs === null ? 0 : Math.max(0, (normalized.startAtMs - Date.now()) / 1_000);
+      normalized.startAtMs === undefined
+        ? 0
+        : Math.max(0, (normalized.startAtMs - Date.now()) / 1_000);
     const appendedCanonical = appended.map((die, index) => ({
       die,
-      index: existingCount + index,
-      id: physicalVisualId(existingCount + index),
+      index: existingCanonicalCount + index,
+      id: physicalVisualId(activeCanonicalPhysicalIndexes[existingCanonicalCount + index]),
     }));
     const newStates = createMixedPhysicalLaunchStates(
       appendedCanonical,
@@ -3607,15 +3552,20 @@ async function appendTableRoll(request: DiceRollRequest): Promise<DraftrollRollC
     tableReplanPaused = true;
     isPlanning = true;
     setStatus(`${readActiveTableRolls().length} rollers sharing the table`, true);
-    const needsSharedPhysicalPlan = newStates.length > 0 || hasPendingPhysicalFallbackDice();
+    const needsSharedPhysicalPlan = newStates.length > 0 || hasPendingAdditionalPhysicalDice();
     const plan = needsSharedPhysicalPlan
-      ? await buildRollPlan([...existingStates, ...newStates], existingCount, lockedTrajectory)
+      ? await buildRollPlan(
+          [...existingStates, ...newStates],
+          existingCanonicalCount,
+          lockedTrajectory,
+        )
       : createStaticTablePlan(createFallbackOnlyPlan(normalized.fallbacks).duration);
     assertPresentationGeneration(generation);
     appended.forEach((die) => {
       die.group.visible = true;
     });
     activeOutcomes = activeOutcomes.slice(0, plan.results.length);
+    syncCanonicalPhysicalSpecs(plan.results);
     captureReplay(plan);
     beginPlanPlayback(plan, { initialTime: 0, settleImmediately: false });
     return registered.promise;
@@ -3624,6 +3574,7 @@ async function appendTableRoll(request: DiceRollRequest): Promise<DraftrollRollC
     registered.pending.reject(error instanceof Error ? error : new Error(String(error)));
     if (generation !== presentationGeneration) throw presentationClearedError();
     removeAppendedDice(appended);
+    removeAppendedAdditionalPhysicalVisuals(appendedAdditional);
     removeAppendedFallbackVisuals(appendedFallbacks);
     activeKinds = previous.activeKinds;
     activeThemes = previous.activeThemes;
@@ -3631,6 +3582,9 @@ async function appendTableRoll(request: DiceRollRequest): Promise<DraftrollRollC
     activePhysicsPreset = previous.activePhysicsPreset;
     activeTargets = previous.activeTargets;
     activeOutcomes = previous.activeOutcomes;
+    activePhysicalSpecs = previous.activePhysicalSpecs;
+    activeCanonicalPhysicalIndexes = previous.activeCanonicalPhysicalIndexes;
+    activeAdditionalPhysicalIndexes = previous.activeAdditionalPhysicalIndexes;
     activeVisualOrder = previous.activeVisualOrder;
     activeFallbackSpecs = previous.activeFallbackSpecs;
     activeContext = previous.activeContext;
@@ -3651,7 +3605,7 @@ function canAppendTableRequest(request: DiceRollRequest): boolean {
     (isRolling || hasCast) &&
     !isPlanning &&
     activePlan !== null &&
-    (dice.length > 0 || activeFallbackSpecs.length > 0) &&
+    (activePhysicalSpecs.length > 0 || activeFallbackSpecs.length > 0) &&
     normalizeAdditivePhysicalRequest(request) !== null
   );
 }
@@ -3669,14 +3623,17 @@ async function castDice(
   applyRendererResolution();
   if (dissolveAnimation) cancelDissolve(true);
   const hasQueuedVisualRequest =
-    queuedApiResults !== null || queuedKinds !== null || queuedFallbacks !== null;
+    queuedPhysical !== null ||
+    queuedApiResults !== null ||
+    queuedKinds !== null ||
+    queuedFallbacks !== null;
   if (dice.length === 0 && !hasQueuedVisualRequest) spawnPreview();
   if (!prepareTargets()) throw new Error('Roll request is invalid');
 
-  const totalVisuals = quantity + activeFallbackSpecs.length;
+  const totalVisuals = activePhysicalSpecs.length + activeFallbackSpecs.length;
   applyRuntimeQuality(totalVisuals);
   let plan: RollPlan;
-  const hasArbitraryPhysicalDice = hasConfiguredPhysicalFallbackDice();
+  const hasArbitraryPhysicalDice = hasConfiguredAdditionalPhysicalDice();
   if (quantity === 0 && !hasArbitraryPhysicalDice) {
     activeOutcomes = [];
     plan = createFallbackOnlyPlan(activeFallbackSpecs);
@@ -3716,6 +3673,7 @@ async function castDice(
     }
     assertPresentationGeneration(generation);
     activeOutcomes = resolveOutcomes(plan.results);
+    syncCanonicalPhysicalSpecs(plan.results);
   }
 
   captureReplay(plan);
@@ -3749,10 +3707,26 @@ async function castDice(
   return completion;
 }
 
+function physicalResultAt(
+  physicalIndex: number,
+  canonicalValues: readonly number[],
+): number | string {
+  const spec = activePhysicalSpecs[physicalIndex];
+  if (spec) return spec.result;
+  const canonicalIndex = activeCanonicalPhysicalIndexes.indexOf(physicalIndex);
+  return canonicalIndex >= 0 ? (canonicalValues[canonicalIndex] ?? 0) : 0;
+}
+
+function physicalOutcomeAt(physicalIndex: number): EffectOutcome {
+  const canonicalIndex = activeCanonicalPhysicalIndexes.indexOf(physicalIndex);
+  if (canonicalIndex >= 0) return activeOutcomes[canonicalIndex] ?? 'neutral';
+  return activePhysicalSpecs[physicalIndex]?.outcome ?? 'neutral';
+}
+
 function collectOrderedVisualResults(physicalValues: readonly number[]): Array<number | string> {
   return activeVisualOrder.map((entry) =>
     entry.kind === 'physical'
-      ? (physicalValues[entry.index] ?? 0)
+      ? physicalResultAt(entry.index, physicalValues)
       : (activeFallbackSpecs[entry.index]?.result ?? ''),
   );
 }
@@ -3773,8 +3747,9 @@ function formatVisualResult(
             ? ' (explosion)'
             : '';
   if (entry.kind === 'physical') {
-    const kind = activeKinds[entry.index] ?? selectedKind;
-    return `${kind.toUpperCase()} ${physicalValues[entry.index] ?? 0}${suffix}`;
+    const spec = activePhysicalSpecs[entry.index];
+    if (spec) return `${spec.title} ${spec.label}${suffix}`;
+    return `Die ${String(physicalResultAt(entry.index, physicalValues))}${suffix}`;
   }
   const fallback = activeFallbackSpecs[entry.index];
   return fallback ? `${fallback.title} ${fallback.label}${suffix}` : `Result${suffix}`;
@@ -3799,6 +3774,7 @@ function readRenderedDieState(dieId: string): { kept?: boolean; generatedBy?: st
 function physicalVisualId(index: number): string {
   return (
     activeVisualOrder.find((entry) => entry.kind === 'physical' && entry.index === index)?.dieId ??
+    activePhysicalSpecs[index]?.id ??
     `physical_${index}`
   );
 }
@@ -3840,8 +3816,18 @@ function markOutcomeEffectsThrough(plan: RollPlan, time: number): void {
     plan.settleTimes?.length === plan.dieCount ? plan.settleTimes : deriveDieSettleTimes(plan);
   plan.settleTimes = settleTimes;
   consumeSettledVisualIndexes(
-    Array.from({ length: plan.dieCount }, (_value, index) => physicalVisualId(index)),
+    Array.from({ length: plan.dieCount }, (_value, index) =>
+      physicalVisualId(activeCanonicalPhysicalIndexes[index] ?? index),
+    ),
     settleTimes,
+    time,
+    playedOutcomeEffectIds,
+  );
+  consumeSettledVisualIndexes(
+    additionalPhysicalVisuals.map((_visual, index) =>
+      physicalVisualId(activeAdditionalPhysicalIndexes[index] ?? index),
+    ),
+    additionalPhysicalVisuals.map((visual) => visual.getSettleTime(plan.duration)),
     time,
     playedOutcomeEffectIds,
   );
@@ -3863,9 +3849,19 @@ function playSettledOutcomeEffects(plan: RollPlan, currentTime: number): void {
   const settleTimes =
     plan.settleTimes?.length === plan.dieCount ? plan.settleTimes : deriveDieSettleTimes(plan);
   plan.settleTimes = settleTimes;
-  const physicalIndexes = consumeSettledVisualIndexes(
-    Array.from({ length: plan.dieCount }, (_value, index) => physicalVisualId(index)),
+  const canonicalIndexes = consumeSettledVisualIndexes(
+    Array.from({ length: plan.dieCount }, (_value, index) =>
+      physicalVisualId(activeCanonicalPhysicalIndexes[index] ?? index),
+    ),
     settleTimes,
+    currentTime,
+    playedOutcomeEffectIds,
+  );
+  const additionalIndexes = consumeSettledVisualIndexes(
+    additionalPhysicalVisuals.map((_visual, index) =>
+      physicalVisualId(activeAdditionalPhysicalIndexes[index] ?? index),
+    ),
+    additionalPhysicalVisuals.map((visual) => visual.getSettleTime(plan.duration)),
     currentTime,
     playedOutcomeEffectIds,
   );
@@ -3875,13 +3871,19 @@ function playSettledOutcomeEffects(plan: RollPlan, currentTime: number): void {
     currentTime,
     playedOutcomeEffectIds,
   );
-  if (physicalIndexes.length === 0 && fallbackIndexes.length === 0) return;
+  if (
+    canonicalIndexes.length === 0 &&
+    additionalIndexes.length === 0 &&
+    fallbackIndexes.length === 0
+  )
+    return;
   if (document.hidden) return;
 
   effects.beginBatch();
   try {
-    physicalIndexes.forEach((index) => {
-      const outcome = activeOutcomes[index] ?? (neutralEffects ? 'neutral' : 'none');
+    canonicalIndexes.forEach((index) => {
+      const physicalIndex = activeCanonicalPhysicalIndexes[index] ?? index;
+      const outcome = physicalOutcomeAt(physicalIndex);
       effects.playOutcome(
         activeThemes[index] ?? selectedTheme,
         outcome,
@@ -3889,9 +3891,20 @@ function playSettledOutcomeEffects(plan: RollPlan, currentTime: number): void {
         {
           kind: activeKinds[index] ?? selectedKind,
           value: plan.results[index],
-          hero: reserveHeroEffect(effectGroupId('physical', index), outcome),
+          hero: reserveHeroEffect(effectGroupId('physical', physicalIndex), outcome),
         },
       );
+    });
+    additionalIndexes.forEach((index) => {
+      const physicalIndex = activeAdditionalPhysicalIndexes[index];
+      const spec = physicalIndex === undefined ? undefined : activePhysicalSpecs[physicalIndex];
+      const visual = additionalPhysicalVisuals[index];
+      if (!spec || !visual) return;
+      effects.playOutcome(spec.theme, spec.outcome, visual.getWorldPosition().setY(0.05), {
+        kind: 'd6',
+        value: spec.numericValue ?? (typeof spec.result === 'number' ? spec.result : 0),
+        hero: reserveHeroEffect(effectGroupId('physical', physicalIndex), spec.outcome),
+      });
     });
     fallbackIndexes.forEach((index) => {
       const spec = activeFallbackSpecs[index];
@@ -3921,8 +3934,9 @@ function outcomeSummaryForGroups(groups: readonly ActiveTableRollGroup[]): {
       index < group.physicalStart + group.physicalCount;
       index += 1
     ) {
-      if (activeOutcomes[index] === 'positive') positive = true;
-      if (activeOutcomes[index] === 'negative') negative = true;
+      const outcome = physicalOutcomeAt(index);
+      if (outcome === 'positive') positive = true;
+      if (outcome === 'negative') negative = true;
     }
     for (
       let index = group.fallbackStart;
@@ -3948,7 +3962,7 @@ function announceCompletedOutcomeOnce(tableRolls: readonly ActiveTableRollGroup[
                 : activeSeed || 'active-roll',
             total: 0,
             physicalStart: 0,
-            physicalCount: activeOutcomes.length,
+            physicalCount: activePhysicalSpecs.length,
             fallbackStart: 0,
             fallbackCount: activeFallbackSpecs.length,
             visualCount: activeOutcomes.length + activeFallbackSpecs.length,
@@ -3963,6 +3977,21 @@ function announceCompletedOutcomeOnce(tableRolls: readonly ActiveTableRollGroup[
   else if (summary.positive && summary.negative) audio.playSuccess();
 }
 
+function syncCanonicalPhysicalSpecs(results: readonly number[]): void {
+  activeCanonicalPhysicalIndexes.forEach((physicalIndex, canonicalIndex) => {
+    const spec = activePhysicalSpecs[physicalIndex];
+    if (!spec) return;
+    spec.outcome = activeOutcomes[canonicalIndex] ?? spec.outcome;
+    if (spec.metadata?.draftrollManualPhysical === true) {
+      const result = results[canonicalIndex] ?? spec.outcomeIndex + 1;
+      spec.outcomeIndex = Math.max(0, Math.round(result) - 1);
+      spec.result = result;
+      spec.numericValue = result;
+      spec.label = String(result);
+    }
+  });
+}
+
 function revealResults(): void {
   if (!isRolling) return;
   isRolling = false;
@@ -3971,7 +4000,13 @@ function revealResults(): void {
     (sum, fallback) => sum + (fallback.numericValue ?? 0),
     0,
   );
-  const physicalTotal = physicalValues.reduce((sum, value) => sum + value, 0);
+  const additionalPhysicalTotal = currentAdditionalPhysicalSpecs().reduce(
+    (sum, visual) =>
+      sum + (visual.numericValue ?? (typeof visual.result === 'number' ? visual.result : 0)),
+    0,
+  );
+  const physicalTotal =
+    physicalValues.reduce((sum, value) => sum + value, 0) + additionalPhysicalTotal;
   const normalizedTotal = Number(activeContext.normalizedTotal);
   const total = Number.isFinite(normalizedTotal) ? normalizedTotal : physicalTotal + fallbackTotal;
   const tableRolls = readActiveTableRolls();
@@ -4018,6 +4053,7 @@ function revealResults(): void {
     die.body.torque.setZero();
     die.body.sleep();
   }
+  additionalPhysicalVisuals.forEach((visual) => visual.settle());
   fallbackVisuals.forEach((visual) => visual.settle());
   // Keep the completed plan while the table remains visible. A later concurrent
   // throw can sample these settled transforms and add new dynamic dice without
@@ -4031,7 +4067,7 @@ function revealResults(): void {
             groupId: 'active-roll',
             total,
             physicalStart: 0,
-            physicalCount: activeOutcomes.length,
+            physicalCount: activePhysicalSpecs.length,
             fallbackStart: 0,
             fallbackCount: activeFallbackSpecs.length,
             visualCount: activeOutcomes.length + activeFallbackSpecs.length,
@@ -4157,20 +4193,10 @@ presetInput.addEventListener('keydown', (event) => {
 });
 
 window.draftrollDice = {
-  roll: (input) => {
-    const request =
-      input && typeof input === 'object' && !Array.isArray(input)
-        ? normalizePhysicalBridgeRequest(input)
-        : input;
-    if (
-      request &&
-      typeof request === 'object' &&
-      !Array.isArray(request) &&
-      canAppendTableRequest(request)
-    ) {
-      return appendTableRoll(request);
-    }
+  roll: (request) => {
+    if (request && canAppendTableRequest(request)) return appendTableRoll(request);
     return enqueueRendererTask(async (generation) => {
+      queuedPhysical = null;
       queuedApiResults = null;
       queuedOutcomes = null;
       queuedContext = {};
@@ -4187,56 +4213,43 @@ window.draftrollDice = {
       queuedSettleImmediately = false;
       queuedLateMode = 'auto';
       queuedSettleAfterProgress = 0.78;
-      if (typeof request === 'number') {
-        queuedApiResults = [request];
-      } else if (Array.isArray(request)) {
-        queuedApiResults = request.slice();
-      } else if (request) {
-        const results = request.results;
-        queuedApiResults =
-          results === undefined ? null : Array.isArray(results) ? results.slice() : [results];
-        queuedOutcomes =
-          request.outcomes === undefined
-            ? null
-            : Array.isArray(request.outcomes)
-              ? request.outcomes.slice()
-              : [request.outcomes];
-        queuedContext = { ...request.context };
-        queuedSeed = request.seed ?? null;
-        queuedThemes = request.themes ?? null;
-        queuedKinds = request.kinds ?? null;
-        queuedPhysics = request.physics?.map((entry) => ({ ...entry })) ?? null;
-        queuedPhysicsPreset = request.physicsPreset ?? 'standard';
-        queuedFallbacks =
-          request.fallbacks?.map((fallback) => ({
-            ...fallback,
-            metadata: fallback.metadata ? { ...fallback.metadata } : undefined,
-          })) ?? [];
-        queuedVisualOrder = request.visualOrder?.map((entry) => ({ ...entry })) ?? null;
+      if (request) {
+        const normalized = normalizePhysicalBridgeRequest(request);
+        queuedPhysical = normalized.physical.map(clonePhysicalVisual);
+        queuedApiResults = normalized.canonicalResults.slice();
+        queuedOutcomes = normalized.canonicalOutcomes.slice();
+        queuedContext = { ...normalized.context };
+        queuedSeed = normalized.seed ?? null;
+        queuedThemes = normalized.canonicalThemes.slice();
+        queuedKinds = normalized.canonicalKinds.slice();
+        queuedPhysics = normalized.canonicalPhysics.map((entry) => ({ ...entry }));
+        queuedPhysicsPreset = normalized.physicsPreset;
+        queuedFallbacks = normalized.fallbacks.map(cloneFallbackVisual);
+        queuedVisualOrder = normalized.visualOrder.map((entry) => ({ ...entry }));
         queuedStartAtMs =
-          typeof request.startAtMs === 'number' && Number.isFinite(request.startAtMs)
-            ? request.startAtMs
+          typeof normalized.startAtMs === 'number' && Number.isFinite(normalized.startAtMs)
+            ? normalized.startAtMs
             : null;
         queuedSeekToMs =
-          typeof request.seekToMs === 'number' && Number.isFinite(request.seekToMs)
-            ? Math.max(0, request.seekToMs)
+          typeof normalized.seekToMs === 'number' && Number.isFinite(normalized.seekToMs)
+            ? Math.max(0, normalized.seekToMs)
             : 0;
         queuedAnimationDurationMs =
-          typeof request.animationDurationMs === 'number' &&
-          Number.isFinite(request.animationDurationMs)
-            ? Math.max(1, request.animationDurationMs)
+          typeof normalized.animationDurationMs === 'number' &&
+          Number.isFinite(normalized.animationDurationMs)
+            ? Math.max(1, normalized.animationDurationMs)
             : null;
-        queuedSettleImmediately = request.settleImmediately === true;
+        queuedSettleImmediately = normalized.settleImmediately === true;
         queuedLateMode =
-          request.lateMode === 'seek' ||
-          request.lateMode === 'settled' ||
-          request.lateMode === 'replay'
-            ? request.lateMode
+          normalized.lateMode === 'seek' ||
+          normalized.lateMode === 'settled' ||
+          normalized.lateMode === 'replay'
+            ? normalized.lateMode
             : 'auto';
         queuedSettleAfterProgress =
-          typeof request.settleAfterProgress === 'number' &&
-          Number.isFinite(request.settleAfterProgress)
-            ? THREE.MathUtils.clamp(request.settleAfterProgress, 0, 1)
+          typeof normalized.settleAfterProgress === 'number' &&
+          Number.isFinite(normalized.settleAfterProgress)
+            ? THREE.MathUtils.clamp(normalized.settleAfterProgress, 0, 1)
             : 0.78;
       }
       return castDice(undefined, generation);
@@ -4246,6 +4259,7 @@ window.draftrollDice = {
     const values = Array.isArray(results) ? results : [results];
     presetInput.value = values.join(',');
     presetInput.classList.remove('invalid');
+    queuedPhysical = null;
     queuedApiResults = null;
     queuedSeed = null;
     queuedThemes = null;
@@ -4264,6 +4278,7 @@ window.draftrollDice = {
   clearResults: () => {
     presetInput.value = '';
     presetInput.classList.remove('invalid');
+    queuedPhysical = null;
     queuedApiResults = null;
     queuedOutcomes = null;
     queuedContext = {};
@@ -4346,7 +4361,7 @@ window.draftrollDice = {
         15,
         60,
       );
-    applyRuntimeQuality(Math.max(1, quantity + activeFallbackSpecs.length));
+    applyRuntimeQuality(Math.max(1, activePhysicalSpecs.length + activeFallbackSpecs.length));
     requestRender();
   },
   configureThemeEffects: (theme, slots) => effects.configureThemeEffects(theme, slots),
@@ -4422,10 +4437,25 @@ window.draftrollDice = {
       typeof options.value === 'number' && Number.isInteger(options.value)
         ? options.value
         : Math.ceil(Number(requestedKind.slice(1)) / 2);
+    const sides = maximumDieValue(requestedKind);
+    const type = requestedKind === 'coin' ? 'd2' : requestedKind;
     return window.draftrollDice.roll({
-      results: [value],
-      kinds: [requestedKind],
-      themes: [selectedTheme],
+      physical: [
+        {
+          id: 'preview-die',
+          type,
+          sides,
+          outcomeIndex: THREE.MathUtils.clamp(Math.round(value), 1, sides) - 1,
+          result: value,
+          numericValue: value,
+          canonicalKind: requestedKind,
+          title: type,
+          label: String(value),
+          theme: selectedTheme,
+          outcome: 'neutral',
+        },
+      ],
+      visualOrder: [{ kind: 'physical', index: 0, dieId: 'preview-die' }],
       context: { preview: true },
     });
   },
@@ -4594,7 +4624,10 @@ canvas.addEventListener('pointerup', (event) => {
   if (hasCast && interactionOptions.click !== 'none') {
     canvas.dispatchEvent(
       new CustomEvent('draftroll:die-interaction', {
-        detail: { action: interactionOptions.click, results: lastReplay?.results.slice() ?? [] },
+        detail: {
+          action: interactionOptions.click,
+          results: lastReplay?.physical.map((visual) => visual.result) ?? [],
+        },
         bubbles: true,
       }),
     );
@@ -4608,7 +4641,7 @@ canvas.addEventListener('pointerup', (event) => {
       effects.playOutcome(selectedTheme, 'positive', new THREE.Vector3(0, 0.5, 0), {
         hero: true,
         kind: activeKinds[0] ?? selectedKind,
-        value: lastReplay?.results[0] ?? 1,
+        value: lastReplay?.physical[0]?.numericValue ?? 1,
       });
   }
 });

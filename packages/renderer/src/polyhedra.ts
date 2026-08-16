@@ -1,7 +1,28 @@
+/**
+ * Generated readable convex-polyhedron geometry for physical Draftroll dice.
+ *
+ * @packageDocumentation
+ */
+
+/**
+ * Immutable local-space XYZ coordinate used by generated physical geometry.
+ *
+ * @public
+ */
 export type PolyhedronVertex = readonly [number, number, number];
 
+/**
+ * Surface feature used to place a readable outcome label on a generated die.
+ *
+ * @public
+ */
 export type PolyhedronLabelKind = 'face' | 'edge' | 'vertex';
 
+/**
+ * Local-space placement and orientation for one printed outcome label.
+ *
+ * @public
+ */
 export interface PolyhedronLabelAnchor {
   /** Read convention chosen for this outcome. */
   kind: PolyhedronLabelKind;
@@ -17,6 +38,11 @@ export interface PolyhedronLabelAnchor {
   scale: number;
 }
 
+/**
+ * Maps one logical die outcome to its physical support state and readable labels.
+ *
+ * @public
+ */
 export interface PolyhedronOutcome {
   value: number;
   /** Face that is placed against the table for this outcome. */
@@ -28,6 +54,11 @@ export interface PolyhedronOutcome {
   labels: PolyhedronLabelAnchor[];
 }
 
+/**
+ * Serializable generated convex geometry with explicit physical outcome semantics.
+ *
+ * @public
+ */
 export interface ReadablePolyhedron {
   vertices: PolyhedronVertex[];
   faces: number[][];
@@ -39,14 +70,14 @@ export interface ReadablePolyhedron {
   requestedFacets: number;
   displayFacets: number;
   exact: boolean;
-  family:
-    | 'd1-cylinder'
-    | 'd2-coin'
-    | 'd3-cube'
-    | 'generated-dual'
-    | 'representative';
+  family: 'd1-cylinder' | 'd2-coin' | 'd3-cube' | 'generated-dual' | 'representative';
 }
 
+/**
+ * Bounds the complexity of generated physical die geometry.
+ *
+ * @public
+ */
 export interface ReadablePolyhedronOptions {
   /** Maximum exact face count before a lower-detail representative is used. */
   maximumFacets?: number;
@@ -106,16 +137,12 @@ const cross = (a: PolyhedronVertex, b: PolyhedronVertex): MutableVertex => [
   a[2] * b[0] - a[0] * b[2],
   a[0] * b[1] - a[1] * b[0],
 ];
-const magnitude = (value: PolyhedronVertex): number =>
-  Math.hypot(value[0], value[1], value[2]);
+const magnitude = (value: PolyhedronVertex): number => Math.hypot(value[0], value[1], value[2]);
 const normalize = (value: PolyhedronVertex): MutableVertex => {
   const length = magnitude(value);
-  return length <= EPSILON
-    ? [0, 0, 0]
-    : [value[0] / length, value[1] / length, value[2] / length];
+  return length <= EPSILON ? [0, 0, 0] : [value[0] / length, value[1] / length, value[2] / length];
 };
-const midpoint = (a: PolyhedronVertex, b: PolyhedronVertex): MutableVertex =>
-  scale(add(a, b), 0.5);
+const midpoint = (a: PolyhedronVertex, b: PolyhedronVertex): MutableVertex => scale(add(a, b), 0.5);
 const lerp = (a: PolyhedronVertex, b: PolyhedronVertex, amount: number): MutableVertex =>
   add(scale(a, 1 - amount), scale(b, amount));
 const clamp = (value: number, minimum: number, maximum: number): number =>
@@ -190,7 +217,11 @@ function convexHull(points: readonly PolyhedronVertex[]): HullFace[] {
     const occurrences = new Map<string, number>();
     for (const faceIndex of visible) {
       const [a, b, c] = faces[faceIndex].vertices;
-      for (const [start, end] of [[a, b], [b, c], [c, a]] as const) {
+      for (const [start, end] of [
+        [a, b],
+        [b, c],
+        [c, a],
+      ] as const) {
         const key = start < end ? `${start}:${end}` : `${end}:${start}`;
         occurrences.set(key, (occurrences.get(key) ?? 0) + 1);
       }
@@ -199,7 +230,11 @@ function convexHull(points: readonly PolyhedronVertex[]): HullFace[] {
     const horizon: Array<readonly [number, number]> = [];
     for (const faceIndex of visible) {
       const [a, b, c] = faces[faceIndex].vertices;
-      for (const [start, end] of [[a, b], [b, c], [c, a]] as const) {
+      for (const [start, end] of [
+        [a, b],
+        [b, c],
+        [c, a],
+      ] as const) {
         const key = start < end ? `${start}:${end}` : `${end}:${start}`;
         if (occurrences.get(key) === 1) horizon.push([start, end]);
       }
@@ -281,17 +316,13 @@ function labelUpDirection(
   const projected = subtract(toward, scale(face.normal, dot(toward, face.normal)));
   if (magnitude(projected) > 1e-5) return normalize(projected);
 
-  const reference = Math.abs(face.normal[1]) < 0.9
-    ? ([0, 1, 0] as const)
-    : ([1, 0, 0] as const);
+  const reference = Math.abs(face.normal[1]) < 0.9 ? ([0, 1, 0] as const) : ([1, 0, 0] as const);
   return normalize(cross(face.normal, reference));
 }
 
 function faceAnchor(info: readonly FaceInfo[], faceIndex: number): PolyhedronLabelAnchor {
   const face = info[faceIndex];
-  const reference = Math.abs(face.normal[1]) < 0.9
-    ? ([0, 1, 0] as const)
-    : ([1, 0, 0] as const);
+  const reference = Math.abs(face.normal[1]) < 0.9 ? ([0, 1, 0] as const) : ([1, 0, 0] as const);
   return {
     kind: 'face',
     faceIndex,
@@ -377,10 +408,13 @@ function featureCandidates(
   else if (topVertices.length === 1) preferred = 'vertex';
   else if (
     topVertices.length === 2 &&
-    edges.some((edge) =>
-      (edge.a === topVertices[0] && edge.b === topVertices[1]) ||
-      (edge.a === topVertices[1] && edge.b === topVertices[0]))
-  ) preferred = 'edge';
+    edges.some(
+      (edge) =>
+        (edge.a === topVertices[0] && edge.b === topVertices[1]) ||
+        (edge.a === topVertices[1] && edge.b === topVertices[0]),
+    )
+  )
+    preferred = 'edge';
   else if (bestFace && bestFace.alignment >= 0.52) preferred = 'face';
   else preferred = 'vertex';
 
@@ -412,7 +446,9 @@ function featureCandidates(
       kind: 'edge',
       key: `e:${edge.a}:${edge.b}`,
       edge,
-      score: Math.min(first, second) * 0.65 + (first + second) * 0.175 +
+      score:
+        Math.min(first, second) * 0.65 +
+        (first + second) * 0.175 +
         (preferred === 'edge' ? 0.45 : 0),
     });
   });
@@ -483,7 +519,7 @@ function d1Cylinder(segments = 18): ReadablePolyhedron {
   const radius = 0.58;
   for (const z of [-half, half]) {
     for (let index = 0; index < segments; index += 1) {
-      const angle = index / segments * Math.PI * 2;
+      const angle = (index / segments) * Math.PI * 2;
       vertices.push([Math.cos(angle) * radius, Math.sin(angle) * radius, z]);
     }
   }
@@ -501,14 +537,16 @@ function d1Cylinder(segments = 18): ReadablePolyhedron {
     vertices,
     faces,
     landingFaces: [0, 1],
-    faceKinds: faces.map((_face, index) => index < 2 ? 'cap' : 'rim'),
-    outcomes: [{
-      value: 1,
-      supportFace: 0,
-      settledUp: scale(info[0].normal, -1),
-      labelKind: 'face',
-      labels: [faceAnchor(info, 0), faceAnchor(info, 1)],
-    }],
+    faceKinds: faces.map((_face, index) => (index < 2 ? 'cap' : 'rim')),
+    outcomes: [
+      {
+        value: 1,
+        supportFace: 0,
+        settledUp: scale(info[0].normal, -1),
+        labelKind: 'face',
+        labels: [faceAnchor(info, 0), faceAnchor(info, 1)],
+      },
+    ],
     requestedFacets: 1,
     displayFacets: 2,
     exact: true,
@@ -545,23 +583,39 @@ function d2Coin(segments = 24): ReadablePolyhedron {
 
 function d3Cube(): ReadablePolyhedron {
   const rawVertices: MutableVertex[] = [
-    [-1, -1, -1], [1, -1, -1], [1, 1, -1], [-1, 1, -1],
-    [-1, -1, 1], [1, -1, 1], [1, 1, 1], [-1, 1, 1],
+    [-1, -1, -1],
+    [1, -1, -1],
+    [1, 1, -1],
+    [-1, 1, -1],
+    [-1, -1, 1],
+    [1, -1, 1],
+    [1, 1, 1],
+    [-1, 1, 1],
   ];
   const vertices = rawVertices.map((vertex) => scale(vertex, 1 / Math.sqrt(3)));
   const faces = [
-    [0, 3, 2, 1], [4, 5, 6, 7], [0, 4, 7, 3],
-    [1, 2, 6, 5], [3, 7, 6, 2], [0, 1, 5, 4],
+    [0, 3, 2, 1],
+    [4, 5, 6, 7],
+    [0, 4, 7, 3],
+    [1, 2, 6, 5],
+    [3, 7, 6, 2],
+    [0, 1, 5, 4],
   ];
   const info = faces.map((face) => faceInfo(vertices, face));
-  const pairs: Array<readonly [number, number]> = [[0, 1], [2, 3], [4, 5]];
-  const outcomes = pairs.map(([first, second], index): PolyhedronOutcome => ({
-    value: index + 1,
-    supportFace: second,
-    settledUp: scale(info[second].normal, -1),
-    labelKind: 'face',
-    labels: [faceAnchor(info, first), faceAnchor(info, second)],
-  }));
+  const pairs: Array<readonly [number, number]> = [
+    [0, 1],
+    [2, 3],
+    [4, 5],
+  ];
+  const outcomes = pairs.map(
+    ([first, second], index): PolyhedronOutcome => ({
+      value: index + 1,
+      supportFace: second,
+      settledUp: scale(info[second].normal, -1),
+      labelKind: 'face',
+      labels: [faceAnchor(info, first), faceAnchor(info, second)],
+    }),
+  );
   return {
     vertices,
     faces,
@@ -586,6 +640,8 @@ function d3Cube(): ReadablePolyhedron {
  *
  * Geometry never determines randomness; Draftroll supplies the authoritative
  * logical result and the renderer uses its outcome only for presentation.
+ *
+ * @public
  */
 export function createReadablePolyhedron(
   facets: number,

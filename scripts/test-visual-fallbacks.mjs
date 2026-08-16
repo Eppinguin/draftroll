@@ -35,16 +35,20 @@ const [
   readFile(new URL('../index.html', import.meta.url), 'utf8'),
 ]);
 
-for (const kind of ['coin', 'percentile', 'fate', 'spinner', 'token', 'card']) {
+for (const kind of ['token', 'card']) {
   assert.match(
     renderer,
     new RegExp(`['"]${kind}['"]`),
     `renderer fallback kind ${kind} is missing`,
   );
 }
+assert.doesNotMatch(renderer, /'spinner'/);
 assert.match(renderer, /DraftrollFallbackVisual/);
 assert.match(renderer, /interface DraftrollPhysicalVisual/);
 assert.match(renderer, /physical\?: DraftrollPhysicalVisual\[\]/);
+assert.doesNotMatch(renderer, /results\?: number\[\] \| number/);
+assert.doesNotMatch(renderer, /kinds\?: DraftrollDieKind/);
+assert.doesNotMatch(renderer, /forceFallback/);
 assert.match(renderer, /resolvePhysicalSlot/);
 assert.match(renderer, /createCustomPhysicalPresentation/);
 assert.match(renderer, /visualOrder/);
@@ -128,20 +132,22 @@ assert.match(rollWorker, /extractPhysicalTransforms/);
 assert.doesNotMatch(rollWorker, /new CANNON\.World/);
 
 // Legacy spinner inputs are accepted only at the browser compatibility boundary; SDK dN is physical.
-assert.match(visuals, /PhysicalDieVisualInstance/);
-assert.match(visuals, /usesPhysicalDieModel/);
+assert.doesNotMatch(visuals, /PhysicalDieVisualInstance/);
+assert.match(visuals, /fallback-visuals-base/);
 assert.doesNotMatch(visuals, /GeneratedFallbackVisualInstance/);
 assert.match(physicalVisuals, /class PhysicalDieVisualInstance/);
 assert.match(physicalVisuals, /createGeneratedPhysicalDieDefinition/);
 assert.match(physicalVisuals, /createDefaultPhysicalDiePresentation/);
-assert.match(physicalVisuals, /draftrollPhysicalPresentation/);
+assert.match(physicalVisuals, /if \(spec\.presentation\)/);
+assert.match(physicalVisuals, /getRuntimeThemePresentation/);
+assert.doesNotMatch(physicalVisuals, /draftrollPhysicalPresentation/);
 assert.match(physicalMesh, /presentationTexture/);
 assert.match(physicalMesh, /content.kind === 'icon'/);
 assert.match(physicalVisuals, /physicalDieColliderRadius/);
-assert.match(physicalVisuals, /getPhysicalFallbackPlanEntries/);
-assert.match(physicalVisuals, /commitPhysicalFallbackPlan/);
-assert.match(physicalVisuals, /capturePhysicalFallbackReplay/);
-assert.match(physicalVisuals, /restorePhysicalFallbackReplay/);
+assert.match(physicalVisuals, /getAdditionalPhysicalPlanEntries/);
+assert.match(physicalVisuals, /commitAdditionalPhysicalPlan/);
+assert.match(physicalVisuals, /captureAdditionalPhysicalReplay/);
+assert.match(physicalVisuals, /restoreAdditionalPhysicalReplay/);
 assert.match(physicalVisuals, /activePhysicalDice/);
 assert.match(physicalVisuals, /pendingPhysicalDice/);
 assert.doesNotMatch(physicalVisuals, /Worker\.prototype/);
@@ -151,19 +157,23 @@ assert.doesNotMatch(physicalVisuals, /new Worker\(/);
 assert.doesNotMatch(physicalVisuals, /new CANNON\.World/);
 assert.doesNotMatch(visualBase, /createGeneratedDieVisual/);
 assert.doesNotMatch(visualBase, /createReadablePolyhedron/);
-assert.match(engine, /getPhysicalFallbackPlanEntries/);
-assert.match(engine, /commitPhysicalFallbackPlan/);
+assert.match(engine, /getAdditionalPhysicalPlanEntries/);
+assert.match(engine, /commitAdditionalPhysicalPlan/);
 assert.match(engine, /additional,/);
-assert.match(engine, /hasPendingPhysicalFallbackDice/);
-assert.match(engine, /physicalFallbackReplay/);
+assert.match(engine, /hasPendingAdditionalPhysicalDice/);
+assert.match(engine, /additionalPhysicalReplay/);
+assert.doesNotMatch(engine, /physicalFallbackReplay/);
 assert.doesNotMatch(physicalVisuals, /settledRotation/);
 
 // Runtime themes can paint arbitrary artwork into generated physical outcome slots.
 assert.match(physicalMesh, /getRuntimeThemeTexture/);
 assert.match(physicalMesh, /getRuntimeThemeMaterial/);
 assert.match(physicalMesh, /getRuntimeThemeMesh/);
+assert.match(physicalMesh, /getRuntimeThemeLabelStyle/);
+assert.match(physicalMesh, /getRuntimeThemeAssetTexture/);
 assert.match(physicalMesh, /createPhysicalDieMesh/);
 assert.match(physicalMesh, /updateShadow/);
+assert.doesNotMatch(physicalVisuals, /DraftrollFallbackVisual/);
 assert.doesNotMatch(physicalVisuals, /BaseFallbackVisualInstance/);
 assert.doesNotMatch(physicalVisuals, /fallback-visuals-base/);
 assert.match(physicalLaunch, /createPhysicalLaunchStates/);
@@ -207,7 +217,6 @@ assert.match(visualBase, /CARD_HEIGHT \* scale \+ CARD_ROW_GAP/);
 assert.match(visualBase, /easeInOutCubic/);
 assert.match(visualBase, /faceDown/);
 assert.match(visualBase, /faceUp/);
-assert.match(visualBase, /spec\.oppositeLabel/);
 assert.match(visualBase, /getSettleTime/);
 
 assert.match(html, /1d20\+1d2\+1dF\+1d9\+1d100/);

@@ -10,7 +10,7 @@ export interface FallbackVisualBounds {
   z: number;
 }
 
-type VisualMode = 'sprite' | 'coin' | 'card';
+type VisualMode = 'sprite' | 'card';
 
 interface Trajectory {
   start: THREE.Vector3;
@@ -229,79 +229,6 @@ function createCardBackTexture(spec: DraftrollFallbackVisual): THREE.CanvasTextu
   return texture;
 }
 
-function cropCoinTexture(texture: THREE.CanvasTexture): void {
-  texture.offset.set(100 / 640, 0);
-  texture.repeat.set(440 / 640, 1);
-  texture.needsUpdate = true;
-}
-
-function createCoinVisual(
-  texture: THREE.CanvasTexture,
-  spec: DraftrollFallbackVisual,
-): ThreeDimensionalVisual {
-  const palette = THEMES[normalizeTheme(spec.theme)];
-  const group = new THREE.Group();
-  const bodyGeometry = new THREE.CylinderGeometry(0.76, 0.76, 0.14, 64, 1, false);
-  const faceGeometry = new THREE.CircleGeometry(0.69, 64);
-  const edgeMaterial = new THREE.MeshStandardMaterial({
-    color: palette.edge,
-    metalness: 0.58,
-    roughness: 0.3,
-    transparent: true,
-    opacity: 0,
-  });
-  const capMaterial = new THREE.MeshStandardMaterial({
-    color: palette.base,
-    metalness: 0.42,
-    roughness: 0.36,
-    transparent: true,
-    opacity: 0,
-  });
-
-  cropCoinTexture(texture);
-  const faceMaterial = new THREE.MeshBasicMaterial({
-    map: texture,
-    transparent: true,
-    opacity: 0,
-    depthWrite: false,
-    toneMapped: false,
-    side: THREE.DoubleSide,
-  });
-  const backTexture = createFallbackTexture({ ...spec, label: spec.oppositeLabel ?? '•' });
-  cropCoinTexture(backTexture);
-  const backMaterial = new THREE.MeshBasicMaterial({
-    map: backTexture,
-    transparent: true,
-    opacity: 0,
-    depthWrite: false,
-    toneMapped: false,
-    side: THREE.DoubleSide,
-  });
-
-  const body = new THREE.Mesh(bodyGeometry, [edgeMaterial, capMaterial, capMaterial]);
-  body.castShadow = true;
-  body.receiveShadow = true;
-  group.add(body);
-
-  const face = new THREE.Mesh(faceGeometry, faceMaterial);
-  face.rotation.x = -Math.PI / 2;
-  face.position.y = 0.072;
-  group.add(face);
-
-  const back = new THREE.Mesh(faceGeometry, backMaterial);
-  back.rotation.x = Math.PI / 2;
-  back.position.y = -0.072;
-  group.add(back);
-
-  return {
-    mode: 'coin',
-    group,
-    geometries: [bodyGeometry, faceGeometry],
-    materials: [edgeMaterial, capMaterial, faceMaterial, backMaterial],
-    textures: [backTexture],
-  };
-}
-
 function createRoundedCardShape(width: number, height: number, radius: number): THREE.Shape {
   const halfWidth = width / 2;
   const halfHeight = height / 2;
@@ -400,9 +327,7 @@ function createCardVisual(spec: DraftrollFallbackVisual): ThreeDimensionalVisual
 }
 
 function visualScale(kind: DraftrollFallbackKind): THREE.Vector2 {
-  if (kind === 'token') return new THREE.Vector2(1.95, 1.28);
-  if (kind === 'fate') return new THREE.Vector2(1.55, 1.55);
-  return new THREE.Vector2(1.62, 1.16);
+  return kind === 'token' ? new THREE.Vector2(1.95, 1.28) : new THREE.Vector2(1.62, 1.16);
 }
 
 function easeOutCubic(value: number): number {
@@ -507,12 +432,7 @@ export class FallbackVisualInstance {
     this.sprite.scale.set(scale.x, scale.y, 1);
     this.sprite.renderOrder = 5;
 
-    this.threeDimensional =
-      spec.kind === 'coin'
-        ? createCoinVisual(this.texture, spec)
-        : spec.kind === 'card'
-          ? createCardVisual(spec)
-          : null;
+    this.threeDimensional = spec.kind === 'card' ? createCardVisual(spec) : null;
     this.group.add(this.threeDimensional?.group ?? this.sprite);
 
     this.shadowMaterial = new THREE.SpriteMaterial({

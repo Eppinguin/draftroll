@@ -12,7 +12,7 @@ const [cards, deck, demo, html, sdkPackage] = await Promise.all([
 assert.match(cards, /createStandardDeck/);
 assert.match(cards, /standardPlayingCards/);
 assert.match(cards, /value: 0/);
-assert.match(cards, /game-specific interpretation belongs to the consuming application/);
+assert.match(cards, /game-specific interpretation .*consuming application/);
 assert.match(deck, /class DraftrollDeck/);
 assert.match(deck, /reshuffleDiscard/);
 assert.match(deck, /getRandomValues/);
@@ -30,4 +30,10 @@ assert.match(demo, /deck\.reshuffleDiscard\(\)/);
 assert.match(demo, /draw\.toDisplayInput/);
 assert.match(demo, /draftroll\.display/);
 
-console.log(JSON.stringify({ ok: true, standardDeck: true, interactiveDemo: true, systemAgnostic: true }, null, 2));
+console.log(
+  JSON.stringify(
+    { ok: true, standardDeck: true, interactiveDemo: true, systemAgnostic: true },
+    null,
+    2,
+  ),
+);

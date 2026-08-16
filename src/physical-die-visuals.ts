@@ -1,16 +1,16 @@
 import * as THREE from 'three';
-import type { DraftrollFallbackVisual } from '../packages/renderer/src/index';
+import type { DraftrollPhysicalVisual } from '../packages/renderer/src/index';
 import {
   createDefaultPhysicalDiePresentation,
   createGeneratedPhysicalDieDefinition,
   createPhysicalDiePresentation,
   physicalDieColliderRadius,
   type PhysicalDieDefinition,
-  type PhysicalDieFaceContent,
   type PhysicalDiePresentation,
 } from './physical-dice';
 import { createPhysicalDieMesh, type PhysicalDieMesh } from './physical-die-mesh';
 import type { PhysicalLaunchState } from './physical-launch';
+import { getRuntimeThemePresentation } from './runtime-themes';
 import { extractPhysicalTransforms } from './physical-roll-planner';
 
 export interface PhysicalVisualBounds {
@@ -25,74 +25,27 @@ interface RecordedTrajectory {
   step: number;
 }
 
-const MAXIMUM_EXACT_GENERATED_SIDES = 256;
 const activePhysicalDice = new Set<PhysicalDieVisualInstance>();
 const pendingPhysicalDice = new Set<PhysicalDieVisualInstance>();
 let plannedPhysicalDice: PhysicalDieVisualInstance[] = [];
-let lastPhysicalFallbackReplay: PhysicalFallbackReplay | null = null;
-
-export function numericPhysicalSides(spec: DraftrollFallbackVisual): number | null {
-  if (Number.isSafeInteger(spec.sides) && (spec.sides ?? 0) >= 1) return spec.sides!;
-  const match = /^d(\d+)$/i.exec(spec.type);
-  const sides = match ? Number(match[1]) : NaN;
-  return Number.isSafeInteger(sides) && sides >= 1 ? sides : null;
-}
-
-/** Transitional browser-storage check for an exact arbitrary physical die. */
-export function usesPhysicalDieModel(spec: DraftrollFallbackVisual): boolean {
-  if (spec.kind !== 'spinner') return false;
-  const sides = numericPhysicalSides(spec);
-  return sides !== null && sides <= MAXIMUM_EXACT_GENERATED_SIDES;
-}
-
-function requestedOutcomeIndex(spec: DraftrollFallbackVisual, sides: number): number {
-  const explicit = spec.metadata?.draftrollPhysicalOutcomeIndex;
-  if (Number.isSafeInteger(explicit) && Number(explicit) >= 0 && Number(explicit) < sides) {
-    return Number(explicit);
-  }
-  const raw = typeof spec.result === 'number' ? spec.result : Number(spec.numericValue);
-  const value = Number.isFinite(raw) ? THREE.MathUtils.clamp(Math.round(raw), 1, sides) : 1;
-  return value - 1;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
-function parsePhysicalFaceContent(value: unknown): PhysicalDieFaceContent | null {
-  if (!isRecord(value)) return null;
-  const label = typeof value.label === 'string' ? value.label : undefined;
-  if (value.kind === 'number' && typeof value.value === 'number' && Number.isFinite(value.value)) {
-    return { kind: 'number', value: value.value, label };
-  }
-  if (value.kind === 'text' && typeof value.text === 'string') {
-    return { kind: 'text', text: value.text };
-  }
-  if (value.kind === 'icon' && typeof value.icon === 'string') {
-    return { kind: 'icon', icon: value.icon, label };
-  }
-  if (value.kind === 'texture' && typeof value.asset === 'string') {
-    return { kind: 'texture', asset: value.asset, label };
-  }
-  return null;
-}
+let lastAdditionalPhysicalReplay: AdditionalPhysicalReplay | null = null;
 
 function readPhysicalPresentation(
-  spec: DraftrollFallbackVisual,
+  spec: DraftrollPhysicalVisual,
   definition: PhysicalDieDefinition,
 ): { presentation: PhysicalDiePresentation; explicit: boolean } {
-  const raw = spec.metadata?.draftrollPhysicalPresentation;
-  if (isRecord(raw) && Array.isArray(raw.contents)) {
-    const contents = raw.contents.map(parsePhysicalFaceContent);
-    if (contents.length === definition.outcomes.length && contents.every(Boolean)) {
-      return {
-        presentation: createPhysicalDiePresentation(
-          definition,
-          contents.filter((content): content is PhysicalDieFaceContent => content !== null),
-        ),
-        explicit: true,
-      };
-    }
+  if (spec.presentation) {
+    return {
+      presentation: createPhysicalDiePresentation(definition, spec.presentation.contents),
+      explicit: true,
+    };
+  }
+  const themed = getRuntimeThemePresentation(spec.theme, spec.type, `d${definition.sides}`);
+  if (themed && themed.contents.length === definition.outcomes.length) {
+    return {
+      presentation: createPhysicalDiePresentation(definition, themed.contents),
+      explicit: true,
+    };
   }
   return { presentation: createDefaultPhysicalDiePresentation(definition), explicit: false };
 }
@@ -191,7 +144,7 @@ function serializeLaunchState(state: PhysicalLaunchState): number[] {
 
 export class PhysicalDieVisualInstance {
   readonly group: THREE.Group;
-  readonly spec: DraftrollFallbackVisual;
+  readonly spec: DraftrollPhysicalVisual;
   readonly definition: PhysicalDieDefinition;
   readonly sides: number;
   bounds: PhysicalVisualBounds = { x: 5, z: 5 };
@@ -210,14 +163,15 @@ export class PhysicalDieVisualInstance {
   private lastProgress = 0;
   private presented = false;
 
-  constructor(spec: DraftrollFallbackVisual) {
+  constructor(spec: DraftrollPhysicalVisual) {
     this.spec = spec;
-    const sides = numericPhysicalSides(spec);
-    if (sides === null) throw new Error(`Physical numeric die requires sides: ${spec.type}`);
-    this.sides = sides;
-    this.definition = createGeneratedPhysicalDieDefinition(sides);
+    if (!Number.isSafeInteger(spec.sides) || spec.sides < 1 || spec.sides > 256) {
+      throw new Error(`Physical die requires 1 to 256 exact outcome slots: ${spec.type}`);
+    }
+    this.sides = spec.sides;
+    this.definition = createGeneratedPhysicalDieDefinition(spec.sides);
     const resolvedPresentation = readPhysicalPresentation(spec, this.definition);
-    this.requestedOutcome = requestedOutcomeIndex(spec, sides);
+    this.requestedOutcome = spec.outcomeIndex;
     this.mesh = createPhysicalDieMesh({
       spec,
       definition: this.definition,
@@ -448,13 +402,13 @@ export interface PendingPhysicalLaunchAssignment {
   state: PhysicalLaunchState;
 }
 
-export interface PhysicalFallbackPlanEntry {
+export interface AdditionalPhysicalPlanEntry {
   definition: PhysicalDieDefinition;
   state: number[];
 }
 
 /** Recorded arbitrary-physical-die transforms retained alongside a legacy replay. */
-export interface PhysicalFallbackReplay {
+export interface AdditionalPhysicalReplay {
   ids: string[];
   step: number;
   frameCount: number;
@@ -485,12 +439,12 @@ export function assignPendingPhysicalLaunchStates(
 }
 
 /** True when at least one arbitrary numeric die is participating in the physical table. */
-export function hasConfiguredPhysicalFallbackDice(): boolean {
+export function hasConfiguredAdditionalPhysicalDice(): boolean {
   return configuredPhysicalDice().length > 0;
 }
 
 /** True when a newly configured arbitrary die still needs a committed physical trajectory. */
-export function hasPendingPhysicalFallbackDice(): boolean {
+export function hasPendingAdditionalPhysicalDice(): boolean {
   return pendingPhysicalDice.size > 0;
 }
 
@@ -498,7 +452,7 @@ export function hasPendingPhysicalFallbackDice(): boolean {
  * Captures the arbitrary physical entries that main.ts appends to the normal roll-worker request.
  * This is an explicit compatibility boundary; no Worker prototype interception is involved.
  */
-export function getPhysicalFallbackPlanEntries(): PhysicalFallbackPlanEntry[] {
+export function getAdditionalPhysicalPlanEntries(): AdditionalPhysicalPlanEntry[] {
   plannedPhysicalDice = configuredPhysicalDice();
   return plannedPhysicalDice.map((entry) => ({
     definition: entry.definition,
@@ -507,7 +461,7 @@ export function getPhysicalFallbackPlanEntries(): PhysicalFallbackPlanEntry[] {
 }
 
 /** Commits the additional trajectories returned by the one shared physical roll worker. */
-export function commitPhysicalFallbackPlan(
+export function commitAdditionalPhysicalPlan(
   transforms: Float32Array,
   frameCount: number,
   step: number,
@@ -516,15 +470,15 @@ export function commitPhysicalFallbackPlan(
   const entries = plannedPhysicalDice.length > 0 ? plannedPhysicalDice : configuredPhysicalDice();
   plannedPhysicalDice = [];
   if (entries.length === 0) {
-    lastPhysicalFallbackReplay = null;
+    lastAdditionalPhysicalReplay = null;
     return;
   }
   const expected = frameCount * entries.length * 7;
   if (frameCount < 1 || transforms.length !== expected || landings.length !== entries.length) {
-    throw new Error('Physical fallback trajectory buffers do not match the planned dice.');
+    throw new Error('Additional physical trajectory buffers do not match the planned dice.');
   }
   commitAdditionalTrajectories(transforms, frameCount, step, entries, landings);
-  lastPhysicalFallbackReplay = {
+  lastAdditionalPhysicalReplay = {
     ids: entries.map((entry) => entry.spec.id),
     step,
     frameCount,
@@ -533,8 +487,8 @@ export function commitPhysicalFallbackPlan(
   };
 }
 
-export function capturePhysicalFallbackReplay(): PhysicalFallbackReplay | undefined {
-  const replay = lastPhysicalFallbackReplay;
+export function captureAdditionalPhysicalReplay(): AdditionalPhysicalReplay | undefined {
+  const replay = lastAdditionalPhysicalReplay;
   return replay
     ? {
         ids: replay.ids.slice(),
@@ -547,18 +501,18 @@ export function capturePhysicalFallbackReplay(): PhysicalFallbackReplay | undefi
 }
 
 /** Restores arbitrary physical trajectories without re-running physics during replay. */
-export function restorePhysicalFallbackReplay(replay: PhysicalFallbackReplay): void {
+export function restoreAdditionalPhysicalReplay(replay: AdditionalPhysicalReplay): void {
   const entries = new Map(configuredPhysicalDice().map((entry) => [entry.spec.id, entry] as const));
   if (replay.ids.length !== replay.landings.length) {
-    throw new Error('Physical fallback replay landing data is invalid.');
+    throw new Error('Additional physical replay landing data is invalid.');
   }
   const expected = replay.frameCount * replay.ids.length * 7;
   if (replay.frameCount < 1 || replay.transforms.length !== expected) {
-    throw new Error('Physical fallback replay transform data is invalid.');
+    throw new Error('Additional physical replay transform data is invalid.');
   }
   replay.ids.forEach((id, index) => {
     const entry = entries.get(id);
-    if (!entry) throw new Error(`Physical fallback replay die is missing: ${id}`);
+    if (!entry) throw new Error(`Additional physical replay die is missing: ${id}`);
     entry.commitTrajectory(
       trajectoryForIndex(
         replay.transforms,
@@ -570,7 +524,7 @@ export function restorePhysicalFallbackReplay(replay: PhysicalFallbackReplay): v
       replay.landings[index] ?? 0,
     );
   });
-  lastPhysicalFallbackReplay = {
+  lastAdditionalPhysicalReplay = {
     ids: replay.ids.slice(),
     step: replay.step,
     frameCount: replay.frameCount,

@@ -1,18 +1,53 @@
-import {
-  DraftrollDeck,
-  type DraftrollCardDefinition,
-  type DraftrollDeckOptions,
-} from './deck';
+/**
+ * System-agnostic helpers for standard French-suited playing-card decks.
+ *
+ * @packageDocumentation
+ */
 
+import { DraftrollDeck, type DraftrollCardDefinition, type DraftrollDeckOptions } from './deck';
+
+/**
+ * Suit identifiers used by the standard playing-card helpers.
+ *
+ * @public
+ */
 export type StandardSuit = 'spades' | 'hearts' | 'diamonds' | 'clubs';
-export type StandardRank = 'A' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '10' | 'J' | 'Q' | 'K';
+/**
+ * Rank identifiers used by the standard playing-card helpers.
+ *
+ * @public
+ */
+export type StandardRank =
+  | 'A'
+  | '2'
+  | '3'
+  | '4'
+  | '5'
+  | '6'
+  | '7'
+  | '8'
+  | '9'
+  | '10'
+  | 'J'
+  | 'Q'
+  | 'K';
 
+/**
+ * Configures construction of a standard French-suited Draftroll deck.
+ *
+ * @public
+ */
 export interface StandardDeckOptions extends DraftrollDeckOptions {
   /** Number of generic jokers to append. Defaults to zero. */
   jokers?: 0 | 1 | 2;
 }
 
-const SUITS: ReadonlyArray<{ id: StandardSuit; symbol: string; label: string; color: 'red' | 'black' }> = [
+const SUITS: ReadonlyArray<{
+  id: StandardSuit;
+  symbol: string;
+  label: string;
+  color: 'red' | 'black';
+}> = [
   { id: 'spades', symbol: '♠', label: 'Spades', color: 'black' },
   { id: 'hearts', symbol: '♥', label: 'Hearts', color: 'red' },
   { id: 'diamonds', symbol: '♦', label: 'Diamonds', color: 'red' },
@@ -41,8 +76,12 @@ const RANKS: ReadonlyArray<{ id: StandardRank; label: string }> = [
  * @remarks
  * Numeric values intentionally remain zero. Blackjack values, poker ranking, trump rules, and
  * every other game-specific interpretation belong to the consuming application.
+ *
+ * @public
  */
-export function standardPlayingCards(options: Pick<StandardDeckOptions, 'jokers'> = {}): DraftrollCardDefinition[] {
+export function standardPlayingCards(
+  options: Pick<StandardDeckOptions, 'jokers'> = {},
+): DraftrollCardDefinition[] {
   const cards: DraftrollCardDefinition[] = [];
   for (const suit of SUITS) {
     for (const rank of RANKS) {
@@ -74,7 +113,11 @@ export function standardPlayingCards(options: Pick<StandardDeckOptions, 'jokers'
   return cards;
 }
 
-/** Creates a shuffled, stateful standard playing-card deck. */
+/**
+ * Creates a shuffled, stateful standard playing-card deck.
+ *
+ * @public
+ */
 export function createStandardDeck(
   id = 'standard-52',
   options: StandardDeckOptions = {},
@@ -83,7 +126,10 @@ export function createStandardDeck(
   return new DraftrollDeck(id, standardPlayingCards({ jokers }), {
     ...deckOptions,
     metadata: {
-      name: jokers > 0 ? `Standard deck + ${jokers} joker${jokers === 1 ? '' : 's'}` : 'Standard 52-card deck',
+      name:
+        jokers > 0
+          ? `Standard deck + ${jokers} joker${jokers === 1 ? '' : 's'}`
+          : 'Standard 52-card deck',
       deckKind: 'standard-playing-cards',
       ...deckOptions.metadata,
     },

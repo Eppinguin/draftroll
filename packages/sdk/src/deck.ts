@@ -1,4 +1,8 @@
-/** Stateful, system-agnostic card decks for Draftroll. */
+/**
+ * Stateful, system-agnostic card deck primitives for Draftroll.
+ *
+ * @packageDocumentation
+ */
 import type {
   CustomDiceDefinition,
   CustomDieFace,
@@ -6,15 +10,30 @@ import type {
   ExternalDieResult,
 } from '../../protocol/src/index';
 
+/**
+ * Defines one card face and optional duplicate count inside a deck.
+ *
+ * @public
+ */
 export interface DraftrollCardDefinition extends Omit<CustomDieFace, 'weight'> {
   copies?: number;
 }
+/**
+ * Configures initial shuffle behavior, randomness, and deck metadata.
+ *
+ * @public
+ */
 export interface DraftrollDeckOptions {
   shuffle?: boolean;
   /** Deterministic/test random source in [0, 1). Production defaults to unbiased WebCrypto sampling. */
   random?: () => number;
   metadata?: Record<string, unknown>;
 }
+/**
+ * Immutable public snapshot of a concrete card copy in a deck.
+ *
+ * @public
+ */
 export interface DraftrollCard {
   id: string;
   deckId: string;
@@ -25,6 +44,11 @@ export interface DraftrollCard {
   label: string;
   metadata?: Record<string, unknown>;
 }
+/**
+ * Presentation metadata applied when a card draw is converted to display input.
+ *
+ * @public
+ */
 export interface DraftrollCardDisplayOptions {
   name?: string;
   expression?: string;
@@ -33,6 +57,11 @@ export interface DraftrollCardDisplayOptions {
   comment?: string | null;
   metadata?: Record<string, unknown>;
 }
+/**
+ * Result of drawing one or more cards, including exact display conversion.
+ *
+ * @public
+ */
 export interface DraftrollCardDraw {
   readonly deckId: string;
   readonly cards: readonly DraftrollCard[];
@@ -98,6 +127,9 @@ export class DraftrollDeck {
   private discardPile: DraftrollCard[] = [];
   private inPlay = new Map<string, DraftrollCard>();
 
+  /**
+   * Creates an independent deck from system-agnostic card definitions.
+   */
   constructor(
     id: string,
     cards: readonly DraftrollCardDefinition[],
@@ -144,30 +176,38 @@ export class DraftrollDeck {
     if (options.shuffle !== false) this.shuffle();
   }
 
+  /** Returns the total number of physical card copies in the deck. */
   get size(): number {
     return this.source.length;
   }
+  /** Returns the number of cards currently available to draw. */
   get remaining(): number {
     return this.drawPile.length;
   }
+  /** Returns the number of cards currently in the discard pile. */
   get discarded(): number {
     return this.discardPile.length;
   }
+  /** Returns the number of cards currently drawn and still in play. */
   get active(): number {
     return this.inPlay.size;
   }
+  /** Returns detached snapshots of the cards currently available to draw. */
   get remainingCards(): readonly DraftrollCard[] {
     return this.drawPile.map(cloneCard);
   }
+  /** Returns detached snapshots of the cards currently discarded. */
   get discardedCards(): readonly DraftrollCard[] {
     return this.discardPile.map(cloneCard);
   }
 
+  /** Randomizes the remaining draw pile in place. */
   shuffle(): this {
     shuffle(this.drawPile, this.sampleIndex);
     return this;
   }
 
+  /** Draws cards from the current draw pile and marks them active. */
   draw(count = 1): DraftrollCardDraw {
     if (!Number.isSafeInteger(count) || count < 1)
       throw new Error('Draw count must be a positive safe integer');
@@ -212,6 +252,7 @@ export class DraftrollDeck {
     });
   }
 
+  /** Moves active cards into the discard pile. */
   discard(cards: DraftrollCard | string | readonly (DraftrollCard | string)[]): this {
     for (const item of Array.isArray(cards) ? cards : [cards]) {
       const id = typeof item === 'string' ? item : item.id;
@@ -223,6 +264,7 @@ export class DraftrollDeck {
     return this;
   }
 
+  /** Returns active cards to the draw pile, optionally reshuffling them. */
   return(
     cards: DraftrollCard | string | readonly (DraftrollCard | string)[],
     options: { shuffle?: boolean } = {},
@@ -238,10 +280,12 @@ export class DraftrollDeck {
     return this;
   }
 
+  /** Moves every discarded card back into the draw pile and shuffles it. */
   reshuffleDiscard(): this {
     this.drawPile.push(...this.discardPile.splice(0));
     return this.shuffle();
   }
+  /** Restores every card copy to the draw pile and optionally shuffles it. */
   reset(options: { shuffle?: boolean } = {}): this {
     this.inPlay.clear();
     this.discardPile = [];
@@ -251,6 +295,11 @@ export class DraftrollDeck {
   }
 }
 
+/**
+ * Creates a stateful Draftroll deck from system-agnostic card definitions.
+ *
+ * @public
+ */
 export function createDeck(
   id: string,
   cards: readonly DraftrollCardDefinition[],
