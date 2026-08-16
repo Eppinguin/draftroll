@@ -8,6 +8,7 @@ for line in [
     "replace_all('src/physical-die-visuals.ts', 'capturePhysicalFallbackReplay', 'captureAdditionalPhysicalReplay')\n",
     "replace_all('src/physical-die-visuals.ts', 'restorePhysicalFallbackReplay', 'restoreAdditionalPhysicalReplay')\n",
     "replace_all('src/physical-die-visuals.ts', 'physical fallback', 'additional physical')\n",
+    "replace_all('src/main.ts', '(dice.length === 0 && activeFallbackSpecs.length === 0)', '(activePhysicalSpecs.length === 0 && activeFallbackSpecs.length === 0)')\n",
 ]:
     source = source.replace(line, '')
 
