@@ -33,4 +33,12 @@ if main.count(old_position) != 1:
     raise SystemExit(f'physical world-position adapter: expected one match, found {main.count(old_position)}')
 main_path.write_text(main.replace(old_position, new_position, 1))
 
+natural_path = Path('scripts/test-natural-target-physics.mjs')
+natural = natural_path.read_text()
+old_coin = "assert.match(renderer, /normalized === 'd2'\\) return 'coin'/);"
+new_coin = "assert.match(renderer, /normalized === 'd2'[\\s\\S]{0,100}'coin'/);"
+if natural.count(old_coin) != 1:
+    raise SystemExit(f'd2 canonical mapping assertion: expected one match, found {natural.count(old_coin)}')
+natural_path.write_text(natural.replace(old_coin, new_coin, 1))
+
 print('Unified-plan follow-up cleanup applied.')
