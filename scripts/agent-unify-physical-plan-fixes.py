@@ -18,9 +18,19 @@ main_path = Path('src/main.ts')
 main = main_path.read_text()
 main = main.replace("from './physical-dices';", "from './physical-dice';")
 main = main.replace('clearAdditionalPhysicalVisuals', 'clearGenericPhysicalVisuals')
-main_path.write_text(main)
+old_position = """  const canonicalIndex = activeCanonicalPhysicalIndexes.indexOf(physicalIndex);
+  if (canonicalIndex >= 0) return dice[canonicalIndex]?.getWorldPosition(target) ?? null;
+  const genericIndex = activeGenericPhysicalIndexes.indexOf(physicalIndex);
+"""
+new_position = """  const canonicalIndex = activeCanonicalPhysicalIndexes.indexOf(physicalIndex);
+  if (canonicalIndex >= 0) {
+    const position = dice[canonicalIndex]?.getWorldPosition();
+    return position ? target.copy(position) : null;
+  }
+  const genericIndex = activeGenericPhysicalIndexes.indexOf(physicalIndex);
+"""
+if main.count(old_position) != 1:
+    raise SystemExit(f'physical world-position adapter: expected one match, found {main.count(old_position)}')
+main_path.write_text(main.replace(old_position, new_position, 1))
 
-lines = main.splitlines()
-for index in range(2618, min(len(lines), 2632)):
-    print(f'{index + 1}: {lines[index]}')
 print('Unified-plan follow-up cleanup applied.')
