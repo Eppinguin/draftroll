@@ -25,8 +25,10 @@ jobs:
         run: python scripts/normalize-clean-physical-migration.py
       - name: Apply breaking pre-release migration
         run: python scripts/agent-clean-physical-api.py
+      - name: Clean generated migration output
+        run: python scripts/clean-physical-migration-output.py
       - name: Remove one-time migration files
-        run: rm -f scripts/agent-clean-physical-api.py scripts/agent-physical-theme-api.mjs scripts/normalize-clean-physical-migration.py .github/workflows/agent-physical-theme-api.yml .agent-physical-theme-api-trigger
+        run: rm -f scripts/agent-clean-physical-api.py scripts/agent-physical-theme-api.mjs scripts/normalize-clean-physical-migration.py scripts/clean-physical-migration-output.py .github/workflows/agent-physical-theme-api.yml .agent-physical-theme-api-trigger
       - name: Install pnpm
         run: npm install --global pnpm@11.17.0
       - name: Install dependencies
