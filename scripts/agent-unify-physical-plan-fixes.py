@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 renderer_path = Path('packages/renderer/src/index.ts')
 renderer = renderer_path.read_text()
@@ -135,5 +136,66 @@ new_warmup = """  assert.deepEqual(bridgeCalls.slice(0, 1), [['installTheme', ma
 if themes.count(old_warmup) != 1:
     raise SystemExit(f'runtime theme warmup assertion: expected one match, found {themes.count(old_warmup)}')
 themes_path.write_text(themes.replace(old_warmup, new_warmup, 1))
+
+modifier_path = Path('scripts/test-modifier-sequencing.mjs')
+modifier = modifier_path.read_text()
+modifier = modifier.replace('  const quantityCalls = [];\n  const themeCalls = [];\n', '')
+modifier = modifier.replace(
+    'request.results ?? []',
+    '(request.physical ?? []).map((visual) => visual.result)',
+)
+old_initial_setters = """    setDie() {},
+    setQuantity(count) {
+      quantityCalls.push(count);
+    },
+    setTheme(theme) {
+      themeCalls.push(theme);
+    },
+"""
+if modifier.count(old_initial_setters) != 1:
+    raise SystemExit(f'modifier initial bridge setters: expected one match, found {modifier.count(old_initial_setters)}')
+modifier = modifier.replace(old_initial_setters, '', 1)
+plain_setters = """    setDie() {},
+    setQuantity() {},
+    setTheme() {},
+"""
+plain_count = modifier.count(plain_setters)
+if plain_count < 3:
+    raise SystemExit(f'modifier plain bridge setters: expected at least three matches, found {plain_count}')
+modifier = modifier.replace(plain_setters, '')
+modifier = modifier.replace(
+    'calls[0].results',
+    'calls[0].physical.map((visual) => visual.result)',
+)
+modifier = modifier.replace(
+    'calls[1].results',
+    'calls[1].physical.map((visual) => visual.result)',
+)
+old_setter_assertions = """  assert.deepEqual(
+    quantityCalls,
+    [2],
+    'additive reroll stages must not call setQuantity because the browser bridge rebuilds the table',
+  );
+  assert.deepEqual(
+    themeCalls,
+    ['dragon'],
+    'additive reroll stages must not retheme or rebuild settled dice',
+  );
+"""
+if modifier.count(old_setter_assertions) != 1:
+    raise SystemExit(f'modifier setter assertions: expected one match, found {modifier.count(old_setter_assertions)}')
+modifier = modifier.replace(old_setter_assertions, '', 1)
+modifier = modifier.replace(
+    'sdkCalls.map((request) => request.results)',
+    'sdkCalls.map((request) => request.physical.map((visual) => visual.result))',
+)
+modifier = re.sub(
+    r'(sdkCalls\[\d+\]|retryCalls\[\d+\])\.results',
+    r'\1.physical.map((visual) => visual.result)',
+    modifier,
+)
+if 'request.results ?? []' in modifier:
+    raise SystemExit('modifier request.results compatibility path remains')
+modifier_path.write_text(modifier)
 
 print('Unified-plan follow-up cleanup applied.')
