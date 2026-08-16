@@ -73,4 +73,27 @@ assert.doesNotMatch(worker, /createDiePhysicsShape\\(kinds\\[index\\]\\)/);""",
     'character client unified worker assertion',
 )
 
+replace_once(
+    'scripts/test-package-entrypoints.mjs',
+    """  './headless': {
+    types: './dist/index.d.ts',
+    default: './dist/index.js',
+  },
+});""",
+    """  './headless': {
+    types: './dist/index.d.ts',
+    default: './dist/index.js',
+  },
+  './deck': {
+    types: './dist/deck.d.ts',
+    default: './dist/deck.js',
+  },
+  './cards': {
+    types: './dist/cards.d.ts',
+    default: './dist/cards.js',
+  },
+});""",
+    'SDK cards/deck package exports',
+)
+
 print('Remaining core test expectations migrated.')
