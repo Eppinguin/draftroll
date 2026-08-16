@@ -18,10 +18,11 @@ try {
     JSON.stringify(
       {
         compilerOptions: {
-          target: 'ES2022',
+          target: 'ES2023',
+          lib: ['ES2023', 'DOM'],
           module: 'CommonJS',
           moduleResolution: 'Node',
-          rootDir: join(projectRoot, 'src'),
+          rootDir: projectRoot,
           outDir,
           strict: true,
           skipLibCheck: true,
@@ -47,13 +48,13 @@ try {
   await writeFile(join(outDir, 'package.json'), '{"type":"commonjs"}\n');
 
   const require = createRequire(import.meta.url);
-  const { createDiePhysicsShape } = require(join(outDir, 'physics-shapes.js'));
+  const { createDiePhysicsShape } = require(join(outDir, 'src/physics-shapes.js'));
   const {
     markUnobstructedTableDice,
     minimumRestingAlignment,
     readRestingAlignment,
     releaseUnstableRestPose,
-  } = require(join(outDir, 'resting-physics.js'));
+  } = require(join(outDir, 'src/resting-physics.js'));
   const coinShape = createDiePhysicsShape('coin');
   assert.ok(coinShape instanceof CANNON.Cylinder, 'coin uses a Cannon cylinder');
 

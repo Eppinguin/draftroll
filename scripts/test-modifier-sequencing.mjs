@@ -163,8 +163,6 @@ try {
   protocol.assertNormalizedRollResult(externallyNormalizedReroll);
 
   const calls = [];
-  const quantityCalls = [];
-  const themeCalls = [];
   const pending = [];
   const lifecycle = [];
   const bridge = {
@@ -172,16 +170,13 @@ try {
       calls.push(request);
       return new Promise((settle) =>
         pending.push(() =>
-          settle({ results: request.results ?? [], total: 0, replay: { stage: calls.length } }),
+          settle({
+            results: (request.physical ?? []).map((visual) => visual.result),
+            total: 0,
+            replay: { stage: calls.length },
+          }),
         ),
       );
-    },
-    setDie() {},
-    setQuantity(count) {
-      quantityCalls.push(count);
-    },
-    setTheme(theme) {
-      themeCalls.push(theme);
     },
     getThemes() {
       return [{ id: 'dragon', name: 'Wyrmfire' }];
@@ -199,7 +194,7 @@ try {
   });
   await waitFor(() => calls.length === 1);
   assert.deepEqual(
-    calls[0].results,
+    calls[0].physical.map((visual) => visual.result),
     [1, 4],
     'the failed initial result must be physically rolled first',
   );
@@ -223,7 +218,11 @@ try {
 
   pending.shift()();
   await waitFor(() => calls.length === 2);
-  assert.deepEqual(calls[1].results, [2], 'the replacement must be a separate follow-up throw');
+  assert.deepEqual(
+    calls[1].physical.map((visual) => visual.result),
+    [2],
+    'the replacement must be a separate follow-up throw',
+  );
   assert.equal(calls[1].tableMode, 'add');
   assert.equal(calls[1].context.modifierSequencePending, false);
   assert.equal(
@@ -244,16 +243,6 @@ try {
 
   pending.shift()();
   const completion = await presentation;
-  assert.deepEqual(
-    quantityCalls,
-    [2],
-    'additive reroll stages must not call setQuantity because the browser bridge rebuilds the table',
-  );
-  assert.deepEqual(
-    themeCalls,
-    ['dragon'],
-    'additive reroll stages must not retheme or rebuild settled dice',
-  );
   assert.deepEqual(completion.results, [1, 4, 2]);
   assert.equal(completion.total, 6);
   assert.deepEqual(
@@ -266,11 +255,12 @@ try {
   const immediateBridge = {
     async roll(request) {
       explosionCalls.push(request);
-      return { results: request.results ?? [], total: 0, replay: { stage: explosionCalls.length } };
+      return {
+        results: (request.physical ?? []).map((visual) => visual.result),
+        total: 0,
+        replay: { stage: explosionCalls.length },
+      };
     },
-    setDie() {},
-    setQuantity() {},
-    setTheme() {},
     getThemes() {
       return [{ id: 'dragon', name: 'Wyrmfire' }];
     },
@@ -282,14 +272,11 @@ try {
     async roll(request) {
       sdkCalls.push(request);
       return {
-        results: request.results ?? [],
+        results: (request.physical ?? []).map((visual) => visual.result),
         total: Number(request.context?.normalizedTotal ?? 0),
         replay: { stage: sdkCalls.length },
       };
     },
-    setDie() {},
-    setQuantity() {},
-    setTheme() {},
     clear() {},
     getThemes() {
       return [{ id: 'dragon', name: 'Wyrmfire' }];
@@ -305,7 +292,7 @@ try {
   const singleReroll = original.rerollDie('die_1');
   const singleCompletion = await singleReroll.wait();
   assert.deepEqual(
-    sdkCalls.map((request) => request.results),
+    sdkCalls.map((request) => request.physical.map((visual) => visual.result)),
     [[2, 4], [5]],
     'an individual reroll must append only the replacement die',
   );
@@ -338,7 +325,10 @@ try {
   const repeatedReroll = singleReroll.rerollDie('die_1');
   await repeatedReroll.wait();
   assert.equal(sdkCalls[2].tableMode, 'add');
-  assert.deepEqual(sdkCalls[2].results, [6]);
+  assert.deepEqual(
+    sdkCalls[2].physical.map((visual) => visual.result),
+    [6],
+  );
   const repeatedStates = sdkCalls[2].context.renderedDice.filter(
     (die) => die.id === 'die_1' || die.generatedBy === 'reroll',
   );
@@ -362,7 +352,7 @@ try {
     'after clear, a reroll safely falls back to a complete replacement presentation',
   );
   assert.deepEqual(
-    sdkCalls[3].results,
+    sdkCalls[3].physical.map((visual) => visual.result),
     [3, 4],
     'the replacement fallback renders the complete logical result, not an orphaned die',
   );
@@ -374,7 +364,10 @@ try {
     'add',
     'once the complete fallback is visible, later rerolls append normally again',
   );
-  assert.deepEqual(sdkCalls[4].results, [1]);
+  assert.deepEqual(
+    sdkCalls[4].physical.map((visual) => visual.result),
+    [1],
+  );
   assert.equal(
     sdkCalls[4].context.renderedDice.length,
     3,
@@ -390,7 +383,10 @@ try {
     'replace',
     'hosts can explicitly opt out of persistent reroll history',
   );
-  assert.deepEqual(sdkCalls[5].results, [2]);
+  assert.deepEqual(
+    sdkCalls[5].physical.map((visual) => visual.result),
+    [2],
+  );
 
   const retryCalls = [];
   let rejectNextAppend = true;
@@ -402,14 +398,11 @@ try {
         throw new Error('Active table visual limit exceeded');
       }
       return {
-        results: request.results ?? [],
+        results: (request.physical ?? []).map((visual) => visual.result),
         total: Number(request.context?.normalizedTotal ?? 0),
         replay: null,
       };
     },
-    setDie() {},
-    setQuantity() {},
-    setTheme() {},
     clear() {},
     getThemes() {
       return [{ id: 'dragon', name: 'Wyrmfire' }];
@@ -429,7 +422,10 @@ try {
     ['replace', 'add', 'replace'],
     'a raced clear or full table must retry the revised roll as a complete replacement',
   );
-  assert.deepEqual(retryCalls[2].results, [5, 4]);
+  assert.deepEqual(
+    retryCalls[2].physical.map((visual) => visual.result),
+    [5, 4],
+  );
   assert.equal(retriedCompletion.presentationMode, 'replace');
   const afterRetry = retriedReroll.rerollDie('die_1');
   await afterRetry.wait();
@@ -453,7 +449,7 @@ try {
       staleCalls.push(request);
       if (staleCalls.length > 1) {
         return Promise.resolve({
-          results: request.results ?? [],
+          results: (request.physical ?? []).map((visual) => visual.result),
           total: Number(request.context?.normalizedTotal ?? 0),
           replay: null,
         });
@@ -462,15 +458,12 @@ try {
       return new Promise((settle) => {
         settleStaleRoll = () =>
           settle({
-            results: request.results ?? [],
+            results: (request.physical ?? []).map((visual) => visual.result),
             total: Number(request.context?.normalizedTotal ?? 0),
             replay: null,
           });
       });
     },
-    setDie() {},
-    setQuantity() {},
-    setTheme() {},
     clear() {
       staleClearCount += 1;
     },
@@ -578,7 +571,7 @@ try {
 
   await explosionRenderer.playRoll(shorthandExplosion);
   assert.deepEqual(
-    explosionCalls.map((request) => request.results),
+    explosionCalls.map((request) => request.physical.map((visual) => visual.result)),
     [[4, 2], [4], [3]],
     'recursive explosions must roll one causal wave at a time',
   );
@@ -594,9 +587,9 @@ try {
   explosionCalls.length = 0;
   await explosionRenderer.playRoll(fateExplosion);
   assert.deepEqual(
-    explosionCalls.map((request) => request.fallbacks?.map((fallback) => fallback.result)),
+    explosionCalls.map((request) => request.physical.map((visual) => visual.result)),
     [[1], [-1]],
-    'fallback-only explosions must also preserve prior visuals and append causal waves',
+    'Fate explosions remain first-class physical dice and append causal waves',
   );
   assert.deepEqual(
     explosionCalls.map((request) => request.tableMode),
@@ -606,7 +599,7 @@ try {
   explosionCalls.length = 0;
   await explosionRenderer.playRoll(externallyNormalizedReroll);
   assert.deepEqual(
-    explosionCalls.map((request) => request.results),
+    explosionCalls.map((request) => request.physical.map((visual) => visual.result)),
     [[1, 4], [2]],
     'external/display rolls must retain causal staging',
   );
@@ -626,7 +619,7 @@ try {
     startTime: Date.now() - 120,
   });
   assert.deepEqual(
-    explosionCalls.map((request) => request.results),
+    explosionCalls.map((request) => request.physical.map((visual) => visual.result)),
     [[1, 4], [2]],
     'ordinary realtime latency must not collapse rerolls into one constrained-looking throw',
   );
@@ -654,7 +647,7 @@ try {
   explosionCalls.length = 0;
   await explosionRenderer.playRoll(rerollOnce, { elapsedMs: 2_500, animationDurationMs: 2_800 });
   assert.deepEqual(
-    explosionCalls.map((request) => request.results),
+    explosionCalls.map((request) => request.physical.map((visual) => visual.result)),
     [[1, 4, 2]],
     'events already beyond the settled threshold may catch up directly to their final state',
   );
@@ -662,20 +655,18 @@ try {
   explosionCalls.length = 0;
   await explosionRenderer.playRoll(shorthandExplosion, { modifierSequence: 'simultaneous' });
   assert.deepEqual(
-    explosionCalls.map((request) => request.results),
+    explosionCalls.map((request) => request.physical.map((visual) => visual.result)),
     [[4, 2, 4, 3]],
-    'hosts can opt into the legacy simultaneous presentation',
+    'hosts can opt into a single simultaneous presentation',
   );
 
   const rendererSource = await readFile(
     join(projectRoot, 'packages/renderer/src/index.ts'),
     'utf8',
   );
-  assert.match(
-    rendererSource,
-    /numericResults\.length > 0 && presentationMode === 'replace'/,
-    'additive stages must bypass bridge setters that rebuild the table',
-  );
+  assert.doesNotMatch(rendererSource, /bridge\.setDie|bridge\.setQuantity|bridge\.setTheme/);
+  assert.match(rendererSource, /this\.bridge\.roll\(\{/);
+  assert.match(rendererSource, /presentationMode/);
   const browserHostSource = await readFile(join(projectRoot, 'src/main.ts'), 'utf8');
   assert.match(browserHostSource, /modifierSequencePending/);
   assert.match(browserHostSource, /\(discarded\)/);
@@ -699,13 +690,13 @@ try {
   );
   assert.match(
     browserHostSource,
-    /dice\.length === 0 && activeFallbackSpecs\.length === 0/,
-    'fallback-only modifier chains must remain appendable',
+    /dice\.length === 0 && genericPhysicalVisuals\.length === 0 && fallbackVisuals\.length === 0/,
+    'table emptiness must account for canonical, generated/custom physical, and fallback visuals',
   );
   assert.match(
     browserHostSource,
     /createStaticTablePlan/,
-    'fallback-only follow-up waves must keep prior visuals static',
+    'non-physical follow-up waves must keep prior visuals static',
   );
   const overlaySource = await readFile(join(projectRoot, 'packages/overlay/src/index.ts'), 'utf8');
   assert.match(
@@ -745,7 +736,10 @@ try {
     /Results hidden until all dice settle/,
     'the demo roll log must not reveal the final modifier die count before settlement',
   );
-  const fallbackVisualSource = await readFile(join(projectRoot, 'src/fallback-visuals.ts'), 'utf8');
+  const fallbackVisualSource = await readFile(
+    join(projectRoot, 'src/fallback-visuals-base.ts'),
+    'utf8',
+  );
   assert.match(fallbackVisualSource, /private settled = false/);
   assert.match(
     fallbackVisualSource,
@@ -760,7 +754,9 @@ try {
         shorthandExplosion: shorthandExplosion.dice.map((die) => die.result),
         rerollStages: calls.map((request) => request.results),
         explosionStages: [[4, 2], [4], [3]],
-        individualRerollStages: sdkCalls.map((request) => request.results),
+        individualRerollStages: sdkCalls.map((request) =>
+          request.physical.map((visual) => visual.result),
+        ),
         lifecycle,
       },
       null,

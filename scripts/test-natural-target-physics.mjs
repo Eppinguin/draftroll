@@ -28,7 +28,7 @@ assert.match(
 assert.match(physicalDice, /collider\.kind === 'cylinder'[\s\S]*?new CANNON\.Cylinder/);
 assert.match(dice, /this\.kind === 'coin'[\s\S]*?Math\.PI/);
 assert.match(launch, /participant\.coinLike[\s\S]*?rollingX \* 1\.22/);
-assert.match(renderer, /normalized === 'd2'\) return 'coin'/);
+assert.match(renderer, /normalized === 'd2'[\s\S]{0,100}'coin'/);
 assert.match(physicalPlanner, /allWellSeated[\s\S]*?releaseUnstableRestPose/);
 assert.match(restingPhysics, /minimumRestingAlignment/);
 assert.match(
@@ -51,8 +51,9 @@ assert.doesNotMatch(worker, /applyTargetAssistance/);
 assert.doesNotMatch(worker, /applyMicroOrientationCorrection/);
 assert.doesNotMatch(worker, /searchCandidate/);
 assert.doesNotMatch(worker, /targetNormals/);
-assert.match(worker, /candidateAttempts: 1/);
-assert.match(worker, /assistedDice: \[\]/);
+assert.match(worker, /entries: PlanEntry\[\]/);
+assert.match(worker, /landings: landings\.buffer/);
+assert.doesNotMatch(worker, /AdditionalPhysical|additionalTransforms|additionalLandings/);
 
 assert.match(
   renderer,
@@ -63,10 +64,13 @@ assert.match(main, /\(isRolling \|\| hasCast\)/);
 assert.match(main, /sampleActiveLaunchStates/);
 assert.match(main, /tableReplanPaused/);
 assert.match(main, /const lockedTrajectory = isRolling[\s\S]*?createLockedTableTrajectory/);
+assert.match(main, /createLockedTableTrajectory\(activePlan, planTime, existingPhysicalCount\)/);
 assert.match(
   main,
-  /needsSharedPhysicalPlan[\s\S]*?buildRollPlan\(\[\.\.\.existingStates, \.\.\.newStates\], existingCount, lockedTrajectory\)[\s\S]*?createStaticTablePlan/,
+  /buildRollPlan\([\s\S]{0,220}existingPhysicalCount,[\s\S]{0,120}lockedTrajectory/,
 );
+assert.match(main, /hasPendingPhysicalVisuals/);
+assert.match(main, /createStaticTablePlan/);
 assert.match(main, /Keep the completed plan while the table remains visible/);
 assert.match(overlay, /table: options\.table \? \{ \.\.\.options\.table \} : undefined/);
 assert.match(playground, /id="sdk-second-delay"[^>]*value="80"/);

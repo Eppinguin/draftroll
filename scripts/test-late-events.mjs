@@ -92,11 +92,12 @@ try {
   const bridge = {
     async roll(request) {
       calls.push(request);
-      return { results: request.results ?? [], total: 17, replay: null };
+      return {
+        results: (request.physical ?? []).map((visual) => visual.result),
+        total: 17,
+        replay: null,
+      };
     },
-    setDie() {},
-    setQuantity() {},
-    setTheme() {},
     getThemes() {
       return [{ id: 'dragon', name: 'Wyrmfire' }];
     },

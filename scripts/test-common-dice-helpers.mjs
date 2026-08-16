@@ -95,7 +95,7 @@ try {
   assert.equal(coinRoll.total, 1);
 
   const fate = commonDice.fate();
-  assert.equal(fate.renderAs, 'fate');
+  assert.equal(fate.renderAs, 'd6');
   assert.equal(fate.faces.length, 6);
   assert.deepEqual(
     fate.faces.map((face) => face.result),
@@ -112,7 +112,7 @@ try {
   );
 
   const percentile = commonDice.percentilePair();
-  assert.equal(percentile.renderAs, 'percentile');
+  assert.equal(percentile.renderAs, 'd100');
   assert.equal(percentile.faces.length, 100);
   assert.equal(percentile.faces[0].result, 1);
   assert.equal(percentile.faces[0].label, '00 / 1');
@@ -157,7 +157,7 @@ try {
     { result: 'quiet', value: 0, weight: 3 },
     { result: 'ambush', value: -1, weight: 1 },
   ]);
-  assert.equal(encounterTable.renderAs, 'spinner');
+  assert.equal(encounterTable.renderAs, 'token');
   const tableRoll = new DiceEngine({
     rng: new SequenceRng([4]),
     customDice: [encounterTable],

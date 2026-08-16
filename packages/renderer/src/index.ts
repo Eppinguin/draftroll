@@ -251,7 +251,7 @@ export interface RendererPlayOptions {
   physicsPreset?: 'standard' | 'compact' | 'heavy' | 'low-gravity';
   /**
    * Present evaluator-generated rerolls and explosions as follow-up throws.
-   * Defaults to staged; simultaneous preserves the legacy one-throw behavior.
+   * Defaults to staged; simultaneous presents all modifier stages in one throw.
    */
   modifierSequence?: 'staged' | 'simultaneous';
 }
@@ -429,9 +429,6 @@ export interface DraftrollBridge {
     reducedMotion?: boolean;
     physicsPreset?: 'standard' | 'compact' | 'heavy' | 'low-gravity';
   }): Promise<RendererCompletion>;
-  setDie(kind: DraftrollDieKind): void;
-  setQuantity(count: number): void;
-  setTheme(theme: string): void;
   getThemes(): DraftrollThemeManifest[];
   installTheme?(
     bundle: RuntimeThemeBundle,
@@ -722,9 +719,8 @@ export class DraftrollRenderer implements DiceRenderer {
   async warmup(themeIds: string[] = [this.fallbackThemeId], signal?: AbortSignal): Promise<void> {
     throwIfAborted(signal, 'Renderer warmup');
     for (const themeId of themeIds) {
-      const rendererTheme = await this.resolveRendererTheme(themeId, signal);
+      await this.resolveRendererTheme(themeId, signal);
       throwIfAborted(signal, 'Renderer warmup');
-      this.bridge.setTheme(rendererTheme);
     }
   }
 
@@ -1208,13 +1204,6 @@ export class DraftrollRenderer implements DiceRenderer {
       (entries[0].options.preservePreviousDice === true || entries[0].table.mode === 'concurrent'
         ? 'add'
         : 'replace');
-    if (physical.length > 0 && presentationMode === 'replace') {
-      // These legacy bridge setters rebuild the browser table. They are useful
-      // for a replacement cast, but calling them before an additive modifier
-      // stage would remove the settled dice that the new dice must join.
-      this.bridge.setQuantity(physical.length);
-      this.bridge.setTheme(physical[0]?.theme ?? this.fallbackThemeId);
-    }
     const startTimes = entries
       .map((entry) => finiteStartTime(entry))
       .filter((value): value is number => value !== null);

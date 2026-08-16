@@ -30,7 +30,7 @@ export interface PhysicalRollEntry {
   /** position(3), quaternion(4), velocity(3), angular velocity(3), release delay(1). */
   state: ArrayLike<number>;
   physics?: PhysicalRollPhysics;
-  /** Standard renderer dice request impact events; additional physical visuals do not. */
+  /** Whether contacts for this physical entry should emit impact events. */
   captureImpacts?: boolean;
 }
 
@@ -111,9 +111,7 @@ export class PhysicalRollPlanner {
     const lockedCount = Math.max(0, Math.min(entries.length, request.lockedCount ?? 0));
     const lockedMotion = this.validLockedMotion(request.lockedMotion, lockedCount);
     const { delays, maximumDelay } = this.resetBodies(planner, entries, lockedCount, lockedMotion);
-    const lockedDuration = lockedMotion
-      ? (lockedMotion.frameCount - 1) * lockedMotion.step
-      : 0;
+    const lockedDuration = lockedMotion ? (lockedMotion.frameCount - 1) * lockedMotion.step : 0;
 
     const transforms: number[] = [];
     const unobstructedTableDice = new Uint8Array(entries.length);
@@ -159,13 +157,7 @@ export class PhysicalRollPlanner {
         PHYSICAL_PLANNER_STEP,
         true,
       );
-      this.enforceBounds(
-        planner.bodies,
-        lockedCount,
-        request.boundsX,
-        request.boundsZ,
-        time,
-      );
+      this.enforceBounds(planner.bodies, lockedCount, request.boundsX, request.boundsZ, time);
       markUnobstructedTableDice(
         planner.world.contacts,
         planner.bodyIndexes,
@@ -217,9 +209,8 @@ export class PhysicalRollPlanner {
 
       finalAverageLinear = linear / Math.max(1, dynamicCount);
       finalAverageAngular = angular / Math.max(1, dynamicCount);
-      stableTime = afterLastActivation && allSlow && allWellSeated
-        ? stableTime + PHYSICAL_PLANNER_STEP
-        : 0;
+      stableTime =
+        afterLastActivation && allSlow && allWellSeated ? stableTime + PHYSICAL_PLANNER_STEP : 0;
       if (this.currentStep >= MIN_STEPS && stableTime > 0.5) {
         settleReason = 'shared-rest-stable';
         break;

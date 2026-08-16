@@ -27,8 +27,6 @@ interface RecordedTrajectory {
 
 const activePhysicalDice = new Set<PhysicalDieVisualInstance>();
 const pendingPhysicalDice = new Set<PhysicalDieVisualInstance>();
-let plannedPhysicalDice: PhysicalDieVisualInstance[] = [];
-let lastAdditionalPhysicalReplay: AdditionalPhysicalReplay | null = null;
 
 function readPhysicalPresentation(
   spec: DraftrollPhysicalVisual,
@@ -115,21 +113,6 @@ function trajectoryForIndex(
     quaternions.set(single.subarray(source + 3, source + 7), frame * 4);
   }
   return { positions, quaternions, frameCount, step };
-}
-
-function commitAdditionalTrajectories(
-  transforms: Float32Array,
-  frameCount: number,
-  step: number,
-  entries: readonly PhysicalDieVisualInstance[],
-  landings: Int32Array,
-): void {
-  entries.forEach((entry, index) => {
-    entry.commitTrajectory(
-      trajectoryForIndex(transforms, frameCount, step, entries.length, index),
-      landings[index] ?? 0,
-    );
-  });
 }
 
 function serializeLaunchState(state: PhysicalLaunchState): number[] {
@@ -402,18 +385,10 @@ export interface PendingPhysicalLaunchAssignment {
   state: PhysicalLaunchState;
 }
 
-export interface AdditionalPhysicalPlanEntry {
+export interface PhysicalVisualPlanEntry {
+  id: string;
   definition: PhysicalDieDefinition;
   state: number[];
-}
-
-/** Recorded arbitrary-physical-die transforms retained alongside a legacy replay. */
-export interface AdditionalPhysicalReplay {
-  ids: string[];
-  step: number;
-  frameCount: number;
-  transforms: Float32Array;
-  landings: Int32Array;
 }
 
 function configuredPhysicalDice(): PhysicalDieVisualInstance[] {
@@ -438,97 +413,49 @@ export function assignPendingPhysicalLaunchStates(
   }
 }
 
-/** True when at least one arbitrary numeric die is participating in the physical table. */
-export function hasConfiguredAdditionalPhysicalDice(): boolean {
+export function hasConfiguredPhysicalVisuals(): boolean {
   return configuredPhysicalDice().length > 0;
 }
 
-/** True when a newly configured arbitrary die still needs a committed physical trajectory. */
-export function hasPendingAdditionalPhysicalDice(): boolean {
+export function hasPendingPhysicalVisuals(): boolean {
   return pendingPhysicalDice.size > 0;
 }
 
-/**
- * Captures the arbitrary physical entries that main.ts appends to the normal roll-worker request.
- * This is an explicit compatibility boundary; no Worker prototype interception is involved.
- */
-export function getAdditionalPhysicalPlanEntries(): AdditionalPhysicalPlanEntry[] {
-  plannedPhysicalDice = configuredPhysicalDice();
-  return plannedPhysicalDice.map((entry) => ({
+export function getPhysicalVisualPlanEntries(): PhysicalVisualPlanEntry[] {
+  return configuredPhysicalDice().map((entry) => ({
+    id: entry.spec.id,
     definition: entry.definition,
     state: entry.plannerState(),
   }));
 }
 
-/** Commits the additional trajectories returned by the one shared physical roll worker. */
-export function commitAdditionalPhysicalPlan(
+export function commitPhysicalVisualPlan(
   transforms: Float32Array,
   frameCount: number,
   step: number,
+  physicalCount: number,
+  physicalIndexes: readonly number[],
   landings: Int32Array,
 ): void {
-  const entries = plannedPhysicalDice.length > 0 ? plannedPhysicalDice : configuredPhysicalDice();
-  plannedPhysicalDice = [];
-  if (entries.length === 0) {
-    lastAdditionalPhysicalReplay = null;
-    return;
+  const entries = configuredPhysicalDice();
+  if (entries.length !== physicalIndexes.length) {
+    throw new Error('Physical visual indexes do not match the configured generic dice.');
   }
-  const expected = frameCount * entries.length * 7;
-  if (frameCount < 1 || transforms.length !== expected || landings.length !== entries.length) {
-    throw new Error('Additional physical trajectory buffers do not match the planned dice.');
+  if (
+    frameCount < 1 ||
+    transforms.length !== frameCount * physicalCount * 7 ||
+    landings.length !== physicalCount
+  ) {
+    throw new Error('Physical trajectory buffers do not match the unified plan.');
   }
-  commitAdditionalTrajectories(transforms, frameCount, step, entries, landings);
-  lastAdditionalPhysicalReplay = {
-    ids: entries.map((entry) => entry.spec.id),
-    step,
-    frameCount,
-    transforms: transforms.slice(),
-    landings: landings.slice(),
-  };
-}
-
-export function captureAdditionalPhysicalReplay(): AdditionalPhysicalReplay | undefined {
-  const replay = lastAdditionalPhysicalReplay;
-  return replay
-    ? {
-        ids: replay.ids.slice(),
-        step: replay.step,
-        frameCount: replay.frameCount,
-        transforms: replay.transforms.slice(),
-        landings: replay.landings.slice(),
-      }
-    : undefined;
-}
-
-/** Restores arbitrary physical trajectories without re-running physics during replay. */
-export function restoreAdditionalPhysicalReplay(replay: AdditionalPhysicalReplay): void {
-  const entries = new Map(configuredPhysicalDice().map((entry) => [entry.spec.id, entry] as const));
-  if (replay.ids.length !== replay.landings.length) {
-    throw new Error('Additional physical replay landing data is invalid.');
-  }
-  const expected = replay.frameCount * replay.ids.length * 7;
-  if (replay.frameCount < 1 || replay.transforms.length !== expected) {
-    throw new Error('Additional physical replay transform data is invalid.');
-  }
-  replay.ids.forEach((id, index) => {
-    const entry = entries.get(id);
-    if (!entry) throw new Error(`Additional physical replay die is missing: ${id}`);
+  entries.forEach((entry, index) => {
+    const physicalIndex = physicalIndexes[index];
+    if (physicalIndex === undefined || physicalIndex < 0 || physicalIndex >= physicalCount) {
+      throw new Error(`Physical visual index is invalid: ${String(physicalIndex)}`);
+    }
     entry.commitTrajectory(
-      trajectoryForIndex(
-        replay.transforms,
-        replay.frameCount,
-        replay.step,
-        replay.ids.length,
-        index,
-      ),
-      replay.landings[index] ?? 0,
+      trajectoryForIndex(transforms, frameCount, step, physicalCount, physicalIndex),
+      landings[physicalIndex] ?? 0,
     );
   });
-  lastAdditionalPhysicalReplay = {
-    ids: replay.ids.slice(),
-    step: replay.step,
-    frameCount: replay.frameCount,
-    transforms: replay.transforms.slice(),
-    landings: replay.landings.slice(),
-  };
 }

@@ -120,15 +120,16 @@ assert.match(physicalPlanner, /releaseUnstableRestPose/);
 assert.match(physicalPlanner, /resolveLandedPhysicalOutcome/);
 assert.match(physicalPlanner, /extractPhysicalTransforms/);
 
-// The established roll worker is the only physical worker protocol for canonical + additional dice.
+// The roll worker consumes one ordered physical-entry array and returns one transform/landing stream.
 assert.match(rollWorker, /PhysicalRollPlanner/);
-assert.match(rollWorker, /AdditionalPhysicalPlanEntry/);
-assert.match(rollWorker, /definition\?: PhysicalDieDefinition/);
-assert.match(rollWorker, /createCanonicalPhysicalDieDefinition/);
-assert.match(rollWorker, /createGeneratedPhysicalDieDefinition/);
-assert.match(rollWorker, /additionalTransforms/);
-assert.match(rollWorker, /additionalLandings/);
-assert.match(rollWorker, /extractPhysicalTransforms/);
+assert.match(rollWorker, /interface PlanEntry/);
+assert.match(rollWorker, /definition: PhysicalDieDefinition/);
+assert.match(rollWorker, /entries: PlanEntry\[\]/);
+assert.match(rollWorker, /transforms: transforms\.buffer/);
+assert.match(rollWorker, /landings: landings\.buffer/);
+assert.doesNotMatch(rollWorker, /AdditionalPhysical/);
+assert.doesNotMatch(rollWorker, /additionalTransforms|additionalLandings/);
+assert.doesNotMatch(rollWorker, /extractPhysicalTransforms/);
 assert.doesNotMatch(rollWorker, /new CANNON\.World/);
 
 // Legacy spinner inputs are accepted only at the browser compatibility boundary; SDK dN is physical.
@@ -144,10 +145,9 @@ assert.doesNotMatch(physicalVisuals, /draftrollPhysicalPresentation/);
 assert.match(physicalMesh, /presentationTexture/);
 assert.match(physicalMesh, /content.kind === 'icon'/);
 assert.match(physicalVisuals, /physicalDieColliderRadius/);
-assert.match(physicalVisuals, /getAdditionalPhysicalPlanEntries/);
-assert.match(physicalVisuals, /commitAdditionalPhysicalPlan/);
-assert.match(physicalVisuals, /captureAdditionalPhysicalReplay/);
-assert.match(physicalVisuals, /restoreAdditionalPhysicalReplay/);
+assert.match(physicalVisuals, /getPhysicalVisualPlanEntries/);
+assert.match(physicalVisuals, /commitPhysicalVisualPlan/);
+assert.doesNotMatch(physicalVisuals, /AdditionalPhysical|additionalPhysical/);
 assert.match(physicalVisuals, /activePhysicalDice/);
 assert.match(physicalVisuals, /pendingPhysicalDice/);
 assert.doesNotMatch(physicalVisuals, /Worker\.prototype/);
@@ -157,11 +157,11 @@ assert.doesNotMatch(physicalVisuals, /new Worker\(/);
 assert.doesNotMatch(physicalVisuals, /new CANNON\.World/);
 assert.doesNotMatch(visualBase, /createGeneratedDieVisual/);
 assert.doesNotMatch(visualBase, /createReadablePolyhedron/);
-assert.match(engine, /getAdditionalPhysicalPlanEntries/);
-assert.match(engine, /commitAdditionalPhysicalPlan/);
-assert.match(engine, /additional,/);
-assert.match(engine, /hasPendingAdditionalPhysicalDice/);
-assert.match(engine, /additionalPhysicalReplay/);
+assert.match(engine, /createWorkerPhysicalEntries/);
+assert.match(engine, /commitPhysicalVisualPlan/);
+assert.match(engine, /landings: plan\.landings\.slice\(\)/);
+assert.match(engine, /activeGenericPhysicalIndexes/);
+assert.doesNotMatch(engine, /AdditionalPhysical|additionalPhysical/);
 assert.doesNotMatch(engine, /physicalFallbackReplay/);
 assert.doesNotMatch(physicalVisuals, /settledRotation/);
 

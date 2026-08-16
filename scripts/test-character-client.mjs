@@ -113,8 +113,11 @@ assert.match(
   'completed table dice must accept a later additive throw',
 );
 assert.match(engine, /canvas\.animate/);
-assert.match(renderer, /kinds:\s*physicalKinds/);
-assert.match(worker, /createDiePhysicsShape\(kinds\[index\]\)/);
+assert.match(renderer, /physical,\s*fallbacks,/);
+assert.doesNotMatch(renderer, /kinds:\s*physicalKinds|results:\s*numericResults/);
+assert.match(worker, /entries:\s*PlanEntry\[\]/);
+assert.match(worker, /definition:\s*entry\.definition/);
+assert.doesNotMatch(worker, /createDiePhysicsShape\(kinds\[index\]\)/);
 assert.match(protocol, /name\?: string/);
 assert.match(
   html,

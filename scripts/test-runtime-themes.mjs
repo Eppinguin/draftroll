@@ -118,11 +118,6 @@ try {
         replay: null,
       };
     },
-    setDie() {},
-    setQuantity() {},
-    setTheme(themeId) {
-      bridgeCalls.push(['setTheme', themeId]);
-    },
     getThemes() {
       return [...bridgeThemes.values()];
     },
@@ -147,10 +142,12 @@ try {
     onThemeLoad: (event) => rendererEvents.push(event),
   });
   await renderer.warmup([manifest.id]);
-  assert.deepEqual(bridgeCalls.slice(0, 2), [
-    ['installTheme', manifest.id],
-    ['setTheme', manifest.id],
-  ]);
+  assert.deepEqual(bridgeCalls.slice(0, 1), [['installTheme', manifest.id]]);
+  assert.equal(
+    bridgeCalls.some(([name]) => name === 'setTheme'),
+    false,
+    'theme choice is carried by each physical visual, not mutable bridge state',
+  );
   assert.equal(rendererEvents.at(-1).type, 'complete');
 
   await renderer.playRoll({
