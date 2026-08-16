@@ -38,5 +38,15 @@ count = source.split(physicalIndexOld).length - 1;
 if (count !== 1) throw new Error(`physical index migration block expected once, found ${count}`);
 source = source.replace(physicalIndexOld, physicalIndexNew);
 
+const playbackBlock = `  source = replaceOnce(
+    source,
+    \`  dice.forEach((die, canonicalIndex) => {\\n    const physicalIndex = activeCanonicalPhysicalIndexes[canonicalIndex] ?? canonicalIndex;\`,
+    \`  dice.forEach((die, canonicalIndex) => {\\n    const physicalIndex = physicalTable.physicalIndexForCanonical(canonicalIndex);\`,
+    'playback canonical registry lookup',
+  );\n`;
+count = source.split(playbackBlock).length - 1;
+if (count !== 1) throw new Error(`redundant playback migration block expected once, found ${count}`);
+source = source.replace(playbackBlock, '');
+
 await writeFile(path, source);
 console.log('final physical migration guards normalized');
