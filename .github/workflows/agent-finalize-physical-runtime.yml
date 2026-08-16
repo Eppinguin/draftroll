@@ -51,6 +51,7 @@ jobs:
           packages/renderer/src/index.ts
           src/main.ts
           src/physical-table.ts
+          src/physical-dice.ts
           src/physical-die-visuals.ts
           src/physical-die-mesh.ts
           src/roll-worker.ts
