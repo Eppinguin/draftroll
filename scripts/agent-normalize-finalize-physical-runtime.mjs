@@ -78,16 +78,18 @@ source = source.replace(effectBlock, '');
 const guardOld = `  if (/activeCanonicalPhysicalIndexes|activeGenericPhysicalIndexes/.test(source)) {
     throw new Error('main.ts still contains parallel physical index arrays');
   }`;
-const guardNew = `  if (/activeCanonicalPhysicalIndexes|activeGenericPhysicalIndexes/.test(source)) {
-    const leftovers = source
-      .split('\\n')
-      .map((line, index) => ({ line: index + 1, text: line }))
-      .filter(({ text }) => /activeCanonicalPhysicalIndexes|activeGenericPhysicalIndexes/.test(text));
-    throw new Error(\`main.ts still contains parallel physical index arrays: \${JSON.stringify(leftovers)}\`);
+const syncInsertion = `  source = replaceOnce(
+    source,
+    \`  activeCanonicalPhysicalIndexes.forEach((physicalIndex, canonicalIndex) => {\`,
+    \`  physicalTable.canonicalEntries().forEach(({ physicalIndex, canonicalIndex }) => {\\n    if (canonicalIndex === null) return;\`,
+    'canonical spec sync registry loop',
+  );
+\n  if (/activeCanonicalPhysicalIndexes|activeGenericPhysicalIndexes/.test(source)) {
+    throw new Error('main.ts still contains parallel physical index arrays');
   }`;
 count = source.split(guardOld).length - 1;
 if (count !== 1) throw new Error(`physical index guard expected once, found ${count}`);
-source = source.replace(guardOld, guardNew);
+source = source.replace(guardOld, syncInsertion);
 
 await writeFile(path, source);
 console.log('final physical migration guards normalized');
