@@ -43,6 +43,30 @@ function replaceAllExact(source, search, replacement, expected, label) {
 }
 
 {
+  const path = 'src/physical-dices.ts';
+  let source = await readFile(path, 'utf8').catch(() => null);
+  if (source !== null) throw new Error('obsolete src/physical-dices.ts unexpectedly exists');
+}
+
+{
+  const path = 'src/physical-dice.ts';
+  let source = await readFile(path, 'utf8');
+  source = replaceOnce(
+    source,
+    ` * A custom mesh may use relabel targeting for dynamic content, symmetry when exact rotations are\n * known by the presentation layer, or fixed when artwork is baked permanently into the mesh.`,
+    ` * Custom definitions default to relabel targeting so authoritative outcomes can be assigned after\n * a natural landing. Symmetry/fixed modes are reserved for renderers that also provide the required\n * rotation set or trajectory-search capability.`,
+    'custom physical targeting documentation',
+  );
+  source = replaceOnce(
+    source,
+    `    targeting: input.targeting ?? 'fixed',`,
+    `    targeting: input.targeting ?? 'relabel',`,
+    'custom physical deterministic targeting default',
+  );
+  await writeFile(path, source);
+}
+
+{
   const path = 'src/physical-die-visuals.ts';
   let source = await readFile(path, 'utf8');
   source = replaceOnce(
@@ -136,7 +160,7 @@ function replaceAllExact(source, search, replacement, expected, label) {
   source = replaceOnce(
     source,
     `assert.match(physicalTable, /class PhysicalTableRegistry/);`,
-    `assert.match(physicalTable, /class PhysicalTableRegistry/);\nassert.match(physicalTable, /forEachVisual/);\nassert.doesNotMatch(engine, /physicalTable\\.visualInstances/);\nassert.match(renderer, /currently require relabel targeting/);\nassert.match(engine, /visual\\.definition\\.targeting !== 'relabel'/);`,
+    `assert.match(physicalTable, /class PhysicalTableRegistry/);\nassert.match(physicalTable, /forEachVisual/);\nassert.doesNotMatch(engine, /physicalTable\\.visualInstances/);\nassert.match(renderer, /currently require relabel targeting/);\nassert.match(engine, /visual\\.definition\\.targeting !== 'relabel'/);\nassert.match(physicalDice, /input\\.targeting \\?\\? 'relabel'/);`,
     'smoke final physical invariants',
   );
   await writeFile(path, source);
