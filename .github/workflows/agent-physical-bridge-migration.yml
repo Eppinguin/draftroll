@@ -1,0 +1,58 @@
+name: Agent unified physical bridge migration
+
+on:
+  push:
+    branches:
+      - agent/dicebox-learnings-cards
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/dicebox-learnings-cards
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.14.0'
+      - name: Apply guarded migration
+        run: node scripts/agent-physical-bridge-migration.mjs
+      - name: Remove one-time migration files
+        run: rm -f scripts/agent-physical-bridge-migration.mjs .github/workflows/agent-physical-bridge-migration.yml .agent-physical-bridge-trigger
+      - name: Install pnpm
+        run: npm install --global pnpm@11.17.0
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Format changed sources
+        run: pnpm exec oxfmt packages/renderer/src/index.ts packages/themes/src/index.ts src/main.ts src/physical-die-visuals.ts src/runtime-themes.ts scripts/test-mixed-renderer.mjs scripts/test-visual-fallbacks.mjs
+      - name: Lint
+        run: env -u GITHUB_ACTIONS pnpm lint
+      - name: Package typecheck
+        run: pnpm check:packages
+      - name: Browser engine typecheck
+        run: pnpm exec tsc --noEmit
+      - name: Mixed renderer regression
+        run: pnpm test:mixed-renderer
+      - name: Physical architecture regression
+        run: pnpm test:visual-fallbacks
+      - name: Generated geometry regression
+        run: pnpm test:generated-polyhedra
+      - name: Theme regression
+        run: pnpm test:themes
+      - name: Commit validated migration
+        run: |
+          if git diff --quiet; then
+            echo "No migration changes produced"
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "unify physical dice bridge contract"
+          git push origin HEAD:agent/dicebox-learnings-cards
