@@ -180,7 +180,9 @@ try {
   assert.equal(decodedWire.success, true);
 
   const rendererSource = await readFile(join(projectRoot, 'src/main.ts'), 'utf8');
-  assert.match(rendererSource, /applyPlanTransform\(plan, planTime\)/);
+  assert.match(rendererSource, /function updatePlanVisuals/);
+  assert.match(rendererSource, /applyPlanTransform\(plan, time\)/);
+  assert.match(rendererSource, /updatePlanVisuals\(plan, planTime\)/);
   assert.match(rendererSource, /impact\.time > planTime/);
   assert.match(rendererSource, /startLatenessMs/);
   assert.match(rendererSource, /Presenting settled result/);
