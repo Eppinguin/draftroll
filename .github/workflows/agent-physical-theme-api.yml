@@ -34,12 +34,14 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Format changed sources
-        run: pnpm exec oxfmt packages/themes/src/index.ts packages/renderer/src/index.ts packages/sdk/src/builders.ts src/runtime-themes.ts src/physical-die-visuals.ts src/physical-die-mesh.ts src/fallback-visuals.ts src/dice.ts src/main.ts scripts/test-runtime-themes.mjs scripts/test-visual-fallbacks.mjs scripts/test-mixed-renderer.mjs
+        run: pnpm exec oxfmt packages/themes/src/index.ts packages/renderer/src/index.ts packages/sdk/src/builders.ts packages/sdk/src/index.ts packages/overlay/src/index.ts packages/protocol/src/policy.ts packages/protocol/src/runtime.ts src/runtime-themes.ts src/physical-die-visuals.ts src/physical-die-mesh.ts src/fallback-visuals.ts src/dice.ts src/main.ts scripts/test-runtime-themes.mjs scripts/test-visual-fallbacks.mjs scripts/test-mixed-renderer.mjs
       - name: Reject legacy physical adapters
         run: |
           ! grep -R "spinner" packages/renderer/src src/fallback-visuals.ts src/physical-die-visuals.ts
           ! grep -R "PhysicalFallback" src/physical-die-visuals.ts src/main.ts
           ! grep -R "physicalFallbackReplay" src/main.ts
+          ! grep -R "forceFallback" packages src
+          ! grep -R "fallbackOnly" packages src
       - name: Lint
         run: env -u GITHUB_ACTIONS pnpm lint
       - name: Package typecheck
