@@ -15,6 +15,7 @@ export const PHYSICAL_PLANNER_STEP = 1 / 120;
 export const PHYSICAL_STATE_STRIDE = 14;
 const MAX_STEPS = 1_080;
 const MIN_STEPS = 120;
+const MAX_FRAMES = MAX_STEPS + 1;
 const DEFAULT_MASS = 1.12;
 
 export interface PhysicalRollPhysics {
@@ -72,6 +73,7 @@ interface PlannerCache {
   bodies: CANNON.Body[];
   floorBodyId: number;
   bodyIndexes: Map<number, number>;
+  restingAxes: CANNON.Vec3[];
 }
 
 function finite(value: number | undefined, fallback: number): number {
@@ -95,9 +97,19 @@ function cacheKey(entries: readonly PhysicalRollEntry[]): string {
 export class PhysicalRollPlanner {
   private readonly diceMaterial = new CANNON.Material('draftroll-physical-dice');
   private readonly tableMaterial = new CANNON.Material('draftroll-physical-table');
+  private readonly lockedFromPosition = new CANNON.Vec3();
+  private readonly lockedToPosition = new CANNON.Vec3();
+  private readonly lockedFromQuaternion = new CANNON.Quaternion();
+  private readonly lockedToQuaternion = new CANNON.Quaternion();
+  private readonly lockedSampleQuaternion = new CANNON.Quaternion();
+  private readonly lockedInverseQuaternion = new CANNON.Quaternion();
+  private readonly lockedDeltaQuaternion = new CANNON.Quaternion();
   private cache: PlannerCache | null = null;
-  private activeFlags: boolean[] = [];
-  private captureImpactFlags: boolean[] = [];
+  private activeFlags = new Uint8Array(0);
+  private captureImpactFlags = new Uint8Array(0);
+  private delays = new Float32Array(0);
+  private unobstructedTableDice = new Uint8Array(0);
+  private lastUnstableReleaseTimes = new Float32Array(0);
   private impacts: number[] = [];
   private currentStep = 0;
 
@@ -110,17 +122,17 @@ export class PhysicalRollPlanner {
     planner.world.gravity.set(0, -Math.abs(finite(request.gravity, 20.5)), 0);
     const lockedCount = Math.max(0, Math.min(entries.length, request.lockedCount ?? 0));
     const lockedMotion = this.validLockedMotion(request.lockedMotion, lockedCount);
-    const { delays, maximumDelay } = this.resetBodies(planner, entries, lockedCount, lockedMotion);
+    const maximumDelay = this.resetBodies(planner, entries, lockedCount, lockedMotion);
     const lockedDuration = lockedMotion ? (lockedMotion.frameCount - 1) * lockedMotion.step : 0;
 
-    const transforms: number[] = [];
-    const unobstructedTableDice = new Uint8Array(entries.length);
-    const restingAxes = entries.map(() => new CANNON.Vec3());
-    const lastUnstableReleaseTimes = new Float32Array(entries.length);
-    lastUnstableReleaseTimes.fill(Number.NEGATIVE_INFINITY);
+    const frameStride = entries.length * 7;
+    const transformBuffer = new Float32Array(MAX_FRAMES * frameStride);
+    let transformOffset = 0;
+    this.lastUnstableReleaseTimes.fill(Number.NEGATIVE_INFINITY);
+    this.unobstructedTableDice.fill(0);
 
     this.updateLockedBodies(planner, lockedMotion, 0, PHYSICAL_PLANNER_STEP, false);
-    this.appendTransforms(transforms, planner.bodies);
+    transformOffset = this.appendTransforms(transformBuffer, transformOffset, planner.bodies);
 
     let stableTime = 0;
     let frameCount = 1;
@@ -134,9 +146,9 @@ export class PhysicalRollPlanner {
       const time = this.currentStep * PHYSICAL_PLANNER_STEP;
       let activatedThisStep = false;
       for (let index = lockedCount; index < entries.length; index += 1) {
-        if (!this.activeFlags[index] && time + 1e-6 >= delays[index]) {
+        if (this.activeFlags[index] === 0 && time + 1e-6 >= this.delays[index]) {
           this.activateBody(planner.bodies[index], entries[index]);
-          this.activeFlags[index] = true;
+          this.activeFlags[index] = 1;
           activatedThisStep = true;
         }
       }
@@ -163,13 +175,19 @@ export class PhysicalRollPlanner {
         planner.bodyIndexes,
         entries.length,
         planner.floorBodyId,
-        unobstructedTableDice,
+        this.unobstructedTableDice,
       );
-      this.appendTransforms(transforms, planner.bodies);
+      transformOffset = this.appendTransforms(transformBuffer, transformOffset, planner.bodies);
       frameCount += 1;
 
       const afterLastActivation = time >= Math.max(maximumDelay + 0.3, lockedDuration + 0.15);
-      const allActive = this.activeFlags.slice(lockedCount).every(Boolean);
+      let allActive = true;
+      for (let index = lockedCount; index < entries.length; index += 1) {
+        if (this.activeFlags[index] === 0) {
+          allActive = false;
+          break;
+        }
+      }
       let allSlow = allActive;
       let allWellSeated = allActive;
       let linear = 0;
@@ -177,7 +195,7 @@ export class PhysicalRollPlanner {
       let dynamicCount = 0;
 
       for (let index = lockedCount; index < planner.bodies.length; index += 1) {
-        if (!this.activeFlags[index]) continue;
+        if (this.activeFlags[index] === 0) continue;
         const body = planner.bodies[index];
         const speed = body.velocity.length();
         const spin = body.angularVelocity.length();
@@ -188,21 +206,21 @@ export class PhysicalRollPlanner {
           allSlow = false;
         }
 
-        if (unobstructedTableDice[index] === 0) continue;
+        if (this.unobstructedTableDice[index] === 0) continue;
         const alignment = readPhysicalRestingAlignment(
           entries[index].definition,
           body.quaternion,
-          restingAxes[index],
+          planner.restingAxes[index],
         );
         const minimum = minimumPhysicalRestingAlignment(entries[index].definition);
         if (alignment >= minimum) continue;
         allWellSeated = false;
         if (
           afterLastActivation &&
-          time - lastUnstableReleaseTimes[index] >= 0.45 &&
-          releaseUnstableRestPose(body, restingAxes[index])
+          time - this.lastUnstableReleaseTimes[index] >= 0.45 &&
+          releaseUnstableRestPose(body, planner.restingAxes[index])
         ) {
-          lastUnstableReleaseTimes[index] = time;
+          this.lastUnstableReleaseTimes[index] = time;
           stableTime = 0;
         }
       }
@@ -217,15 +235,18 @@ export class PhysicalRollPlanner {
       }
     }
 
-    const landings = Int32Array.from(
-      planner.bodies.map((body, index) =>
-        resolveLandedPhysicalOutcome(entries[index].definition, body.quaternion),
-      ),
-    );
+    const landings = new Int32Array(entries.length);
+    for (let index = 0; index < planner.bodies.length; index += 1) {
+      landings[index] = resolveLandedPhysicalOutcome(
+        entries[index].definition,
+        planner.bodies[index].quaternion,
+      );
+    }
+    const usedTransformLength = frameCount * frameStride;
     return {
       step: PHYSICAL_PLANNER_STEP,
       frameCount,
-      transforms: Float32Array.from(transforms),
+      transforms: transformBuffer.slice(0, usedTransformLength),
       impacts: Float32Array.from(this.impacts),
       landings,
       duration: (frameCount - 1) * PHYSICAL_PLANNER_STEP,
@@ -253,6 +274,20 @@ export class PhysicalRollPlanner {
     };
   }
 
+  private ensureScratchSize(size: number): void {
+    if (this.activeFlags.length === size) {
+      this.activeFlags.fill(0);
+      this.captureImpactFlags.fill(0);
+      this.delays.fill(0);
+      return;
+    }
+    this.activeFlags = new Uint8Array(size);
+    this.captureImpactFlags = new Uint8Array(size);
+    this.delays = new Float32Array(size);
+    this.unobstructedTableDice = new Uint8Array(size);
+    this.lastUnstableReleaseTimes = new Float32Array(size);
+  }
+
   private ensurePlanner(
     entries: readonly PhysicalRollEntry[],
     boundsX: number,
@@ -278,7 +313,7 @@ export class PhysicalRollPlanner {
         shape: createPhysicalDieCollider(entry.definition, entrySizeScale(entry)),
       });
       body.addEventListener('collide', (event: { contact: CANNON.ContactEquation }) => {
-        if (!this.activeFlags[index] || !this.captureImpactFlags[index]) return;
+        if (this.activeFlags[index] === 0 || this.captureImpactFlags[index] === 0) return;
         const strength = Math.abs(event.contact.getImpactVelocityAlongNormal());
         if (strength > 1.5) {
           this.impacts.push(this.currentStep * PHYSICAL_PLANNER_STEP, index, strength);
@@ -298,6 +333,7 @@ export class PhysicalRollPlanner {
       bodies,
       floorBodyId: floor.id,
       bodyIndexes,
+      restingAxes: entries.map(() => new CANNON.Vec3()),
     };
     return this.cache;
   }
@@ -375,13 +411,12 @@ export class PhysicalRollPlanner {
     entries: readonly PhysicalRollEntry[],
     lockedCount: number,
     lockedMotion: LockedPhysicalMotion | undefined,
-  ): { delays: Float32Array; maximumDelay: number } {
-    this.activeFlags = Array.from({ length: entries.length }, () => false);
-    this.captureImpactFlags = entries.map((entry) => entry.captureImpacts === true);
-    this.impacts = [];
+  ): number {
+    this.ensureScratchSize(entries.length);
+    this.impacts.length = 0;
     this.currentStep = 0;
-    const delays = new Float32Array(entries.length);
     let maximumDelay = 0;
+    const crowd = Math.max(0, Math.min(1, (entries.length - 8) / 22));
 
     entries.forEach((entry, index) => {
       const body = planner.bodies[index];
@@ -394,31 +429,31 @@ export class PhysicalRollPlanner {
       body.interpolatedPosition.copy(body.position);
       body.previousQuaternion.copy(body.quaternion);
       body.interpolatedQuaternion.copy(body.quaternion);
-      const crowd = Math.max(0, Math.min(1, (entries.length - 8) / 22));
       body.linearDamping = finite(entry.physics?.linearDamping, 0.095 + crowd * 0.025);
       body.angularDamping = finite(entry.physics?.angularDamping, 0.085 + crowd * 0.045);
       body.allowSleep = true;
       body.sleepSpeedLimit = 0.09 + crowd * 0.015;
       body.sleepTimeLimit = 0.72;
-      delays[index] = Math.max(0, state[13] ?? 0);
+      this.delays[index] = Math.max(0, state[13] ?? 0);
+      this.captureImpactFlags[index] = entry.captureImpacts === true ? 1 : 0;
 
       if (index < lockedCount && lockedMotion) {
         this.configureLockedBody(body);
-        this.activeFlags[index] = true;
+        this.activeFlags[index] = 1;
         return;
       }
 
-      maximumDelay = Math.max(maximumDelay, delays[index]);
+      maximumDelay = Math.max(maximumDelay, this.delays[index]);
       this.parkBody(body);
-      if (delays[index] <= 0) {
+      if (this.delays[index] <= 0) {
         this.activateBody(body, entry);
-        this.activeFlags[index] = true;
+        this.activeFlags[index] = 1;
       }
     });
 
     planner.world.clearForces();
     planner.world.broadphase.dirty = true;
-    return { delays, maximumDelay };
+    return maximumDelay;
   }
 
   private activateBody(body: CANNON.Body, entry: PhysicalRollEntry): void {
@@ -504,19 +539,19 @@ export class PhysicalRollPlanner {
       motion.transforms[a + 1] + (motion.transforms[b + 1] - motion.transforms[a + 1]) * alpha,
       motion.transforms[a + 2] + (motion.transforms[b + 2] - motion.transforms[a + 2]) * alpha,
     );
-    const qa = new CANNON.Quaternion(
+    quaternion.set(
       motion.transforms[a + 3],
       motion.transforms[a + 4],
       motion.transforms[a + 5],
       motion.transforms[a + 6],
     );
-    const qb = new CANNON.Quaternion(
+    this.lockedSampleQuaternion.set(
       motion.transforms[b + 3],
       motion.transforms[b + 4],
       motion.transforms[b + 5],
       motion.transforms[b + 6],
     );
-    qa.slerp(qb, alpha, quaternion);
+    quaternion.slerp(this.lockedSampleQuaternion, alpha, quaternion);
     quaternion.normalize();
   }
 
@@ -528,40 +563,42 @@ export class PhysicalRollPlanner {
     snapToEnd: boolean,
   ): void {
     if (!motion) return;
-    const fromPosition = new CANNON.Vec3();
-    const toPosition = new CANNON.Vec3();
-    const fromQuaternion = new CANNON.Quaternion();
-    const toQuaternion = new CANNON.Quaternion();
-    const inverse = new CANNON.Quaternion();
-    const delta = new CANNON.Quaternion();
     const toTime = fromTime + step;
     for (let index = 0; index < motion.count; index += 1) {
       const body = planner.bodies[index];
       if (!body) continue;
-      this.sampleLocked(motion, index, fromTime, fromPosition, fromQuaternion);
-      this.sampleLocked(motion, index, toTime, toPosition, toQuaternion);
-      body.position.copy(snapToEnd ? toPosition : fromPosition);
-      body.quaternion.copy(snapToEnd ? toQuaternion : fromQuaternion);
-      body.velocity.set(
-        (toPosition.x - fromPosition.x) / step,
-        (toPosition.y - fromPosition.y) / step,
-        (toPosition.z - fromPosition.z) / step,
+      this.sampleLocked(
+        motion,
+        index,
+        fromTime,
+        this.lockedFromPosition,
+        this.lockedFromQuaternion,
       );
-      fromQuaternion.inverse(inverse);
-      toQuaternion.mult(inverse, delta);
-      if (delta.w < 0) {
-        delta.x *= -1;
-        delta.y *= -1;
-        delta.z *= -1;
-        delta.w *= -1;
+      this.sampleLocked(motion, index, toTime, this.lockedToPosition, this.lockedToQuaternion);
+      body.position.copy(snapToEnd ? this.lockedToPosition : this.lockedFromPosition);
+      body.quaternion.copy(snapToEnd ? this.lockedToQuaternion : this.lockedFromQuaternion);
+      body.velocity.set(
+        (this.lockedToPosition.x - this.lockedFromPosition.x) / step,
+        (this.lockedToPosition.y - this.lockedFromPosition.y) / step,
+        (this.lockedToPosition.z - this.lockedFromPosition.z) / step,
+      );
+      this.lockedFromQuaternion.inverse(this.lockedInverseQuaternion);
+      this.lockedToQuaternion.mult(this.lockedInverseQuaternion, this.lockedDeltaQuaternion);
+      if (this.lockedDeltaQuaternion.w < 0) {
+        this.lockedDeltaQuaternion.x *= -1;
+        this.lockedDeltaQuaternion.y *= -1;
+        this.lockedDeltaQuaternion.z *= -1;
+        this.lockedDeltaQuaternion.w *= -1;
       }
-      const angle = 2 * Math.acos(Math.max(-1, Math.min(1, delta.w)));
-      const denominator = Math.sqrt(Math.max(1e-10, 1 - delta.w * delta.w));
+      const angle = 2 * Math.acos(Math.max(-1, Math.min(1, this.lockedDeltaQuaternion.w)));
+      const denominator = Math.sqrt(
+        Math.max(1e-10, 1 - this.lockedDeltaQuaternion.w * this.lockedDeltaQuaternion.w),
+      );
       if (denominator > 1e-5 && angle > 1e-6) {
         body.angularVelocity.set(
-          ((delta.x / denominator) * angle) / step,
-          ((delta.y / denominator) * angle) / step,
-          ((delta.z / denominator) * angle) / step,
+          ((this.lockedDeltaQuaternion.x / denominator) * angle) / step,
+          ((this.lockedDeltaQuaternion.y / denominator) * angle) / step,
+          ((this.lockedDeltaQuaternion.z / denominator) * angle) / step,
         );
       } else body.angularVelocity.setZero();
       body.aabbNeedsUpdate = true;
@@ -583,7 +620,7 @@ export class PhysicalRollPlanner {
     const maximumVertical = 7.5 - crowd * 1.4;
     const maximumAngular = 28 - crowd * 4;
     bodies.forEach((body, index) => {
-      if (index < lockedCount || !this.activeFlags[index]) return;
+      if (index < lockedCount || this.activeFlags[index] === 0) return;
       const minX = -boundsX + margin;
       const maxX = boundsX - margin;
       const minZ = -boundsZ + margin;
@@ -642,39 +679,22 @@ export class PhysicalRollPlanner {
     });
   }
 
-  private appendTransforms(target: number[], bodies: readonly CANNON.Body[]): void {
+  private appendTransforms(
+    target: Float32Array,
+    offset: number,
+    bodies: readonly CANNON.Body[],
+  ): number {
+    let cursor = offset;
     for (const body of bodies) {
-      target.push(
-        body.position.x,
-        body.position.y,
-        body.position.z,
-        body.quaternion.x,
-        body.quaternion.y,
-        body.quaternion.z,
-        body.quaternion.w,
-      );
+      target[cursor] = body.position.x;
+      target[cursor + 1] = body.position.y;
+      target[cursor + 2] = body.position.z;
+      target[cursor + 3] = body.quaternion.x;
+      target[cursor + 4] = body.quaternion.y;
+      target[cursor + 5] = body.quaternion.z;
+      target[cursor + 6] = body.quaternion.w;
+      cursor += 7;
     }
+    return cursor;
   }
-}
-
-/** Extracts a subset of interleaved physical transforms without changing their trajectory. */
-export function extractPhysicalTransforms(
-  transforms: Float32Array,
-  frameCount: number,
-  totalCount: number,
-  start: number,
-  count: number,
-): Float32Array {
-  if (count <= 0) return new Float32Array();
-  const output = new Float32Array(frameCount * count * 7);
-  for (let frame = 0; frame < frameCount; frame += 1) {
-    const sourceFrame = frame * totalCount * 7;
-    const targetFrame = frame * count * 7;
-    for (let index = 0; index < count; index += 1) {
-      const source = sourceFrame + (start + index) * 7;
-      const target = targetFrame + index * 7;
-      output.set(transforms.subarray(source, source + 7), target);
-    }
-  }
-  return output;
 }
