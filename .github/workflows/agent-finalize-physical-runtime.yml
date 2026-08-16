@@ -58,7 +58,7 @@ jobs:
           tests/browser/specs/overlay.spec.ts
 
       - name: Lint
-        run: pnpm lint
+        run: GITHUB_ACTIONS= pnpm lint
 
       - name: Typecheck packages
         run: pnpm check:packages
