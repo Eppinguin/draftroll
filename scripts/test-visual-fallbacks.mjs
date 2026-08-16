@@ -57,7 +57,12 @@ assert.match(renderer, /normalizeFallbackKind/);
 assert.match(engine, /spawnFallbackVisuals/);
 assert.match(engine, /createFallbackOnlyPlan/);
 assert.match(engine, /collectOrderedVisualResults/);
-assert.match(engine, /visual\.update\(fallbackProgress, plan\.duration\)/);
+assert.match(engine, /function updatePlanVisuals/);
+assert.match(
+  engine,
+  /genericPhysicalVisuals\.forEach\(\(visual\) => visual\.update\(progress, plan\.duration\)\)/,
+);
+assert.match(engine, /updatePlanVisuals\(activePlan, planTime\)/);
 assert.match(engine, /fallbacks:\s*activeFallbackSpecs/);
 
 // The serializable contract is public; runtime conversion/factories live in the browser engine.
@@ -147,6 +152,8 @@ assert.match(physicalMesh, /content.kind === 'icon'/);
 assert.match(physicalVisuals, /physicalDieColliderRadius/);
 assert.match(physicalVisuals, /getPhysicalVisualPlanEntries/);
 assert.match(physicalVisuals, /commitPhysicalVisualPlan/);
+assert.match(physicalVisuals, /private activationDelay = 0/);
+assert.match(physicalVisuals, /elapsed \+ this\.trajectory\.step \* 0\.5 >= this\.activationDelay/);
 assert.doesNotMatch(physicalVisuals, /AdditionalPhysical|additionalPhysical/);
 assert.match(physicalVisuals, /activePhysicalDice/);
 assert.match(physicalVisuals, /pendingPhysicalDice/);

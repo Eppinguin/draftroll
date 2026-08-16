@@ -144,6 +144,7 @@ export class PhysicalDieVisualInstance {
   private settled = false;
   private needsPlanning = false;
   private lastProgress = 0;
+  private activationDelay = 0;
   private presented = false;
 
   constructor(spec: DraftrollPhysicalVisual) {
@@ -187,6 +188,7 @@ export class PhysicalDieVisualInstance {
   assignLaunchState(state: PhysicalLaunchState): void {
     if (!this.needsPlanning) return;
     this.launchState = serializeLaunchState(state);
+    this.activationDelay = Math.max(0, state.delay);
     this.end.set(state.target[0], state.target[1]);
     this.group.position.set(...state.position);
     this.inner.quaternion.set(...state.quaternion);
@@ -295,10 +297,11 @@ export class PhysicalDieVisualInstance {
     ];
   }
 
-  commitTrajectory(trajectory: RecordedTrajectory, landed: number): void {
+  commitTrajectory(trajectory: RecordedTrajectory, landed: number, activationDelay = 0): void {
     const newlyIntroduced = this.needsPlanning;
     if (newlyIntroduced) this.applyRequestedResult(landed);
     this.trajectory = trajectory;
+    this.activationDelay = Math.max(0, activationDelay);
     this.needsPlanning = false;
     pendingPhysicalDice.delete(this);
     this.lastProgress = 0;
@@ -323,6 +326,7 @@ export class PhysicalDieVisualInstance {
     this.needsPlanning = true;
     pendingPhysicalDice.add(this);
     this.lastProgress = 0;
+    this.activationDelay = 0;
     this.settled = false;
     this.presented = false;
     this.group.visible = false;
@@ -330,18 +334,21 @@ export class PhysicalDieVisualInstance {
     this.mesh.updateShadow(this.group.position.y, 0);
   }
 
-  update(progress: number, _duration = 1): void {
+  update(progress: number, duration = 1): void {
     if (this.settled || !this.trajectory) return;
     const normalized = THREE.MathUtils.clamp(progress, 0, 1);
     this.lastProgress = normalized;
-    const wasPresented = this.presented;
-    if (normalized > 0) this.presented = true;
+    const elapsed = normalized * Math.max(0, duration);
+    if (elapsed + this.trajectory.step * 0.5 >= this.activationDelay) this.presented = true;
     this.group.visible = this.presented;
-    if (!this.presented) return;
+    if (!this.presented) {
+      this.mesh.setOpacity(0);
+      this.mesh.updateShadow(this.group.position.y, 0);
+      return;
+    }
     sample(this.trajectory, normalized, this.group.position, this.inner.quaternion);
-    const opacity = wasPresented ? 1 : THREE.MathUtils.clamp(normalized * 7, 0, 1);
-    this.mesh.setOpacity(opacity);
-    this.mesh.updateShadow(this.group.position.y, opacity);
+    this.mesh.setOpacity(1);
+    this.mesh.updateShadow(this.group.position.y, 1);
   }
 
   settle(): void {
@@ -436,6 +443,7 @@ export function commitPhysicalVisualPlan(
   physicalCount: number,
   physicalIndexes: readonly number[],
   landings: Int32Array,
+  activationDelays?: Float32Array,
 ): void {
   const entries = configuredPhysicalDice();
   if (entries.length !== physicalIndexes.length) {
@@ -444,7 +452,8 @@ export function commitPhysicalVisualPlan(
   if (
     frameCount < 1 ||
     transforms.length !== frameCount * physicalCount * 7 ||
-    landings.length !== physicalCount
+    landings.length !== physicalCount ||
+    (activationDelays !== undefined && activationDelays.length !== physicalCount)
   ) {
     throw new Error('Physical trajectory buffers do not match the unified plan.');
   }
@@ -456,6 +465,7 @@ export function commitPhysicalVisualPlan(
     entry.commitTrajectory(
       trajectoryForIndex(transforms, frameCount, step, physicalCount, physicalIndex),
       landings[physicalIndex] ?? 0,
+      activationDelays?.[physicalIndex] ?? 0,
     );
   });
 }

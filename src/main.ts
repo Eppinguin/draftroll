@@ -2563,6 +2563,7 @@ async function buildRollPlan(
     completed.dieCount,
     activeGenericPhysicalIndexes,
     completed.landings,
+    completed.activationDelays,
   );
   return completed;
 }
@@ -2722,6 +2723,13 @@ function captureReplay(plan: RollPlan): void {
   };
 }
 
+function updatePlanVisuals(plan: RollPlan, time: number): void {
+  applyPlanTransform(plan, time);
+  const progress = plan.duration > 0 ? time / plan.duration : 1;
+  genericPhysicalVisuals.forEach((visual) => visual.update(progress, plan.duration));
+  fallbackVisuals.forEach((visual) => visual.update(progress, plan.duration));
+}
+
 function beginPlanPlayback(
   plan: RollPlan,
   options: { replaying?: boolean; initialTime?: number; settleImmediately?: boolean } = {},
@@ -2788,10 +2796,7 @@ function beginPlanPlayback(
   revealDelay = planTime >= plan.duration ? 0.29 : 0;
   // Commit transform data before the meshes become visible. No render can see
   // a preview pose, a provisional spawn layout, or an earlier candidate.
-  applyPlanTransform(plan, planTime);
-  const fallbackProgress = plan.duration > 0 ? planTime / plan.duration : 1;
-  genericPhysicalVisuals.forEach((visual) => visual.update(fallbackProgress, plan.duration));
-  fallbackVisuals.forEach((visual) => visual.update(fallbackProgress, plan.duration));
+  updatePlanVisuals(plan, planTime);
   if (OVERLAY_MODE) {
     // Paint the first committed frame before notifying the host. The host keeps
     // its iframe hidden until this exact signal, avoiding both a retained old
@@ -2930,6 +2935,7 @@ function playRecordedReplay(
     plan.dieCount,
     activeGenericPhysicalIndexes,
     plan.landings,
+    plan.activationDelays,
   );
   applyReplayNumbering(plan);
   lastReplay = cloneReplay(replay);
@@ -4760,10 +4766,7 @@ function animate(timestamp: number): void {
   if (activePlan && isRolling) {
     const previousTime = planTime;
     if (!tableReplanPaused) planTime = Math.min(activePlan.duration, planTime + dt);
-    applyPlanTransform(activePlan, planTime);
-    const fallbackProgress = activePlan.duration > 0 ? planTime / activePlan.duration : 1;
-    const fallbackPlanDuration = activePlan.duration;
-    fallbackVisuals.forEach((visual) => visual.update(fallbackProgress, fallbackPlanDuration));
+    updatePlanVisuals(activePlan, planTime);
     if (!tableReplanPaused) {
       playImpacts(activePlan, previousTime, planTime);
       playSettledOutcomeEffects(activePlan, planTime);
@@ -4831,7 +4834,8 @@ document.addEventListener('visibilitychange', () => {
     lastFrameTimestamp = 0;
     if (isRolling && activePlan) {
       planTime = activePlan.duration;
-      applyPlanTransform(activePlan, planTime);
+      updatePlanVisuals(activePlan, planTime);
+      genericPhysicalVisuals.forEach((visual) => visual.settle());
       fallbackVisuals.forEach((visual) => visual.settle());
       markOutcomeEffectsThrough(activePlan, activePlan.duration);
       revealResults();
