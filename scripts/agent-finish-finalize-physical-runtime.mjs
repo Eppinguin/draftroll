@@ -49,6 +49,18 @@ function replaceOnce(source, search, replacement, label) {
 }
 
 {
+  const path = 'scripts/test-modifier-sequencing.mjs';
+  let source = await readFile(path, 'utf8');
+  source = replaceOnce(
+    source,
+    `/dice\\.length === 0 && genericPhysicalVisuals\\.length === 0 && fallbackVisuals\\.length === 0/`,
+    `/dice\\.length === 0 && physicalTable\\.visualCount === 0 && fallbackVisuals\\.length === 0/`,
+    'table-empty registry regression',
+  );
+  await writeFile(path, source);
+}
+
+{
   const path = 'tests/browser/specs/overlay.spec.ts';
   let source = await readFile(path, 'utf8');
   source = replaceOnce(
