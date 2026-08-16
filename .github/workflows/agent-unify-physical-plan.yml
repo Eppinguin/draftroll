@@ -43,7 +43,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Format migrated sources
-        run: pnpm exec oxfmt src/main.ts src/roll-worker.ts src/physical-die-visuals.ts src/physical-roll-planner.ts packages/renderer/src/index.ts scripts/test-visual-fallbacks.mjs scripts/test-natural-target-physics.mjs scripts/test-concurrent-table-rolls.mjs
+        run: pnpm exec oxfmt src/main.ts src/roll-worker.ts src/physical-die-visuals.ts src/physical-roll-planner.ts packages/renderer/src/index.ts scripts/test-visual-fallbacks.mjs scripts/test-natural-target-physics.mjs scripts/test-concurrent-table-rolls.mjs scripts/test-runtime-themes.mjs scripts/test-modifier-sequencing.mjs
       - name: Reject pre-release compatibility seams
         run: |
           if grep -R "AdditionalPhysical\|additionalPhysical\|getAdditionalPhysical\|commitAdditionalPhysical\|hasPendingAdditionalPhysical\|hasConfiguredAdditionalPhysical" src packages/renderer/src; then exit 1; fi
