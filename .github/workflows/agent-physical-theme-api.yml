@@ -21,6 +21,30 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22.14.0'
+      - name: Fix guarded regex helper
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/agent-physical-theme-api.mjs')
+          source = path.read_text()
+          before = """async function replaceRegex(path, pattern, replacement, label) {
+            const source = await readFile(path, 'utf8');
+            const matches = [...source.matchAll(pattern)];
+            if (matches.length !== 1) throw new Error(`${label}: expected one match, found ${matches.length}`);
+            await writeFile(path, source.replace(pattern, replacement));
+          }"""
+          after = """async function replaceRegex(path, pattern, replacement, label) {
+            const source = await readFile(path, 'utf8');
+            const match = source.match(pattern);
+            if (!match) throw new Error(`${label}: expected one match, found 0`);
+            const remainder = source.slice((match.index ?? 0) + match[0].length);
+            if (remainder.match(pattern)) throw new Error(`${label}: expected one match, found more than 1`);
+            await writeFile(path, source.replace(pattern, replacement));
+          }"""
+          if source.count(before) != 1:
+              raise SystemExit(f'regex helper: expected one match, found {source.count(before)}')
+          path.write_text(source.replace(before, after, 1))
+          PY
       - name: Check migration syntax
         run: node --check scripts/agent-physical-theme-api.mjs
       - name: Apply guarded migration
