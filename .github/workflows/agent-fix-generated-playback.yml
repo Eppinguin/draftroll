@@ -39,7 +39,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Format changed sources
-        run: pnpm exec oxfmt --write src/main.ts src/physical-die-visuals.ts scripts/test-visual-fallbacks.mjs scripts/test-late-events.mjs tests/browser/specs/overlay.spec.ts
+        run: pnpm exec oxfmt --write src/main.ts src/physical-die-visuals.ts scripts/test-visual-fallbacks.mjs scripts/test-late-events.mjs scripts/test-large-pool-physics.mjs tests/browser/specs/overlay.spec.ts
 
       - name: Typecheck packages
         run: pnpm check:packages
