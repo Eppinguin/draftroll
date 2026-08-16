@@ -48,5 +48,21 @@ count = source.split(playbackBlock).length - 1;
 if (count !== 1) throw new Error(`redundant playback migration block expected once, found ${count}`);
 source = source.replace(playbackBlock, '');
 
+const replayBlockOld = `  source = replaceOnce(
+    source,
+    \`    activePhysicalSpecs = physical;\\n    activeCanonicalPhysicalIndexes = split.canonicalIndexes;\\n    activeGenericPhysicalIndexes = split.genericIndexes;\`,
+    \`    resetPhysicalTable(physical);\`,
+    'replay physical registry reset',
+  );`;
+const replayBlockNew = `  source = replaceOnce(
+    source,
+    \`  activePhysicalSpecs = physical;\\n  activeCanonicalPhysicalIndexes = split.canonicalIndexes;\\n  activeGenericPhysicalIndexes = split.genericIndexes;\`,
+    \`  resetPhysicalTable(physical);\`,
+    'replay physical registry reset',
+  );`;
+count = source.split(replayBlockOld).length - 1;
+if (count !== 1) throw new Error(`replay migration block expected once, found ${count}`);
+source = source.replace(replayBlockOld, replayBlockNew);
+
 await writeFile(path, source);
 console.log('final physical migration guards normalized');
