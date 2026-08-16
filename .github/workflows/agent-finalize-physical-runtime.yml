@@ -30,11 +30,15 @@ jobs:
       - name: Apply migration cleanup
         run: node scripts/agent-finish-finalize-physical-runtime.mjs
 
+      - name: Update migrated source assertions
+        run: node scripts/agent-final-test-cleanup.mjs
+
       - name: Remove one-time migration files
         run: |
           rm scripts/agent-normalize-finalize-physical-runtime.mjs
           rm scripts/agent-finalize-physical-runtime.mjs
           rm scripts/agent-finish-finalize-physical-runtime.mjs
+          rm scripts/agent-final-test-cleanup.mjs
           rm .github/workflows/agent-finalize-physical-runtime.yml
           rm .agent-finalize-physical-runtime-trigger
 
@@ -55,6 +59,7 @@ jobs:
           src/physical-die-visuals.ts
           src/physical-die-mesh.ts
           src/roll-worker.ts
+          scripts/test-late-events.mjs
           scripts/test-mixed-renderer.mjs
           scripts/test-visual-fallbacks.mjs
           tests/browser/specs/overlay.spec.ts
