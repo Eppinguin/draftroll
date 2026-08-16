@@ -55,4 +55,48 @@ if natural.count(old_additive) != 1:
     raise SystemExit(f'additive planning assertion: expected one match, found {natural.count(old_additive)}')
 natural_path.write_text(natural.replace(old_additive, new_additive, 1))
 
+concurrent_path = Path('scripts/test-concurrent-table-rolls.mjs')
+concurrent = concurrent_path.read_text()
+old_bridge = """  const bridge = {
+    async roll(request) {
+      calls.push(request);
+      return { results: request.results ?? [], total: 999, replay: { batch: calls.length } };
+    },
+    setDie() {},
+    setQuantity() {},
+    setTheme() {},
+    getThemes() {
+"""
+new_bridge = """  const bridge = {
+    async roll(request) {
+      calls.push(request);
+      return {
+        results: (request.physical ?? []).map((visual) => visual.result),
+        total: 999,
+        replay: { batch: calls.length },
+      };
+    },
+    getThemes() {
+"""
+if concurrent.count(old_bridge) != 1:
+    raise SystemExit(f'concurrent bridge mock: expected one match, found {concurrent.count(old_bridge)}')
+concurrent = concurrent.replace(old_bridge, new_bridge, 1)
+old_parallel = """  assert.deepEqual(calls[0].results, [15, 4, 5]);
+  assert.deepEqual(calls[0].kinds, ['d20', 'd6', 'd6']);
+"""
+new_parallel = """  assert.deepEqual(
+    calls[0].physical.map((visual) => visual.result),
+    [15, 4, 5],
+  );
+  assert.deepEqual(
+    calls[0].physical.map((visual) => visual.canonicalKind),
+    ['d20', 'd6', 'd6'],
+  );
+  assert.equal(calls[0].results, undefined);
+  assert.equal(calls[0].kinds, undefined);
+"""
+if concurrent.count(old_parallel) != 1:
+    raise SystemExit(f'concurrent parallel arrays assertion: expected one match, found {concurrent.count(old_parallel)}')
+concurrent_path.write_text(concurrent.replace(old_parallel, new_parallel, 1))
+
 print('Unified-plan follow-up cleanup applied.')
