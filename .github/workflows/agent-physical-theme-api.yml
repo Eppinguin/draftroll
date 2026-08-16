@@ -21,6 +21,20 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22.14.0'
+      - name: Remove overlapping one-time renames
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/agent-clean-physical-api.py')
+          source = path.read_text()
+          for line in [
+              "replace_all('src/physical-die-visuals.ts', 'lastPhysicalFallbackReplay', 'lastAdditionalPhysicalReplay')\n",
+              "replace_all('src/physical-die-visuals.ts', 'capturePhysicalFallbackReplay', 'captureAdditionalPhysicalReplay')\n",
+              "replace_all('src/physical-die-visuals.ts', 'restorePhysicalFallbackReplay', 'restoreAdditionalPhysicalReplay')\n",
+          ]:
+              source = source.replace(line, '')
+          path.write_text(source)
+          PY
       - name: Apply breaking pre-release migration
         run: python scripts/agent-clean-physical-api.py
       - name: Remove one-time migration files
