@@ -66,6 +66,14 @@ modifier = modifier.replace(
     "'hosts can opt into the legacy simultaneous presentation'",
     "'hosts can opt into a single simultaneous presentation'",
 )
+old_fallback_source = """  const fallbackVisualSource = await readFile(join(projectRoot, 'src/fallback-visuals.ts'), 'utf8');"""
+new_fallback_source = """  const fallbackVisualSource = await readFile(
+    join(projectRoot, 'src/fallback-visuals-base.ts'),
+    'utf8',
+  );"""
+if modifier.count(old_fallback_source) != 1:
+    raise SystemExit(f'fallback implementation source assertion: expected one match, found {modifier.count(old_fallback_source)}')
+modifier = modifier.replace(old_fallback_source, new_fallback_source, 1)
 if re.search(r'[A-Za-z_]\w*Calls(?:\[\d+\])?\.results', modifier):
     raise SystemExit('modifier sequencing still inspects removed bridge request.results')
 modifier_path.write_text(modifier)
