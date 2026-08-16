@@ -7,8 +7,26 @@ function replaceOnce(source, search, replacement, label) {
 }
 
 {
+  const path = 'packages/renderer/src/index.ts';
+  let source = await readFile(path, 'utf8');
+  source = replaceOnce(
+    source,
+    `? { contents: physicalModel.presentation.contents.map((content) => ({ ...content })) }`,
+    `? { contents: physicalModel.presentation.contents.map((content) => Object.assign({}, content)) }`,
+    'presentation copy without map spread',
+  );
+  await writeFile(path, source);
+}
+
+{
   const path = 'src/main.ts';
   let source = await readFile(path, 'utf8');
+  source = replaceOnce(
+    source,
+    `  const activeTargeting = (\n    Object.entries(targetingCounts) as Array<['symmetry' | 'relabel' | 'fixed', number]>\n  ).filter(([, count]) => count > 0);`,
+    `  const activeTargeting = (['symmetry', 'relabel', 'fixed'] as const).filter(\n    (targeting) => targetingCounts[targeting] > 0,\n  );`,
+    'targeting diagnostics without unsafe assertion',
+  );
   source = replaceOnce(
     source,
     `        physicalIndex: number;\n        implementation: 'canonical' | 'generated' | 'custom';`,
