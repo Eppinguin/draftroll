@@ -128,6 +128,102 @@ jobs:
           await writeFile(path, source);
           NODE
 
+      - name: Fix host overlay interaction forwarding
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFile, writeFile } from 'node:fs/promises';
+
+          function replaceOnce(source, search, replacement, label) {
+            const count = source.split(search).length - 1;
+            if (count !== 1) throw new Error(`${label}: expected one match, found ${count}`);
+            return source.replace(search, replacement);
+          }
+
+          {
+            const path = 'packages/overlay/src/index.ts';
+            let source = await readFile(path, 'utf8');
+            source = replaceOnce(
+              source,
+              `  private participantFilter?: RendererParticipantFilter;\n`,
+              `  private participantFilter?: RendererParticipantFilter;\n  private interactionOptions: Required<RendererInteractionOptions> = {\n    click: 'none',\n    draggable: false,\n  };\n`,
+              'overlay interaction state',
+            );
+            source = replaceOnce(
+              source,
+              `  async configureInteractions(options: RendererInteractionOptions): Promise<void> {\n    await this.command({ type: 'configure-interactions', options });\n  }`,
+              `  async configureInteractions(options: RendererInteractionOptions): Promise<void> {\n    const next = {\n      click: options.click ?? this.interactionOptions.click,\n      draggable: options.draggable ?? this.interactionOptions.draggable,\n    };\n    await this.command({ type: 'configure-interactions', options });\n    this.interactionOptions = next;\n    if (this.iframe) {\n      this.iframe.style.pointerEvents =\n        next.click === 'none' && !next.draggable ? 'none' : 'auto';\n    }\n  }`,
+              'overlay configure interactions',
+            );
+            await writeFile(path, source);
+          }
+
+          {
+            const path = 'tests/browser/fixtures/host.ts';
+            let source = await readFile(path, 'utf8');
+            source = replaceOnce(
+              source,
+              `  rollLocalWithPhysicalModel(expression?: string): Promise<{ total: number; dice: number }>;\n`,
+              `  rollLocalWithPhysicalModel(expression?: string): Promise<{ total: number; dice: number }>;\n  configureOverlayDrag(draggable?: boolean): Promise<void>;\n`,
+              'fixture overlay drag api',
+            );
+            source = replaceOnce(
+              source,
+              `  rollLocalWithPhysicsPreset,\n  rollLocalWithPhysicalModel,\n  connectRoom,`,
+              `  rollLocalWithPhysicsPreset,\n  rollLocalWithPhysicalModel,\n  configureOverlayDrag,\n  connectRoom,`,
+              'fixture overlay drag binding',
+            );
+            source = replaceOnce(
+              source,
+              `async function rollLocalWithPhysicalModel(\n`,
+              `async function configureOverlayDrag(draggable = true): Promise<void> {\n  await ready;\n  if (!overlay) throw new Error('Overlay renderer is unavailable');\n  await overlay.configureInteractions({ draggable });\n}\n\nasync function rollLocalWithPhysicalModel(\n`,
+              'fixture overlay drag implementation',
+            );
+            await writeFile(path, source);
+          }
+
+          {
+            const path = 'tests/browser/specs/overlay.spec.ts';
+            let source = await readFile(path, 'utf8');
+            source = replaceOnce(
+              source,
+              `  const firstCompletion = await frame.locator('body').evaluate(() =>\n`,
+              `  await frame.locator('body').evaluate(() =>\n`,
+              'remove first additive completion binding',
+            );
+            source = replaceOnce(
+              source,
+              `  );\n  expect(firstCompletion.presentationMode).toBe('replace');\n  const before = await frame\n`,
+              `  );\n  const before = await frame\n`,
+              'remove first additive presentation mode assertion',
+            );
+            source = replaceOnce(
+              source,
+              `  const additiveCompletion = await frame.locator('body').evaluate(() =>\n`,
+              `  await frame.locator('body').evaluate(() =>\n`,
+              'remove additive completion binding',
+            );
+            source = replaceOnce(
+              source,
+              `  );\n  expect(additiveCompletion.presentationMode).toBe('add');\n  const after = await frame\n`,
+              `  );\n  const after = await frame\n`,
+              'remove additive presentation mode assertion',
+            );
+            source = replaceOnce(
+              source,
+              `  await frame\n    .locator('body')\n    .evaluate(() => window.draftrollDice.configureInteractions({ draggable: true }));\n  await iframe.evaluate((element) => {\n    element.setAttribute('style', \`${'${'}element.getAttribute('style') ?? ''}; pointer-events: auto;\`);\n  });\n`,
+              `  await page.evaluate(() => window.__draftrollTest.configureOverlayDrag(true));\n  await expect(iframe).toHaveCSS('pointer-events', 'auto');\n`,
+              'public overlay drag configuration',
+            );
+            source = replaceOnce(
+              source,
+              `  await page.mouse.move(startX, startY);\n  await page.mouse.down();`,
+              `  await canvas.hover({ position: before.screenPosition });\n  await page.mouse.down();`,
+              'iframe-local generated drag start',
+            );
+            await writeFile(path, source);
+          }
+          NODE
+
       - name: Remove one-time migration files
         run: |
           rm scripts/agent-strengthen-generated-physical-browser-regression.mjs
@@ -142,6 +238,7 @@ jobs:
       - name: Format changed sources
         run: >-
           pnpm exec oxfmt
+          packages/overlay/src/index.ts
           src/main.ts
           src/physical-die-visuals.ts
           scripts/test-browser-automation.mjs
