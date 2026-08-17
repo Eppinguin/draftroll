@@ -14,6 +14,58 @@ function replaceOnce(source, search, replacement, label) {
   return source.replace(search, replacement);
 }
 
+// Overlay play options are manually serialized. Keep physical models first-class across the iframe
+// boundary and clone their serializable geometry/presentation so caller-owned objects cannot be
+// mutated by later preparation steps.
+{
+  const path = 'packages/overlay/src/index.ts';
+  let source = await read(path);
+  source = replaceOnce(
+    source,
+    `import type {\n  DiceRenderer,`,
+    `import {\n  clonePhysicalDieDefinition,\n  type DiceRenderer,`,
+    'overlay physical definition clone import',
+  );
+  source = replaceOnce(
+    source,
+    `export interface OverlaySerializablePlayOptions extends Omit<\n  RendererPlayOptions,\n  'outcomeResolver' | 'signal'\n> {}\n`,
+    `export interface OverlaySerializablePlayOptions extends Omit<\n  RendererPlayOptions,\n  'outcomeResolver' | 'signal'\n> {}\n\nfunction cloneOverlayPhysicalModels(\n  models: RendererPlayOptions['physicalModels'],\n): OverlaySerializablePlayOptions['physicalModels'] {\n  if (!models) return undefined;\n  return Object.fromEntries(\n    Object.entries(models).map(([key, model]) => [\n      key,\n      {\n        definition: clonePhysicalDieDefinition(model.definition),\n        presentation: {\n          contents: model.presentation.contents.map((content) => ({ ...content })),\n        },\n      },\n    ]),\n  );\n}\n`,
+    'overlay physical model clone helper',
+  );
+  source = replaceOnce(
+    source,
+    `      defaultThemeId: options.defaultThemeId,\n      dieIds: options.dieIds ? [...options.dieIds] : undefined,`,
+    `      defaultThemeId: options.defaultThemeId,\n      physicalModels: cloneOverlayPhysicalModels(options.physicalModels),\n      dieIds: options.dieIds ? [...options.dieIds] : undefined,`,
+    'overlay physical models serialization',
+  );
+  await write(path, source);
+}
+
+// Core static guard for the manual overlay serialization boundary.
+{
+  const path = 'scripts/test-browser-automation.mjs';
+  let source = await read(path);
+  source = replaceOnce(
+    source,
+    `const server = readFileSync(join(root, 'tests/browser/serve-fixtures.mjs'), 'utf8');`,
+    `const overlayRenderer = readFileSync(join(root, 'packages/overlay/src/index.ts'), 'utf8');\nassert(\n  overlayRenderer.includes('physicalModels: cloneOverlayPhysicalModels(options.physicalModels)'),\n  'overlay play serialization drops physicalModels',\n);\nassert(\n  overlayRenderer.includes('clonePhysicalDieDefinition(model.definition)'),\n  'overlay physical models are not defensively cloned',\n);\n\nconst server = readFileSync(join(root, 'tests/browser/serve-fixtures.mjs'), 'utf8');`,
+    'browser automation overlay physical guard',
+  );
+  source = replaceOnce(
+    source,
+    `  'accessible text fallback works with reduced motion and no WebGL',\n]) {`,
+    `  'accessible text fallback works with reduced motion and no WebGL',\n  'host-supplied custom physical model through the shared planner',\n]) {`,
+    'browser automation custom physical marker',
+  );
+  source = replaceOnce(
+    source,
+    `        'reduced-motion and no-WebGL fallback',\n      ],`,
+    `        'reduced-motion and no-WebGL fallback',\n        'host-supplied custom physical model',\n      ],`,
+    'browser automation coverage output',
+  );
+  await write(path, source);
+}
+
 {
   const path = 'tests/browser/fixtures/host.ts';
   let source = await read(path);
@@ -44,7 +96,7 @@ function replaceOnce(source, search, replacement, label) {
   source = replaceOnce(
     source,
     `  return { total: roll.total, dice: roll.dice.length };\n}\n\nasync function connectRoom(`,
-    `  return { total: roll.total, dice: roll.dice.length };\n}\n\nasync function rollLocalWithPhysicalModel(\n  expression = '1d6',\n): Promise<{ total: number; dice: number }> {\n  await ready;\n  const roll = draftroll.roll(expression, {\n    render: rendererEnabled,\n    renderer: {\n      animationDurationMs: 720,\n      physicalModels: { d6: browserCustomD6Model },\n    },\n  });\n  await roll.wait();\n  state.localPresentationCount += 1;\n  state.lastTotal = roll.total;\n  setStatus('Custom physical roll complete');\n  renderState();\n  return { total: roll.total, dice: roll.dice.length };\n}\n\nasync function connectRoom(`,
+    `  return { total: roll.total, dice: roll.dice.length };\n}\n\nasync function rollLocalWithPhysicalModel(\n  expression = '1d6',\n): Promise<{ total: number; dice: number }> {\n  await ready;\n  const roll = draftroll.roll(expression, {\n    render: rendererEnabled,\n    renderer: {\n      physicalModels: { d6: browserCustomD6Model },\n    },\n  });\n  await roll.wait();\n  state.localPresentationCount += 1;\n  state.lastTotal = roll.total;\n  setStatus('Custom physical roll complete');\n  renderState();\n  return { total: roll.total, dice: roll.dice.length };\n}\n\nasync function connectRoom(`,
     'fixture custom physical roll function',
   );
   await write(path, source);
@@ -75,4 +127,4 @@ function replaceOnce(source, search, replacement, label) {
   await write(path, source);
 }
 
-console.log('custom physical browser regression applied');
+console.log('custom physical browser regression and overlay forwarding applied');
