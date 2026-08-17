@@ -1,0 +1,75 @@
+name: Agent physical architecture cleanup
+
+on:
+  push:
+    branches:
+      - agent/dicebox-learnings-cards
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/dicebox-learnings-cards
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.14.0
+
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.17.0 --activate
+
+      - name: Apply focused architecture cleanup
+        run: |
+          node --check scripts/agent-clean-physical-architecture.mjs
+          node scripts/agent-clean-physical-architecture.mjs
+          git rm -f .DS_Store
+          rm scripts/agent-clean-physical-architecture.mjs
+          rm .github/workflows/agent-physical-architecture-cleanup.yml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Format changed source
+        run: >-
+          pnpm exec oxfmt --write
+          src/main.ts
+          src/physical-table.ts
+          src/physical-die-visuals.ts
+          src/physical-die-mesh.ts
+          src/overlay.css
+          docs/ARCHITECTURE.md
+
+      - name: Static checks
+        run: pnpm check
+
+      - name: Core regression
+        run: pnpm test:core
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Build browser fixtures
+        run: pnpm test:browser:build
+
+      - name: Overlay browser regression
+        run: pnpm exec playwright test tests/browser/specs/overlay.spec.ts --project=chromium
+
+      - name: Commit validated cleanup
+        run: |
+          git status --short
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Cleanup produced no changes"
+            exit 1
+          fi
+          git commit -m "clean physical runtime architecture"
+          git push origin HEAD:agent/dicebox-learnings-cards
