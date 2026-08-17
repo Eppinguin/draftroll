@@ -35,9 +35,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Format changed tests
+      - name: Format changed sources
         run: >-
           pnpm exec oxfmt
+          packages/overlay/src/index.ts
+          scripts/test-browser-automation.mjs
           tests/browser/fixtures/host.ts
           tests/browser/support/fixture.ts
           tests/browser/specs/overlay.spec.ts
@@ -69,5 +71,5 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git diff --cached --quiet && exit 0
-          git commit -m "cover custom physical models in browser"
+          git commit -m "forward custom physical models through overlay"
           git push origin HEAD:agent/dicebox-learnings-cards
