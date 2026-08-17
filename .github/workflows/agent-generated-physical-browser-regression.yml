@@ -24,6 +24,19 @@ jobs:
       - name: Apply generated physical browser regression
         run: node scripts/agent-strengthen-generated-physical-browser-regression.mjs
 
+      - name: Use a lint-safe iframe pointer override
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFile, writeFile } from 'node:fs/promises';
+          const path = 'tests/browser/specs/overlay.spec.ts';
+          let source = await readFile(path, 'utf8');
+          const before = "    (element as HTMLElement).style.pointerEvents = 'auto';";
+          const after = "    element.setAttribute('style', `${element.getAttribute('style') ?? ''}; pointer-events: auto;`);";
+          if (!source.includes(before)) throw new Error('iframe pointer override marker is missing');
+          source = source.replace(before, after);
+          await writeFile(path, source);
+          NODE
+
       - name: Remove one-time migration files
         run: |
           rm scripts/agent-strengthen-generated-physical-browser-regression.mjs
