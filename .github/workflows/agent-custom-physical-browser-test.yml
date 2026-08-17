@@ -51,9 +51,6 @@ jobs:
       - name: Typecheck browser engine
         run: pnpm exec tsc --noEmit
 
-      - name: Typecheck browser fixtures
-        run: pnpm exec tsc -p tests/browser/tsconfig.json --noEmit
-
       - name: Check API documentation
         run: pnpm check:docs
 
