@@ -29,6 +29,20 @@ jobs:
         run: |
           node --check scripts/agent-clean-physical-architecture.mjs
           node scripts/agent-clean-physical-architecture.mjs
+          node --input-type=module <<'NODE'
+          import { readFile, writeFile } from 'node:fs/promises';
+          const path = 'scripts/test-visual-fallbacks.mjs';
+          let source = await readFile(path, 'utf8');
+          const before = `assert.match(physicalVisuals, /new Map<string, PhysicalDieVisualInstance>/);\nassert.match(physicalVisuals, /physicalIndex: number/);\nassert.doesNotMatch(physicalVisuals, /extractPhysicalTransforms|trajectoryForIndex/);\nassert.doesNotMatch(physicalVisuals, /AdditionalPhysical|additionalPhysical/);\nassert.match(physicalVisuals, /activePhysicalDice/);\nassert.match(physicalVisuals, /pendingPhysicalDice/);`;
+          const after = `assert.doesNotMatch(physicalVisuals, /new Map<string, PhysicalDieVisualInstance>/);\nassert.match(physicalVisuals, /physicalIndex: number/);\nassert.doesNotMatch(physicalVisuals, /extractPhysicalTransforms|trajectoryForIndex/);\nassert.doesNotMatch(physicalVisuals, /AdditionalPhysical|additionalPhysical/);\nassert.doesNotMatch(physicalVisuals, /activePhysicalDice|pendingPhysicalDice/);`;
+          if (!source.includes(before)) throw new Error('legacy visual registry assertion block is missing');
+          source = source.replace(before, after);
+          const oldRegistry = `assert.match(physicalTable, /class PhysicalTableRegistry/);\nassert.match(physicalTable, /forEachVisual/);\nassert.doesNotMatch(engine, /physicalTable\\.visualInstances/);`;
+          const newRegistry = `assert.match(physicalTable, /class PhysicalTableRegistry/);\nassert.match(physicalTable, /forEachVisual/);\nassert.match(physicalTable, /visualInstances/);\nassert.match(physicalTable, /preserveBindings/);\nassert.match(physicalTable, /Physical table canonical index is missing/);\nassert.match(engine, /physicalTable\\.visualInstances\\(\\)/);`;
+          if (!source.includes(oldRegistry)) throw new Error('legacy physical table assertion block is missing');
+          source = source.replace(oldRegistry, newRegistry);
+          await writeFile(path, source);
+          NODE
           git rm -f .DS_Store
           rm scripts/agent-clean-physical-architecture.mjs
           rm .github/workflows/agent-physical-architecture-cleanup.yml
@@ -44,6 +58,7 @@ jobs:
           src/physical-die-visuals.ts
           src/physical-die-mesh.ts
           src/overlay.css
+          scripts/test-visual-fallbacks.mjs
           docs/ARCHITECTURE.md
 
       - name: Verify changed source formatting
@@ -54,6 +69,7 @@ jobs:
           src/physical-die-visuals.ts
           src/physical-die-mesh.ts
           src/overlay.css
+          scripts/test-visual-fallbacks.mjs
           docs/ARCHITECTURE.md
 
       - name: Lint and type checks
