@@ -21,9 +21,6 @@ interface SharedTrajectoryView {
   physicalIndex: number;
 }
 
-const activePhysicalDice = new Map<string, PhysicalDieVisualInstance>();
-const pendingPhysicalDice = new Set<string>();
-
 function readPhysicalPresentation(
   spec: DraftrollPhysicalVisual,
   definition: PhysicalDieDefinition,
@@ -128,9 +125,6 @@ export class PhysicalDieVisualInstance {
     if (!Number.isSafeInteger(spec.sides) || spec.sides < 1 || spec.sides > maximumSides) {
       throw new Error(`Physical die requires 1 to ${maximumSides} outcome slots: ${spec.type}`);
     }
-    if (activePhysicalDice.has(spec.id)) {
-      throw new Error(`Physical die id is already active: ${spec.id}`);
-    }
     this.sides = spec.sides;
     this.definition = spec.definition
       ? clonePhysicalDieDefinition(spec.definition)
@@ -153,7 +147,6 @@ export class PhysicalDieVisualInstance {
     });
     this.group = this.mesh.group;
     this.inner = this.mesh.visualRoot;
-    activePhysicalDice.set(spec.id, this);
   }
 
   get hasTrajectory(): boolean {
@@ -181,7 +174,6 @@ export class PhysicalDieVisualInstance {
     this.prepared = true;
     this.trajectory = null;
     this.needsPlanning = true;
-    pendingPhysicalDice.add(this.spec.id);
     this.lastTime = 0;
     this.lastScaleX = 1;
     this.lastScaleZ = 1;
@@ -329,7 +321,6 @@ export class PhysicalDieVisualInstance {
     this.trajectory = { transforms, frameCount, step, physicalCount, physicalIndex };
     this.activationDelay = Math.max(0, activationDelay);
     this.needsPlanning = false;
-    pendingPhysicalDice.delete(this.spec.id);
     this.lastTime = 0;
     this.lastScaleX = 1;
     this.lastScaleZ = 1;
@@ -429,10 +420,6 @@ export class PhysicalDieVisualInstance {
   }
 
   dispose(): void {
-    if (activePhysicalDice.get(this.spec.id) === this) {
-      activePhysicalDice.delete(this.spec.id);
-    }
-    pendingPhysicalDice.delete(this.spec.id);
     this.mesh.dispose();
   }
 }
@@ -459,44 +446,45 @@ export interface PhysicalVisualPlanAssignment {
   physicalIndex: number;
 }
 
-function configuredPhysicalDice(): PhysicalDieVisualInstance[] {
-  return [...activePhysicalDice.values()].filter((entry) => entry.isPrepared);
+function configuredPhysicalDice(
+  entries: readonly PhysicalDieVisualInstance[],
+): PhysicalDieVisualInstance[] {
+  return entries.filter((entry) => entry.isPrepared);
 }
 
-export function getPhysicalVisualInstance(id: string): PhysicalDieVisualInstance | undefined {
-  return activePhysicalDice.get(id);
-}
-
-export function getPendingPhysicalLaunchParticipants(): PendingPhysicalLaunchParticipant[] {
-  const participants: PendingPhysicalLaunchParticipant[] = [];
-  for (const id of pendingPhysicalDice) {
-    const entry = activePhysicalDice.get(id);
-    if (entry?.isPrepared) participants.push(entry.launchParticipant);
-  }
-  return participants;
+export function getPendingPhysicalLaunchParticipants(
+  entries: readonly PhysicalDieVisualInstance[],
+): PendingPhysicalLaunchParticipant[] {
+  return entries
+    .filter((entry) => entry.isPrepared && entry.requiresPlanning)
+    .map((entry) => entry.launchParticipant);
 }
 
 export function assignPendingPhysicalLaunchStates(
+  entries: readonly PhysicalDieVisualInstance[],
   assignments: readonly PendingPhysicalLaunchAssignment[],
 ): void {
+  const entriesById = new Map(entries.map((entry) => [entry.spec.id, entry] as const));
   for (const assignment of assignments) {
-    const entry = activePhysicalDice.get(assignment.id);
-    if (entry && pendingPhysicalDice.has(assignment.id)) {
-      entry.assignLaunchState(assignment.state);
-    }
+    const entry = entriesById.get(assignment.id);
+    if (entry?.isPrepared && entry.requiresPlanning) entry.assignLaunchState(assignment.state);
   }
 }
 
-export function hasConfiguredPhysicalVisuals(): boolean {
-  return configuredPhysicalDice().length > 0;
+export function hasConfiguredPhysicalVisuals(
+  entries: readonly PhysicalDieVisualInstance[],
+): boolean {
+  return entries.some((entry) => entry.isPrepared);
 }
 
-export function hasPendingPhysicalVisuals(): boolean {
-  return pendingPhysicalDice.size > 0;
+export function hasPendingPhysicalVisuals(entries: readonly PhysicalDieVisualInstance[]): boolean {
+  return entries.some((entry) => entry.isPrepared && entry.requiresPlanning);
 }
 
-export function getPhysicalVisualPlanEntries(): PhysicalVisualPlanEntry[] {
-  return configuredPhysicalDice().map((entry) => ({
+export function getPhysicalVisualPlanEntries(
+  entries: readonly PhysicalDieVisualInstance[],
+): PhysicalVisualPlanEntry[] {
+  return configuredPhysicalDice(entries).map((entry) => ({
     id: entry.spec.id,
     definition: entry.definition,
     state: entry.plannerState(),
@@ -504,6 +492,7 @@ export function getPhysicalVisualPlanEntries(): PhysicalVisualPlanEntry[] {
 }
 
 export function commitPhysicalVisualPlan(
+  entries: readonly PhysicalDieVisualInstance[],
   transforms: Float32Array,
   frameCount: number,
   step: number,
@@ -520,7 +509,8 @@ export function commitPhysicalVisualPlan(
   ) {
     throw new Error('Physical trajectory buffers do not match the unified plan.');
   }
-  const configuredIds = new Set(configuredPhysicalDice().map((entry) => entry.spec.id));
+  const configured = configuredPhysicalDice(entries);
+  const configuredIds = new Set(configured.map((entry) => entry.spec.id));
   const assignedIds = new Set(assignments.map((assignment) => assignment.id));
   if (
     configuredIds.size !== assignments.length ||
@@ -529,10 +519,11 @@ export function commitPhysicalVisualPlan(
   ) {
     throw new Error('Physical visual assignments do not match the configured generic dice.');
   }
+  const entriesById = new Map(configured.map((entry) => [entry.spec.id, entry] as const));
 
   for (const assignment of assignments) {
-    const entry = activePhysicalDice.get(assignment.id);
-    if (!entry?.isPrepared) {
+    const entry = entriesById.get(assignment.id);
+    if (!entry) {
       throw new Error(`Physical visual is not configured: ${assignment.id}`);
     }
     const physicalIndex = assignment.physicalIndex;

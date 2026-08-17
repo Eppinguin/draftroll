@@ -25,11 +25,11 @@ import {
   PhysicalDieVisualInstance,
   assignPendingPhysicalLaunchStates,
   commitPhysicalVisualPlan,
-  getPhysicalVisualInstance,
   getPhysicalVisualPlanEntries,
   getPendingPhysicalLaunchParticipants,
   hasConfiguredPhysicalVisuals,
   hasPendingPhysicalVisuals,
+  type PendingPhysicalLaunchParticipant,
 } from './physical-die-visuals';
 import { createCanonicalPhysicalDieDefinition, type PhysicalDieDefinition } from './physical-dice';
 import {
@@ -226,6 +226,7 @@ declare global {
       ) => Promise<DraftrollRollCompletion>;
       configureInteractions: (options: RendererInteractionOptions) => void | Promise<void>;
       getPerformanceSnapshot: () => DicePerformanceSnapshot;
+      /** Internal browser regression diagnostics; not part of DraftrollBridge. */
       getPhysicalSnapshot: () => Array<{
         id: string;
         physicalIndex: number;
@@ -1093,14 +1094,10 @@ function clearGenericPhysicalVisuals(): void {
   }
 }
 
-function rebindPhysicalTableRuntime(): void {
+function rebindCanonicalPhysicalTableRuntime(): void {
   const canonicalEntries = physicalTable.canonicalEntries();
   if (canonicalEntries.length === dice.length) {
     dice.forEach((die, index) => physicalTable.bindCanonical(canonicalEntries[index].id, die));
-  }
-  for (const entry of physicalTable.visualEntries()) {
-    const visual = getPhysicalVisualInstance(entry.id);
-    if (visual) physicalTable.bindVisual(entry.id, visual);
   }
 }
 
@@ -1113,10 +1110,10 @@ function physicalTableSpec(spec: DraftrollPhysicalVisual) {
   };
 }
 
-function resetPhysicalTable(specs: DraftrollPhysicalVisual[]): void {
+function resetPhysicalTable(specs: DraftrollPhysicalVisual[], preserveBindings = false): void {
   activePhysicalSpecs = specs;
-  physicalTable.reset(specs.map(physicalTableSpec));
-  rebindPhysicalTableRuntime();
+  physicalTable.reset(specs.map(physicalTableSpec), preserveBindings);
+  rebindCanonicalPhysicalTableRuntime();
 }
 
 function clearFallbackVisuals(): void {
@@ -1140,6 +1137,7 @@ function clearDice(): void {
   dice = [];
   clearGenericPhysicalVisuals();
   clearFallbackVisuals();
+  physicalTable.reset([]);
 }
 
 function spawnGenericPhysicalVisuals(specs: readonly DraftrollPhysicalVisual[]): void {
@@ -1709,7 +1707,7 @@ function prepareTargets(): boolean {
       }),
     );
   }
-  rebindPhysicalTableRuntime();
+  rebindCanonicalPhysicalTableRuntime();
   activeFallbackSpecs = fallbacks;
   activeVisualOrder = normalizeVisualOrder(
     queuedVisualOrder,
@@ -1835,7 +1833,7 @@ interface CanonicalLaunchParticipant {
   id: string;
 }
 
-type GenericLaunchParticipant = ReturnType<typeof getPendingPhysicalLaunchParticipants>[number];
+type GenericLaunchParticipant = PendingPhysicalLaunchParticipant;
 
 function toLaunchState(state: PhysicalLaunchState): LaunchState {
   return {
@@ -1873,6 +1871,7 @@ function createMixedPhysicalLaunchStates(
   });
   const canonicalStates = generated.slice(0, canonical.length).map(toLaunchState);
   assignPendingPhysicalLaunchStates(
+    physicalTable.visualInstances(),
     generic.map((entry, index) => ({
       id: entry.id,
       state: generated[canonical.length + index],
@@ -1891,7 +1890,7 @@ function allCanonicalLaunchParticipants(): CanonicalLaunchParticipant[] {
 
 function createLaunchStates(swipe: THREE.Vector2 | undefined, seed: string): LaunchState[] {
   const canonical = allCanonicalLaunchParticipants();
-  const generic = getPendingPhysicalLaunchParticipants();
+  const generic = getPendingPhysicalLaunchParticipants(physicalTable.visualInstances());
   const tableRolls = readActiveTableRolls().filter((group) =>
     group.dieIds?.some(
       (id) =>
@@ -2095,7 +2094,7 @@ function genericPlannerPhysics(spec: DraftrollPhysicalVisual): WorkerPhysicalPla
 }
 
 function createWorkerPhysicalEntries(states: readonly LaunchState[]): WorkerPhysicalPlanEntry[] {
-  const genericEntries = getPhysicalVisualPlanEntries();
+  const genericEntries = getPhysicalVisualPlanEntries(physicalTable.visualInstances());
   if (genericEntries.length !== physicalTable.visualCount) {
     throw new Error('Generic physical visuals do not match the active physical descriptors.');
   }
@@ -2327,6 +2326,7 @@ function completePhysicalPlan(
     targetingCounts,
   };
   commitPhysicalVisualPlan(
+    physicalTable.visualInstances(),
     completed.transforms,
     completed.frameCount,
     completed.step,
@@ -2707,7 +2707,6 @@ function playRecordedReplay(
 
   selectedKind = kinds[0] ?? 'd20';
   selectedTheme = physical[0]?.theme ?? fallbacks[0]?.theme ?? 'dragon';
-  resetPhysicalTable(physical);
   activeKinds = kinds;
   quantity = canonical.length;
   activeThemes = themes;
@@ -2721,6 +2720,7 @@ function playRecordedReplay(
     ) ?? Array.from({ length: quantity }, () => ({}));
   world.gravity.set(0, -PHYSICS_PRESETS[activePhysicsPreset].gravity, 0);
   spawnPreview(activeKinds, true);
+  resetPhysicalTable(physical);
   applyRuntimeQuality(totalVisuals);
   activeSeed = replay.seed;
   activeTargets = canonical.map((visual) => visual.outcomeIndex + 1);
@@ -2769,6 +2769,7 @@ function playRecordedReplay(
   };
   if (!plan.settleTimes) plan.settleTimes = deriveDieSettleTimes(plan);
   commitPhysicalVisualPlan(
+    physicalTable.visualInstances(),
     plan.transforms,
     plan.frameCount,
     plan.step,
@@ -3454,7 +3455,7 @@ async function appendTableRoll(request: DiceRollRequest): Promise<DraftrollRollC
     }));
     const newStates = createMixedPhysicalLaunchStates(
       appendedCanonical,
-      getPendingPhysicalLaunchParticipants(),
+      getPendingPhysicalLaunchParticipants(physicalTable.visualInstances()),
       random,
       direction,
       lane,
@@ -3464,7 +3465,8 @@ async function appendTableRoll(request: DiceRollRequest): Promise<DraftrollRollC
     tableReplanPaused = true;
     isPlanning = true;
     setStatus(`${readActiveTableRolls().length} rollers sharing the table`, true);
-    const needsSharedPhysicalPlan = newStates.length > 0 || hasPendingPhysicalVisuals();
+    const needsSharedPhysicalPlan =
+      newStates.length > 0 || hasPendingPhysicalVisuals(physicalTable.visualInstances());
     const plan = needsSharedPhysicalPlan
       ? await buildRollPlan(
           [...existingStates, ...newStates],
@@ -3494,7 +3496,7 @@ async function appendTableRoll(request: DiceRollRequest): Promise<DraftrollRollC
     activePhysicsPreset = previous.activePhysicsPreset;
     activeTargets = previous.activeTargets;
     activeOutcomes = previous.activeOutcomes;
-    resetPhysicalTable(previous.activePhysicalSpecs);
+    resetPhysicalTable(previous.activePhysicalSpecs, true);
     activeVisualOrder = previous.activeVisualOrder;
     activeFallbackSpecs = previous.activeFallbackSpecs;
     activeContext = previous.activeContext;
@@ -3543,7 +3545,7 @@ async function castDice(
   const totalVisuals = activePhysicalSpecs.length + activeFallbackSpecs.length;
   applyRuntimeQuality(totalVisuals);
   let plan: RollPlan;
-  const hasArbitraryPhysicalDice = hasConfiguredPhysicalVisuals();
+  const hasArbitraryPhysicalDice = hasConfiguredPhysicalVisuals(physicalTable.visualInstances());
   if (quantity === 0 && !hasArbitraryPhysicalDice) {
     activeOutcomes = [];
     plan = createFallbackOnlyPlan(activeFallbackSpecs);

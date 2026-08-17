@@ -45,12 +45,20 @@ export class PhysicalTableRegistry {
     return this.visualEntriesInOrder.length;
   }
 
-  reset(specs: readonly PhysicalTableSpec[]): void {
+  reset(specs: readonly PhysicalTableSpec[], preserveBindings = false): void {
+    const previousEntries = preserveBindings ? new Map(this.entriesById) : null;
     this.entriesById.clear();
     this.entriesInOrder.length = 0;
     this.canonicalEntriesInOrder.length = 0;
     this.visualEntriesInOrder.length = 0;
     this.append(specs);
+    if (!previousEntries) return;
+    for (const entry of this.entriesInOrder) {
+      const previous = previousEntries.get(entry.id);
+      if (!previous || previous.implementation !== entry.implementation) continue;
+      entry.die = previous.die;
+      entry.visual = previous.visual;
+    }
   }
 
   append(specs: readonly PhysicalTableSpec[]): void {
@@ -87,6 +95,15 @@ export class PhysicalTableRegistry {
     return this.visualEntriesInOrder;
   }
 
+  visualInstances(): PhysicalDieVisualInstance[] {
+    return this.visualEntriesInOrder.map((entry) => {
+      if (!entry.visual) {
+        throw new Error(`Physical table visual entry is unbound: ${entry.id}`);
+      }
+      return entry.visual;
+    });
+  }
+
   boundEntries(): PhysicalTableEntry[] {
     return this.entriesInOrder.filter((entry) => entry.die !== null || entry.visual !== null);
   }
@@ -112,7 +129,11 @@ export class PhysicalTableRegistry {
   }
 
   physicalIndexForCanonical(canonicalIndex: number): number {
-    return this.canonicalEntriesInOrder[canonicalIndex]?.physicalIndex ?? canonicalIndex;
+    const entry = this.canonicalEntriesInOrder[canonicalIndex];
+    if (!entry) {
+      throw new Error(`Physical table canonical index is missing: ${canonicalIndex}`);
+    }
+    return entry.physicalIndex;
   }
 
   bindCanonical(id: string, die: DieInstance): void {

@@ -166,12 +166,11 @@ assert.match(
   physicalVisuals,
   /this\.lastTime \+ this\.trajectory\.step \* 0\.5 >= this\.activationDelay/,
 );
-assert.match(physicalVisuals, /new Map<string, PhysicalDieVisualInstance>/);
+assert.doesNotMatch(physicalVisuals, /new Map<string, PhysicalDieVisualInstance>/);
 assert.match(physicalVisuals, /physicalIndex: number/);
 assert.doesNotMatch(physicalVisuals, /extractPhysicalTransforms|trajectoryForIndex/);
 assert.doesNotMatch(physicalVisuals, /AdditionalPhysical|additionalPhysical/);
-assert.match(physicalVisuals, /activePhysicalDice/);
-assert.match(physicalVisuals, /pendingPhysicalDice/);
+assert.doesNotMatch(physicalVisuals, /activePhysicalDice|pendingPhysicalDice/);
 assert.doesNotMatch(physicalVisuals, /Worker\.prototype/);
 assert.doesNotMatch(physicalVisuals, /PhysicalRollPlanner/);
 assert.doesNotMatch(physicalVisuals, /localPlanner/);
@@ -186,7 +185,10 @@ assert.doesNotMatch(engine, /activeGenericPhysicalIndexes|activeCanonicalPhysica
 assert.match(engine, /PhysicalTableRegistry/);
 assert.match(physicalTable, /class PhysicalTableRegistry/);
 assert.match(physicalTable, /forEachVisual/);
-assert.doesNotMatch(engine, /physicalTable\.visualInstances/);
+assert.match(physicalTable, /visualInstances/);
+assert.match(physicalTable, /preserveBindings/);
+assert.match(physicalTable, /Physical table canonical index is missing/);
+assert.match(engine, /physicalTable\.visualInstances\(\)/);
 assert.match(renderer, /currently require relabel targeting/);
 assert.match(engine, /visual\.definition\.targeting !== 'relabel'/);
 assert.match(physicalDice, /input\.targeting \?\? 'relabel'/);
@@ -213,7 +215,9 @@ assert.match(physicalMesh, /labelAtlasCache/);
 assert.match(physicalMesh, /surfaceTextureCache/);
 assert.match(physicalMesh, /LABEL_ATLAS_ROWS = 4/);
 assert.match(physicalMesh, /getRuntimeThemeTexture\(spec\.theme, spec\.type, 'label'\)/);
-assert.match(physicalMesh, /ownedTextures/);
+assert.doesNotMatch(physicalMesh, /ownedTextures/);
+assert.match(physicalMesh, /runtimeSurface \? null : acquireSurfaceTexture/);
+assert.match(physicalMesh, /generatedSurface\?\.release/);
 
 // Generated geometry remains the arbitrary-shape provider, not a separate die architecture.
 assert.match(polyhedra, /function fibonacciPoints/);

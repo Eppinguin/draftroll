@@ -495,7 +495,6 @@ export function createPhysicalDieMesh(options: PhysicalDieMeshOptions): Physical
 
   const ownedGeometries: THREE.BufferGeometry[] = [];
   const ownedMaterials: THREE.Material[] = [];
-  const ownedTextures: THREE.Texture[] = [];
   const runtimeMesh =
     getRuntimeThemeMesh(spec.theme, spec.type) ??
     getRuntimeThemeMesh(spec.theme, `d${definition.sides}`);
@@ -505,10 +504,10 @@ export function createPhysicalDieMesh(options: PhysicalDieMeshOptions): Physical
       ? triangulateShape(shape)
       : colliderGeometry(definition);
   ownedGeometries.push(geometry);
-  const generatedSurface = acquireSurfaceTexture(spec);
   const runtimeSurface =
     getRuntimeThemeTexture(spec.theme, spec.type, 'surface') ??
     getRuntimeThemeTexture(spec.theme, `d${definition.sides}`, 'surface');
+  const generatedSurface = runtimeSurface ? null : acquireSurfaceTexture(spec);
   const runtimeNormal =
     getRuntimeThemeTexture(spec.theme, spec.type, 'normal') ??
     getRuntimeThemeTexture(spec.theme, `d${definition.sides}`, 'normal');
@@ -519,7 +518,7 @@ export function createPhysicalDieMesh(options: PhysicalDieMeshOptions): Physical
     getRuntimeThemeMaterial(spec.theme, spec.type) ??
     getRuntimeThemeMaterial(spec.theme, `d${definition.sides}`);
   const bodyMaterial = new THREE.MeshPhysicalMaterial({
-    map: runtimeSurface ?? generatedSurface.texture,
+    map: runtimeSurface ?? generatedSurface?.texture ?? null,
     normalMap: runtimeNormal,
     roughnessMap: runtimeRoughness,
     color: runtimeMaterial?.color ?? 0xffffff,
@@ -703,8 +702,7 @@ export function createPhysicalDieMesh(options: PhysicalDieMeshOptions): Physical
     dispose(): void {
       for (const geometryToDispose of ownedGeometries) geometryToDispose.dispose();
       for (const materialToDispose of ownedMaterials) materialToDispose.dispose();
-      for (const textureToDispose of ownedTextures) textureToDispose.dispose();
-      generatedSurface.release();
+      generatedSurface?.release();
       labelAtlas?.release();
     },
   };

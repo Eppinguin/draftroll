@@ -14,6 +14,8 @@ html[data-draftroll-mode='overlay'] #scene {
   inset: 0;
   width: 100%;
   height: 100%;
+  display: block;
+  opacity: 1;
   background: transparent !important;
   /* Keep passthrough as the default, but let configureInteractions() override
      the canvas inline when click/drag interactions are explicitly enabled. */
@@ -34,9 +36,4 @@ html[data-draftroll-mode='overlay'] #app::before,
 html[data-draftroll-mode='overlay'] #app::after {
   content: none !important;
   display: none !important;
-}
-
-html[data-draftroll-mode='overlay'] #scene {
-  display: block;
-  opacity: 1;
 }
