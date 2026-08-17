@@ -139,6 +139,7 @@ The renderer remains responsible for geometry, Cannon-es planning, fixed-face sh
 - local viewport-aware trajectory planning
 - persistent in-flight physical additions
 - one physical-table registry as the sole owner of live canonical/generated/custom runtime bindings
+- theme geometry profiles change render silhouettes/labels only; physical definitions, colliders, support topology, and authoritative outcomes remain unchanged
 - shape-symmetry targeting diagnostics without changing normalized results
 
 ## Permission projection flow

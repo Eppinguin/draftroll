@@ -203,6 +203,15 @@ assert.match(physicalMesh, /getRuntimeThemeMesh/);
 assert.match(physicalMesh, /getRuntimeThemeLabelStyle/);
 assert.match(physicalMesh, /getRuntimeThemeAssetTexture/);
 assert.match(physicalMesh, /createPhysicalDieMesh/);
+assert.match(physicalMesh, /ThemeGeometryProfile/);
+assert.match(physicalMesh, /triangulateBeveledShape/);
+assert.match(
+  physicalMesh,
+  /!runtimeMesh && !spec\.definition && shape \? palette\.geometry : null/,
+);
+assert.match(physicalMesh, /insetLabelAnchor/);
+assert.match(physicalMesh, /palette\.edgeOpacity \* 0\.72/);
+assert.match(physicalMesh, /runtimeMaterial\?\.roughness \?\? palette\.roughness/);
 assert.match(physicalMesh, /updateShadow/);
 assert.doesNotMatch(physicalVisuals, /DraftrollFallbackVisual/);
 assert.doesNotMatch(physicalVisuals, /BaseFallbackVisualInstance/);
