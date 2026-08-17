@@ -46,8 +46,24 @@ jobs:
           src/overlay.css
           docs/ARCHITECTURE.md
 
-      - name: Static checks
-        run: pnpm check
+      - name: Verify changed source formatting
+        run: >-
+          pnpm exec oxfmt --check
+          src/main.ts
+          src/physical-table.ts
+          src/physical-die-visuals.ts
+          src/physical-die-mesh.ts
+          src/overlay.css
+          docs/ARCHITECTURE.md
+
+      - name: Lint and type checks
+        run: >-
+          pnpm lint &&
+          pnpm test:quality-config &&
+          pnpm check:docs &&
+          pnpm check:packages &&
+          pnpm check:worker &&
+          pnpm exec tsc --noEmit
 
       - name: Core regression
         run: pnpm test:core
