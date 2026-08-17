@@ -416,6 +416,10 @@ export class PhysicalDieVisualInstance {
     return this.group.getWorldPosition(target);
   }
 
+  getWorldQuaternion(target = new THREE.Quaternion()): THREE.Quaternion {
+    return this.inner.getWorldQuaternion(target);
+  }
+
   getSettledPosition(target = new THREE.Vector2()): THREE.Vector2 {
     return target.set(this.group.position.x, this.group.position.z);
   }

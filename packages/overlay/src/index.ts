@@ -343,6 +343,10 @@ export class DraftrollOverlayRenderer implements DiceRenderer {
     Set<(payload: never) => void>
   >();
   private participantFilter?: RendererParticipantFilter;
+  private interactionOptions: Required<RendererInteractionOptions> = {
+    click: 'none',
+    draggable: false,
+  };
 
   /**
    * Creates an iframe-backed overlay renderer.
@@ -787,7 +791,15 @@ export class DraftrollOverlayRenderer implements DiceRenderer {
    * Configure interactions.
    */
   async configureInteractions(options: RendererInteractionOptions): Promise<void> {
+    const next = {
+      click: options.click ?? this.interactionOptions.click,
+      draggable: options.draggable ?? this.interactionOptions.draggable,
+    };
     await this.command({ type: 'configure-interactions', options });
+    this.interactionOptions = next;
+    if (this.iframe) {
+      this.iframe.style.pointerEvents = next.click === 'none' && !next.draggable ? 'none' : 'auto';
+    }
   }
 
   /**

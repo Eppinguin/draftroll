@@ -80,6 +80,10 @@ for (const marker of [
   'mixed physical and fallback benchmark completes in one synchronized presentation',
   'accessible text fallback works with reduced motion and no WebGL',
   'host-supplied custom physical model through the shared planner',
+  'authoritative outcomes for generated non-standard physical dice',
+  'additive generated physical roll preserves settled canonical dice',
+  'generated physical dice receive heavy and low-gravity planner presets',
+  'generated physical dice remain draggable after settlement',
 ]) {
   assert(combinedSpecs.includes(marker), `browser suite is missing coverage: ${marker}`);
 }
@@ -139,6 +143,11 @@ console.log(
         'HTTP/D1 hidden projection boundaries',
         'reduced-motion and no-WebGL fallback',
         'host-supplied custom physical model',
+        'generated authoritative physical outcomes',
+        'generated physical replay after resize',
+        'generated additive table preservation',
+        'generated physical planner presets',
+        'generated settled dragging',
       ],
     },
     null,

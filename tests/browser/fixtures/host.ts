@@ -37,11 +37,18 @@ interface BrowserFixtureState {
   errors: string[];
 }
 
+type BrowserPhysicsPreset = 'standard' | 'compact' | 'heavy' | 'low-gravity';
+
 interface BrowserFixtureApi {
   ready: Promise<void>;
   getState(): BrowserFixtureState;
   rollLocal(expression?: string): Promise<{ total: number; dice: number }>;
+  rollLocalWithPhysicsPreset(
+    expression?: string,
+    physicsPreset?: BrowserPhysicsPreset,
+  ): Promise<{ total: number; dice: number }>;
   rollLocalWithPhysicalModel(expression?: string): Promise<{ total: number; dice: number }>;
+  configureOverlayDrag(draggable?: boolean): Promise<void>;
   connectRoom(options?: {
     roomId?: string;
     participantId?: string;
@@ -240,7 +247,9 @@ window.__draftrollTest = {
   ready,
   getState: () => structuredClone(state),
   rollLocal,
+  rollLocalWithPhysicsPreset,
   rollLocalWithPhysicalModel,
+  configureOverlayDrag,
   connectRoom,
   rollRoom,
   revealLast,
@@ -325,6 +334,29 @@ async function rollLocal(
   setStatus('Local roll complete');
   renderState();
   return { total: roll.total, dice: roll.dice.length };
+}
+
+async function rollLocalWithPhysicsPreset(
+  expression = '1d9',
+  physicsPreset: BrowserPhysicsPreset = 'heavy',
+): Promise<{ total: number; dice: number }> {
+  await ready;
+  const roll = draftroll.roll(expression, {
+    render: rendererEnabled,
+    renderer: { animationDurationMs: 720, physicsPreset },
+  });
+  await roll.wait();
+  state.localPresentationCount += 1;
+  state.lastTotal = roll.total;
+  setStatus(`Local ${physicsPreset} roll complete`);
+  renderState();
+  return { total: roll.total, dice: roll.dice.length };
+}
+
+async function configureOverlayDrag(draggable = true): Promise<void> {
+  await ready;
+  if (!overlay) throw new Error('Overlay renderer is unavailable');
+  await overlay.configureInteractions({ draggable });
 }
 
 async function rollLocalWithPhysicalModel(

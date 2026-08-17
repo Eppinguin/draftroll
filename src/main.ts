@@ -128,6 +128,7 @@ export interface DiceTargetingSnapshot {
 
 export interface DicePerformanceSnapshot {
   profile: DicePerformanceProfile;
+  physicsPreset: DicePhysicsPreset;
   pixelRatio: number;
   dynamicResolutionScale: number;
   targetFramesPerSecond: number;
@@ -232,10 +233,13 @@ declare global {
         implementation: 'canonical' | 'generated' | 'custom';
         targeting: 'symmetry' | 'relabel' | 'fixed';
         requestedOutcomeIndex: number;
+        displayedOutcomeIndex: number;
         landedOutcomeIndex: number | null;
         result: number | string;
         visible: boolean;
         position: { x: number; y: number; z: number };
+        quaternion: { x: number; y: number; z: number; w: number };
+        screenPosition: { x: number; y: number };
       }>;
     };
   }
@@ -4308,6 +4312,12 @@ window.draftrollDice = {
       const entry = physicalTable.entryAt(physicalIndex);
       const position = physicalTable.worldPosition(physicalIndex) ?? new THREE.Vector3();
       const visual = entry?.visual;
+      const quaternion =
+        entry?.die?.group.getWorldQuaternion(new THREE.Quaternion()) ??
+        visual?.getWorldQuaternion(new THREE.Quaternion()) ??
+        new THREE.Quaternion();
+      const projected = position.clone().project(camera);
+      const canvasBounds = canvas.getBoundingClientRect();
       const definitionTargeting =
         spec.definition?.targeting ?? (spec.canonicalKind ? 'symmetry' : 'relabel');
       return {
@@ -4321,15 +4331,27 @@ window.draftrollDice = {
             : ('generated' as const),
         targeting: definitionTargeting,
         requestedOutcomeIndex: spec.outcomeIndex,
+        displayedOutcomeIndex: visual?.displayedOutcomeIndex ?? spec.outcomeIndex,
         landedOutcomeIndex:
           visual?.landedOutcomeIndex ?? activePlan?.landings[physicalIndex] ?? null,
         result: spec.result,
         visible: entry?.die?.group.visible ?? entry?.visual?.group.visible ?? false,
         position: { x: position.x, y: position.y, z: position.z },
+        quaternion: {
+          x: quaternion.x,
+          y: quaternion.y,
+          z: quaternion.z,
+          w: quaternion.w,
+        },
+        screenPosition: {
+          x: ((projected.x + 1) / 2) * canvasBounds.width,
+          y: ((1 - projected.y) / 2) * canvasBounds.height,
+        },
       };
     }),
   getPerformanceSnapshot: () => ({
     profile: performanceProfile,
+    physicsPreset: activePhysicsPreset,
     pixelRatio: currentPixelRatio,
     dynamicResolutionScale,
     targetFramesPerSecond: targetFramesPerSecond(),
