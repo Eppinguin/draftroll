@@ -16,12 +16,12 @@ import {
 } from './runtime-themes';
 import type { ThemeLabelStyleDefinition } from '../packages/themes/src/index';
 import { THEMES, type ThemeGeometryProfile, type ThemeName } from './themes';
+import { createThemedRoundedBoxVisual, getThemeSurfaceTextures } from './dice';
 
 const LABEL_ATLAS_COLUMNS = 5;
 const LABEL_ATLAS_ROWS = 4;
 const LABEL_ATLAS_PADDING = 0.055;
 let shadowTexture: THREE.CanvasTexture | null = null;
-const surfaceTextureCache = new Map<string, { texture: THREE.CanvasTexture; refs: number }>();
 const labelAtlasCache = new Map<
   string,
   { texture: THREE.CanvasTexture; refs: number; columns: number; rows: number }
@@ -47,10 +47,6 @@ function normalizeTheme(theme: string): ThemeName {
   return Object.hasOwn(THEMES, theme) ? theme : 'dragon';
 }
 
-function cssColor(value: number): string {
-  return `#${value.toString(16).padStart(6, '0')}`;
-}
-
 function getShadowTexture(): THREE.CanvasTexture {
   if (shadowTexture) return shadowTexture;
   const canvas = document.createElement('canvas');
@@ -67,70 +63,6 @@ function getShadowTexture(): THREE.CanvasTexture {
   shadowTexture = new THREE.CanvasTexture(canvas);
   shadowTexture.colorSpace = THREE.SRGBColorSpace;
   return shadowTexture;
-}
-
-function createSurfaceTexture(spec: DraftrollPhysicalVisual): THREE.CanvasTexture {
-  const canvas = document.createElement('canvas');
-  canvas.width = 512;
-  canvas.height = 512;
-  const context = canvas.getContext('2d');
-  if (!context) throw new Error('Canvas 2D context unavailable.');
-  const palette = THEMES[normalizeTheme(spec.theme)];
-  const gradient = context.createLinearGradient(0, 0, 512, 512);
-  gradient.addColorStop(0, cssColor(palette.edge));
-  gradient.addColorStop(0.12, cssColor(palette.base));
-  gradient.addColorStop(0.68, cssColor(palette.base));
-  gradient.addColorStop(1, cssColor(palette.shadow));
-  context.fillStyle = gradient;
-  context.fillRect(0, 0, 512, 512);
-  context.globalAlpha = 0.1;
-  context.strokeStyle = palette.label;
-  context.lineWidth = 2;
-  for (let value = -512; value < 1024; value += 32) {
-    context.beginPath();
-    context.moveTo(value, 0);
-    context.lineTo(value - 512, 512);
-    context.stroke();
-  }
-  context.globalAlpha = 0.07;
-  for (let index = 0; index < 48; index += 1) {
-    const x = (index * 193) % 512;
-    const y = (index * 311) % 512;
-    context.beginPath();
-    context.arc(x, y, 1.5 + (index % 4), 0, Math.PI * 2);
-    context.fillStyle = index % 2 ? '#ffffff' : '#000000';
-    context.fill();
-  }
-  context.globalAlpha = 1;
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.anisotropy = 8;
-  return texture;
-}
-
-function acquireSurfaceTexture(spec: DraftrollPhysicalVisual): {
-  texture: THREE.CanvasTexture;
-  release(): void;
-} {
-  const key = normalizeTheme(spec.theme);
-  let cached = surfaceTextureCache.get(key);
-  if (!cached) {
-    cached = { texture: createSurfaceTexture(spec), refs: 0 };
-    surfaceTextureCache.set(key, cached);
-  }
-  cached.refs += 1;
-  return {
-    texture: cached.texture,
-    release(): void {
-      const current = surfaceTextureCache.get(key);
-      if (!current) return;
-      current.refs -= 1;
-      if (current.refs <= 0) {
-        current.texture.dispose();
-        surfaceTextureCache.delete(key);
-      }
-    },
-  };
 }
 
 function triangulateShape(shape: ReadablePolyhedron): THREE.BufferGeometry {
@@ -307,6 +239,27 @@ function insetLabelAnchor(
   return {
     ...anchor,
     position: [position.x, position.y, position.z],
+    scale: anchor.scale * THREE.MathUtils.clamp(profile.faceInset, 0.65, 1.1),
+  };
+}
+
+function readableCubeSize(shape: ReadablePolyhedron): number {
+  const xs = shape.vertices.map((vertex) => vertex[0]);
+  const ys = shape.vertices.map((vertex) => vertex[1]);
+  const zs = shape.vertices.map((vertex) => vertex[2]);
+  return Math.max(
+    Math.max(...xs) - Math.min(...xs),
+    Math.max(...ys) - Math.min(...ys),
+    Math.max(...zs) - Math.min(...zs),
+  );
+}
+
+function scaleLabelAnchor(
+  anchor: PolyhedronLabelAnchor,
+  profile: ThemeGeometryProfile,
+): PolyhedronLabelAnchor {
+  return {
+    ...anchor,
     scale: anchor.scale * THREE.MathUtils.clamp(profile.faceInset, 0.65, 1.1),
   };
 }
@@ -626,18 +579,23 @@ export function createPhysicalDieMesh(options: PhysicalDieMeshOptions): Physical
     getRuntimeThemeMesh(spec.theme, `d${definition.sides}`);
   const generatedGeometryProfile =
     !runtimeMesh && !spec.definition && shape ? palette.geometry : null;
+  const roundedGeneratedCube = Boolean(generatedGeometryProfile && shape?.family === 'd3-cube');
   const geometry = runtimeMesh
     ? scaleThemeMesh(runtimeMesh, definition)
     : shape
-      ? generatedGeometryProfile
-        ? triangulateBeveledShape(shape, generatedGeometryProfile)
-        : triangulateShape(shape)
+      ? roundedGeneratedCube
+        ? createThemedRoundedBoxVisual(spec.theme, readableCubeSize(shape))
+        : generatedGeometryProfile
+          ? triangulateBeveledShape(shape, generatedGeometryProfile)
+          : triangulateShape(shape)
       : colliderGeometry(definition);
   ownedGeometries.push(geometry);
   const runtimeSurface =
     getRuntimeThemeTexture(spec.theme, spec.type, 'surface') ??
     getRuntimeThemeTexture(spec.theme, `d${definition.sides}`, 'surface');
-  const generatedSurface = runtimeSurface ? null : acquireSurfaceTexture(spec);
+  const sharedThemeSurface = runtimeSurface
+    ? null
+    : getThemeSurfaceTextures(normalizeTheme(spec.theme));
   const runtimeNormal =
     getRuntimeThemeTexture(spec.theme, spec.type, 'normal') ??
     getRuntimeThemeTexture(spec.theme, `d${definition.sides}`, 'normal');
@@ -648,17 +606,20 @@ export function createPhysicalDieMesh(options: PhysicalDieMeshOptions): Physical
     getRuntimeThemeMaterial(spec.theme, spec.type) ??
     getRuntimeThemeMaterial(spec.theme, `d${definition.sides}`);
   const bodyMaterial = new THREE.MeshPhysicalMaterial({
-    map: runtimeSurface ?? generatedSurface?.texture ?? null,
-    normalMap: runtimeNormal,
-    roughnessMap: runtimeRoughness,
+    map: runtimeSurface ?? sharedThemeSurface?.map ?? null,
+    normalMap: runtimeNormal ?? sharedThemeSurface?.normalMap,
+    normalScale: new THREE.Vector2(0.82, 0.82),
+    roughnessMap: runtimeRoughness ?? sharedThemeSurface?.roughnessMap,
     color: runtimeMaterial?.color ?? 0xffffff,
     emissive: runtimeMaterial?.emissive ?? palette.emissive,
     emissiveIntensity: runtimeMaterial?.emissiveIntensity ?? palette.emissiveIntensity,
-    roughness: runtimeMaterial?.roughness ?? palette.roughness,
+    roughness: runtimeMaterial?.roughness ?? 1,
     metalness: runtimeMaterial?.metalness ?? palette.metalness,
     clearcoat: runtimeMaterial?.clearcoat ?? palette.clearcoat,
     clearcoatRoughness: runtimeMaterial?.clearcoatRoughness ?? palette.clearcoatRoughness,
-    flatShading: true,
+    clearcoatNormalMap: runtimeNormal ?? sharedThemeSurface?.normalMap,
+    clearcoatNormalScale: new THREE.Vector2(0.28, 0.28),
+    flatShading: !roundedGeneratedCube,
     transparent: true,
     opacity: 0,
     side: THREE.DoubleSide,
@@ -670,7 +631,7 @@ export function createPhysicalDieMesh(options: PhysicalDieMeshOptions): Physical
   body.renderOrder = 1;
   visualRoot.add(body);
 
-  const edgeGeometry = new THREE.EdgesGeometry(geometry, 18);
+  const edgeGeometry = new THREE.EdgesGeometry(geometry, roundedGeneratedCube ? 32 : 18);
   ownedGeometries.push(edgeGeometry);
   const edgeMaterial = new THREE.LineBasicMaterial({
     color: palette.edge,
@@ -716,7 +677,9 @@ export function createPhysicalDieMesh(options: PhysicalDieMeshOptions): Physical
   if (shape && generatedGeometryProfile) {
     for (let index = 0; index < anchorsByOutcome.length; index += 1) {
       anchorsByOutcome[index] = anchorsByOutcome[index].map((anchor) =>
-        insetLabelAnchor(anchor, shape, generatedGeometryProfile),
+        roundedGeneratedCube
+          ? scaleLabelAnchor(anchor, generatedGeometryProfile)
+          : insetLabelAnchor(anchor, shape, generatedGeometryProfile),
       );
     }
   }
@@ -840,7 +803,6 @@ export function createPhysicalDieMesh(options: PhysicalDieMeshOptions): Physical
     dispose(): void {
       for (const geometryToDispose of ownedGeometries) geometryToDispose.dispose();
       for (const materialToDispose of ownedMaterials) materialToDispose.dispose();
-      generatedSurface?.release();
       labelAtlas?.release();
     },
   };

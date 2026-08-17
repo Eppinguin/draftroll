@@ -205,13 +205,18 @@ assert.match(physicalMesh, /getRuntimeThemeAssetTexture/);
 assert.match(physicalMesh, /createPhysicalDieMesh/);
 assert.match(physicalMesh, /ThemeGeometryProfile/);
 assert.match(physicalMesh, /triangulateBeveledShape/);
+assert.match(physicalMesh, /createThemedRoundedBoxVisual/);
+assert.match(physicalMesh, /shape\?\.family === 'd3-cube'/);
+assert.match(physicalMesh, /roundedGeneratedCube \? 32 : 18/);
+assert.match(physicalMesh, /flatShading: !roundedGeneratedCube/);
+assert.match(physicalMesh, /getThemeSurfaceTextures/);
 assert.match(
   physicalMesh,
   /!runtimeMesh && !spec\.definition && shape \? palette\.geometry : null/,
 );
 assert.match(physicalMesh, /insetLabelAnchor/);
 assert.match(physicalMesh, /palette\.edgeOpacity \* 0\.72/);
-assert.match(physicalMesh, /runtimeMaterial\?\.roughness \?\? palette\.roughness/);
+assert.match(physicalMesh, /runtimeMaterial\?\.roughness \?\? 1/);
 assert.match(physicalMesh, /updateShadow/);
 assert.doesNotMatch(physicalVisuals, /DraftrollFallbackVisual/);
 assert.doesNotMatch(physicalVisuals, /BaseFallbackVisualInstance/);
@@ -221,12 +226,12 @@ assert.match(physicalLaunch, /participant\.radius/);
 assert.doesNotMatch(physicalMesh, /function atlasCellTexture|presentationTexture/);
 assert.match(physicalMesh, /LABEL_ATLAS_COLUMNS = 5/);
 assert.match(physicalMesh, /labelAtlasCache/);
-assert.match(physicalMesh, /surfaceTextureCache/);
+assert.doesNotMatch(physicalMesh, /surfaceTextureCache/);
 assert.match(physicalMesh, /LABEL_ATLAS_ROWS = 4/);
 assert.match(physicalMesh, /getRuntimeThemeTexture\(spec\.theme, spec\.type, 'label'\)/);
 assert.doesNotMatch(physicalMesh, /ownedTextures/);
-assert.match(physicalMesh, /runtimeSurface \? null : acquireSurfaceTexture/);
-assert.match(physicalMesh, /generatedSurface\?\.release/);
+assert.doesNotMatch(physicalMesh, /acquireSurfaceTexture/);
+assert.doesNotMatch(physicalMesh, /generatedSurface\?\.release/);
 
 // Generated geometry remains the arbitrary-shape provider, not a separate die architecture.
 assert.match(polyhedra, /function fibonacciPoints/);

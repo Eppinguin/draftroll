@@ -391,6 +391,26 @@ function createGeometry(kind: DieKind): GeometrySet {
 const themedVisualCache = new Map<string, THREE.BufferGeometry>();
 
 /**
+ * Builds a rounded-box render mesh using the same theme geometry semantics as the canonical d6.
+ *
+ * This is intentionally visual-only. Callers keep their existing collider and outcome topology.
+ */
+export function createThemedRoundedBoxVisual(theme: ThemeName, size: number): THREE.BufferGeometry {
+  const palette = THEMES[theme] ?? THEMES.dragon;
+  const profile = palette.geometry;
+  const radius = size / 1.72;
+  const visual = new RoundedBoxGeometry(
+    size,
+    size,
+    size,
+    6,
+    radius * THREE.MathUtils.clamp(profile.cornerRadius, 0.02, 0.42),
+  );
+  applyPlanarFaceUvs(visual, radius);
+  return visual;
+}
+
+/**
  * Builds the display mesh for one theme and die, applying that theme's chamfer.
  *
  * @remarks
@@ -415,14 +435,7 @@ function createThemedVisual(theme: ThemeName, kind: DieKind): THREE.BufferGeomet
   } else if (kind === 'd6') {
     // The d6 is a rounded box, so the profile drives its corner radius directly.
     const size = radius * 1.72;
-    visual = new RoundedBoxGeometry(
-      size,
-      size,
-      size,
-      6,
-      radius * THREE.MathUtils.clamp(profile.cornerRadius, 0.02, 0.42),
-    );
-    applyPlanarFaceUvs(visual, radius);
+    visual = createThemedRoundedBoxVisual(theme, size);
   } else if (profile.bevel <= 0.001) {
     visual = createGeometry(kind).visual.clone();
   } else {
@@ -1647,6 +1660,20 @@ function createSurface(theme: ThemeName, palette: ThemePalette): SurfaceSet {
   }
   surfaceCache.set(theme, surface);
   return surface;
+}
+
+/**
+ * Returns the cached built-in theme surface maps used by every renderer-owned physical die.
+ * Runtime theme textures still take precedence at the caller.
+ */
+export function getThemeSurfaceTextures(theme: ThemeName): {
+  map: THREE.CanvasTexture;
+  normalMap: THREE.CanvasTexture;
+  roughnessMap: THREE.CanvasTexture;
+} {
+  const normalized = Object.hasOwn(THEMES, theme) ? theme : 'dragon';
+  const palette = THEMES[normalized] ?? THEMES.dragon;
+  return createSurface(normalized, palette);
 }
 
 const SURFACE_VARIANT_COUNT = 12;

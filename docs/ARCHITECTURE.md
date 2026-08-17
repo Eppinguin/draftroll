@@ -140,6 +140,7 @@ The renderer remains responsible for geometry, Cannon-es planning, fixed-face sh
 - persistent in-flight physical additions
 - one physical-table registry as the sole owner of live canonical/generated/custom runtime bindings
 - theme geometry profiles change render silhouettes/labels only; physical definitions, colliders, support topology, and authoritative outcomes remain unchanged
+- renderer-owned generated dice share built-in theme surface maps and rounded-box semantics where their support geometry is cube-based (d3), while retaining independent physical outcome mappings
 - shape-symmetry targeting diagnostics without changing normalized results
 
 ## Permission projection flow
