@@ -34,6 +34,16 @@ assert(
   'browser fixture origin is not allowlisted locally',
 );
 
+const overlayRenderer = readFileSync(join(root, 'packages/overlay/src/index.ts'), 'utf8');
+assert(
+  overlayRenderer.includes('physicalModels: cloneOverlayPhysicalModels(options.physicalModels)'),
+  'overlay play serialization drops physicalModels',
+);
+assert(
+  overlayRenderer.includes('clonePhysicalDieDefinition(model.definition)'),
+  'overlay physical models are not defensively cloned',
+);
+
 const server = readFileSync(join(root, 'tests/browser/serve-fixtures.mjs'), 'utf8');
 for (const directive of [
   'frame-src',
@@ -69,6 +79,7 @@ for (const marker of [
   'HTTP state, D1 history, durable events, and revisions never expose roller-only values',
   'mixed physical and fallback benchmark completes in one synchronized presentation',
   'accessible text fallback works with reduced motion and no WebGL',
+  'host-supplied custom physical model through the shared planner',
 ]) {
   assert(combinedSpecs.includes(marker), `browser suite is missing coverage: ${marker}`);
 }
@@ -127,6 +138,7 @@ console.log(
         'mixed physical/fallback performance',
         'HTTP/D1 hidden projection boundaries',
         'reduced-motion and no-WebGL fallback',
+        'host-supplied custom physical model',
       ],
     },
     null,

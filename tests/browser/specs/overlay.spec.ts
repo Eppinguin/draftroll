@@ -93,6 +93,59 @@ test('overlay accepts generated non-standard physical dice', async ({ page }) =>
   expect(mixedSnapshot.map((entry) => entry.targeting)).toEqual(['symmetry', 'relabel', 'relabel']);
 });
 
+test('overlay renders a host-supplied custom physical model through the shared planner', async ({
+  page,
+}) => {
+  await page.goto('/host.html');
+  await waitForFixture(page);
+  const iframe = page.locator('iframe[title="Draftroll dice overlay"]');
+
+  const firstRoll = page.evaluate(() => window.__draftrollTest.rollLocalWithPhysicalModel('1d6'));
+  await expect(iframe).toHaveCSS('visibility', 'visible');
+  const first = await firstRoll;
+  expect(first.dice).toBe(1);
+  expect(Number.isInteger(first.total)).toBe(true);
+  expect(first.total).toBeGreaterThanOrEqual(1);
+  expect(first.total).toBeLessThanOrEqual(6);
+
+  const frame = page.frameLocator('iframe[title="Draftroll dice overlay"]');
+  const firstSnapshot = await frame
+    .locator('body')
+    .evaluate(() => window.draftrollDice.getPhysicalSnapshot());
+  expect(firstSnapshot).toHaveLength(1);
+  expect(firstSnapshot[0]).toMatchObject({
+    implementation: 'custom',
+    targeting: 'relabel',
+    sides: 6,
+    result: first.total,
+    requestedOutcomeIndex: first.total - 1,
+    visible: true,
+  });
+  expect(Number.isInteger(firstSnapshot[0].landedOutcomeIndex)).toBe(true);
+  expect(firstSnapshot[0].landedOutcomeIndex).toBeGreaterThanOrEqual(0);
+  expect(firstSnapshot[0].landedOutcomeIndex).toBeLessThan(6);
+
+  // A second roll reuses the same persistent worker and definition key. If the main thread or
+  // worker registry loses the custom definition between plans, this call fails before playback.
+  const second = await page.evaluate(() =>
+    window.__draftrollTest.rollLocalWithPhysicalModel('1d6'),
+  );
+  expect(second.dice).toBe(1);
+  const secondSnapshot = await frame
+    .locator('body')
+    .evaluate(() => window.draftrollDice.getPhysicalSnapshot());
+  expect(secondSnapshot).toHaveLength(1);
+  expect(secondSnapshot[0]).toMatchObject({
+    implementation: 'custom',
+    targeting: 'relabel',
+    sides: 6,
+    result: second.total,
+    requestedOutcomeIndex: second.total - 1,
+    visible: true,
+  });
+  expect(Number.isInteger(secondSnapshot[0].landedOutcomeIndex)).toBe(true);
+});
+
 test('overlay lifecycle survives repeated rolls and explicit host interaction on a responsive viewport', async ({
   page,
 }) => {

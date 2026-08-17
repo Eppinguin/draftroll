@@ -93,6 +93,7 @@ declare global {
       ready: Promise<void>;
       getState(): FixtureState;
       rollLocal(expression?: string): Promise<{ total: number; dice: number }>;
+      rollLocalWithPhysicalModel(expression?: string): Promise<{ total: number; dice: number }>;
       connectRoom(options?: {
         roomId?: string;
         participantId?: string;

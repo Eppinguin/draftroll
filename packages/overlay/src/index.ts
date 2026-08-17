@@ -14,8 +14,9 @@ import {
   type ThemeLoadEvent,
   type ThemeProvider,
 } from '../../themes/src/index';
-import type {
-  DiceRenderer,
+import {
+  clonePhysicalDieDefinition,
+  type DiceRenderer,
   DraftrollEffectOutcome,
   RendererCompletion,
   RendererPlayOptions,
@@ -64,6 +65,23 @@ export interface OverlaySerializablePlayOptions extends Omit<
   RendererPlayOptions,
   'outcomeResolver' | 'signal'
 > {}
+
+function cloneOverlayPhysicalModels(
+  models: RendererPlayOptions['physicalModels'],
+): OverlaySerializablePlayOptions['physicalModels'] {
+  if (!models) return undefined;
+  return Object.fromEntries(
+    Object.entries(models).map(([key, model]) => [
+      key,
+      {
+        definition: clonePhysicalDieDefinition(model.definition),
+        presentation: {
+          contents: model.presentation.contents.map((content) => ({ ...content })),
+        },
+      },
+    ]),
+  );
+}
 
 /**
  * Controls overlay dismissal timing and animation.
@@ -567,6 +585,7 @@ export class DraftrollOverlayRenderer implements DiceRenderer {
       startTime: options.startTime,
       animationSeed: options.animationSeed,
       defaultThemeId: options.defaultThemeId,
+      physicalModels: cloneOverlayPhysicalModels(options.physicalModels),
       dieIds: options.dieIds ? [...options.dieIds] : undefined,
       preservePreviousDice: options.preservePreviousDice,
       stateDieIds: options.stateDieIds ? [...options.stateDieIds] : undefined,
