@@ -15,7 +15,9 @@ html[data-draftroll-mode='overlay'] #scene {
   width: 100%;
   height: 100%;
   background: transparent !important;
-  pointer-events: none !important;
+  /* Keep passthrough as the default, but let configureInteractions() override
+     the canvas inline when click/drag interactions are explicitly enabled. */
+  pointer-events: none;
 }
 
 html[data-draftroll-mode='overlay'] .overlay-hidden {
