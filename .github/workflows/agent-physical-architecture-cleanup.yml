@@ -41,6 +41,10 @@ jobs:
           const newRegistry = `assert.match(physicalTable, /class PhysicalTableRegistry/);\nassert.match(physicalTable, /forEachVisual/);\nassert.match(physicalTable, /visualInstances/);\nassert.match(physicalTable, /preserveBindings/);\nassert.match(physicalTable, /Physical table canonical index is missing/);\nassert.match(engine, /physicalTable\\.visualInstances\\(\\)/);`;
           if (!source.includes(oldRegistry)) throw new Error('legacy physical table assertion block is missing');
           source = source.replace(oldRegistry, newRegistry);
+          const oldMeshOwnership = `assert.match(physicalMesh, /ownedTextures/);`;
+          const newMeshOwnership = `assert.doesNotMatch(physicalMesh, /ownedTextures/);\nassert.match(physicalMesh, /runtimeSurface \\? null : acquireSurfaceTexture/);\nassert.match(physicalMesh, /generatedSurface\\?\\.release/);`;
+          if (!source.includes(oldMeshOwnership)) throw new Error('legacy mesh ownership assertion is missing');
+          source = source.replace(oldMeshOwnership, newMeshOwnership);
           await writeFile(path, source);
           NODE
           git rm -f .DS_Store
