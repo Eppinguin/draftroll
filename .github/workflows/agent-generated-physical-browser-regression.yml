@@ -24,6 +24,97 @@ jobs:
       - name: Apply generated physical browser regression
         run: node scripts/agent-strengthen-generated-physical-browser-regression.mjs
 
+      - name: Refine additive and drag browser coverage
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFile, writeFile } from 'node:fs/promises';
+
+          function replaceOnce(source, search, replacement, label) {
+            const count = source.split(search).length - 1;
+            if (count !== 1) throw new Error(`${label}: expected one match, found ${count}`);
+            return source.replace(search, replacement);
+          }
+
+          function replaceBetween(source, start, end, replacement, label) {
+            const startIndex = source.indexOf(start);
+            if (startIndex < 0) throw new Error(`${label}: start marker not found`);
+            const endIndex = source.indexOf(end, startIndex + start.length);
+            if (endIndex < 0) throw new Error(`${label}: end marker not found`);
+            return source.slice(0, startIndex) + replacement + source.slice(endIndex);
+          }
+
+          {
+            const path = 'src/main.ts';
+            let source = await readFile(path, 'utf8');
+            source = replaceOnce(
+              source,
+              `        position: { x: number; y: number; z: number };\n        quaternion: { x: number; y: number; z: number; w: number };`,
+              `        position: { x: number; y: number; z: number };\n        quaternion: { x: number; y: number; z: number; w: number };\n        screenPosition: { x: number; y: number };`,
+              'physical snapshot screen position type',
+            );
+            source = replaceOnce(
+              source,
+              `      const definitionTargeting =\n        spec.definition?.targeting ?? (spec.canonicalKind ? 'symmetry' : 'relabel');\n      return {`,
+              `      const projected = position.clone().project(camera);\n      const canvasBounds = canvas.getBoundingClientRect();\n      const definitionTargeting =\n        spec.definition?.targeting ?? (spec.canonicalKind ? 'symmetry' : 'relabel');\n      return {`,
+              'physical snapshot projection',
+            );
+            source = replaceOnce(
+              source,
+              `        quaternion: {\n          x: quaternion.x,\n          y: quaternion.y,\n          z: quaternion.z,\n          w: quaternion.w,\n        },`,
+              `        quaternion: {\n          x: quaternion.x,\n          y: quaternion.y,\n          z: quaternion.z,\n          w: quaternion.w,\n        },\n        screenPosition: {\n          x: ((projected.x + 1) / 2) * canvasBounds.width,\n          y: ((1 - projected.y) / 2) * canvasBounds.height,\n        },`,
+              'physical snapshot projected screen position',
+            );
+            await writeFile(path, source);
+          }
+
+          {
+            const path = 'tests/browser/fixtures/host.ts';
+            let source = await readFile(path, 'utf8');
+            source = replaceOnce(
+              source,
+              `  rollLocalAdditive(expression?: string): Promise<{ total: number; dice: number }>;\n`,
+              '',
+              'remove invalid independent additive fixture api',
+            );
+            source = replaceOnce(
+              source,
+              `  rollLocalAdditive,\n`,
+              '',
+              'remove invalid independent additive fixture binding',
+            );
+            source = replaceBetween(
+              source,
+              `async function rollLocalAdditive(`,
+              `async function rollLocalWithPhysicsPreset(`,
+              '',
+              'remove invalid independent additive fixture implementation',
+            );
+            await writeFile(path, source);
+          }
+
+          {
+            const path = 'tests/browser/specs/overlay.spec.ts';
+            let source = await readFile(path, 'utf8');
+            const additiveStart = `test('additive generated physical roll preserves settled canonical dice', async ({ page }) => {`;
+            const additiveEnd = `test('generated physical dice receive heavy and low-gravity planner presets', async ({ page }) => {`;
+            const additiveReplacement = `test('additive generated physical roll preserves settled canonical dice', async ({ page }) => {\n  await page.goto('/host.html');\n  await waitForFixture(page);\n  const frame = page.frameLocator('iframe[title="Draftroll dice overlay"]');\n\n  const firstCompletion = await frame.locator('body').evaluate(() =>\n    window.draftrollDice.roll({\n      physical: [\n        {\n          id: 'add-canonical-d6',\n          type: 'd6',\n          sides: 6,\n          outcomeIndex: 2,\n          result: 3,\n          numericValue: 3,\n          canonicalKind: 'd6',\n          title: 'd6',\n          label: '3',\n          theme: 'dragon',\n          outcome: 'neutral',\n        },\n      ],\n      visualOrder: [{ kind: 'physical', index: 0, dieId: 'add-canonical-d6' }],\n      seed: 'additive-canonical',\n      animationDurationMs: 720,\n    }),\n  );\n  expect(firstCompletion.presentationMode).toBe('replace');\n  const before = await frame\n    .locator('body')\n    .evaluate(() => window.draftrollDice.getPhysicalSnapshot());\n  expect(before).toHaveLength(1);\n  expect(before[0]).toMatchObject({\n    id: 'add-canonical-d6',\n    implementation: 'canonical',\n    requestedOutcomeIndex: 2,\n    displayedOutcomeIndex: 2,\n    result: 3,\n  });\n\n  const additiveCompletion = await frame.locator('body').evaluate(() =>\n    window.draftrollDice.roll({\n      physical: [\n        {\n          id: 'add-generated-d9',\n          type: 'd9',\n          sides: 9,\n          outcomeIndex: 4,\n          result: 5,\n          numericValue: 5,\n          title: 'd9',\n          label: '5',\n          theme: 'dragon',\n          outcome: 'neutral',\n        },\n      ],\n      visualOrder: [{ kind: 'physical', index: 0, dieId: 'add-generated-d9' }],\n      seed: 'additive-generated',\n      animationDurationMs: 720,\n      tableMode: 'add',\n    }),\n  );\n  expect(additiveCompletion.presentationMode).toBe('add');\n  const after = await frame\n    .locator('body')\n    .evaluate(() => window.draftrollDice.getPhysicalSnapshot());\n  expect(after).toHaveLength(2);\n  expect(after.find((entry) => entry.id === 'add-canonical-d6')).toMatchObject({\n    implementation: 'canonical',\n    requestedOutcomeIndex: 2,\n    displayedOutcomeIndex: 2,\n    result: 3,\n    visible: true,\n  });\n  const generated = after.find((entry) => entry.id === 'add-generated-d9');\n  expect(generated).toMatchObject({\n    implementation: 'generated',\n    targeting: 'relabel',\n    requestedOutcomeIndex: 4,\n    displayedOutcomeIndex: 4,\n    result: 5,\n    visible: true,\n  });\n});\n\n`;
+            source = replaceBetween(
+              source,
+              additiveStart,
+              additiveEnd,
+              additiveReplacement,
+              'renderer-native additive physical coverage',
+            );
+            source = replaceOnce(
+              source,
+              `  const viewportScale = box!.height / 10;\n  const startX = box!.x + box!.width / 2 + before.position.x * viewportScale;\n  const startY = box!.y + box!.height / 2 + before.position.z * viewportScale;`,
+              `  const startX = box!.x + before.screenPosition.x;\n  const startY = box!.y + before.screenPosition.y;`,
+              'projected generated drag target',
+            );
+            await writeFile(path, source);
+          }
+          NODE
+
       - name: Use a lint-safe iframe pointer override
         run: |
           node --input-type=module <<'NODE'
