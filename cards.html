@@ -92,7 +92,11 @@
 
       <details class="sdk-details">
         <summary>SDK shape</summary>
-        <pre><code>const deck = createStandardDeck();
+        <pre><code>import { Draftroll } from '@draftroll/sdk';
+import { createStandardDeck } from '@draftroll/sdk/cards';
+
+const draftroll = await Draftroll.createOverlay({ overlay: { src: '/overlay.html' } });
+const deck = createStandardDeck();
 const draw = deck.draw(3);
 const response = draftroll.display(draw.toDisplayInput());
 await response.wait();

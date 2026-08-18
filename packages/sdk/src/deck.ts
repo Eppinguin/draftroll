@@ -75,27 +75,32 @@ type MutableDraftrollCard = Omit<DraftrollCard, 'metadata'> & {
   metadata?: Record<string, unknown>;
 };
 
-function cloneMetadata(value?: Record<string, unknown>): Record<string, unknown> | undefined {
+const MAXIMUM_DECK_SIZE = 100_000;
+
+function cloneMetadata(
+  value?: Readonly<Record<string, unknown>>,
+  context = 'Deck metadata',
+): Record<string, unknown> | undefined {
   if (!value) return undefined;
-  if (typeof structuredClone === 'function') {
-    try {
-      return structuredClone(value) as Record<string, unknown>;
-    } catch {
-      // Metadata is expected to be data-only, but keep a detached top-level object for unusual hosts.
-    }
+  if (typeof structuredClone !== 'function') {
+    throw new Error('DraftrollDeck requires structuredClone() to isolate metadata safely');
   }
-  return { ...value };
+  try {
+    return structuredClone(value) as Record<string, unknown>;
+  } catch (cause) {
+    throw new TypeError(`${context} must be structured-cloneable`, { cause });
+  }
 }
 
 function cloneCard(card: DraftrollCard): MutableDraftrollCard {
   return {
     ...card,
-    metadata: cloneMetadata(card.metadata ? { ...card.metadata } : undefined),
+    metadata: cloneMetadata(card.metadata, `Card '${card.id}' metadata`),
   };
 }
 
 function snapshotCard(card: DraftrollCard): DraftrollCard {
-  const metadata = cloneMetadata(card.metadata ? { ...card.metadata } : undefined);
+  const metadata = cloneMetadata(card.metadata, `Card '${card.id}' metadata`);
   if (metadata) Object.freeze(metadata);
   return Object.freeze({ ...card, metadata });
 }
@@ -103,10 +108,10 @@ function snapshotCard(card: DraftrollCard): DraftrollCard {
 function cloneDefinition(definition: CustomDiceDefinition): CustomDiceDefinition {
   return {
     ...definition,
-    metadata: cloneMetadata(definition.metadata),
-    faces: definition.faces.map((face) => ({
+    metadata: cloneMetadata(definition.metadata, `Deck '${definition.id}' metadata`),
+    faces: definition.faces.map((face, index) => ({
       ...face,
-      metadata: cloneMetadata(face.metadata),
+      metadata: cloneMetadata(face.metadata, `Deck '${definition.id}' face ${index + 1} metadata`),
     })),
   };
 }
@@ -147,6 +152,10 @@ function shuffle(items: unknown[], sampleIndex: IndexSampler): void {
   }
 }
 
+function toDrawPile(cards: readonly DraftrollCard[]): MutableDraftrollCard[] {
+  return cards.map(cloneCard).reverse();
+}
+
 /**
  * Owns generic shuffle/depletion/discard state while Draftroll remains stateless at the result boundary.
  * The card is selected before rendering; `toDisplayInput()` turns the draw into an exact external result.
@@ -174,6 +183,7 @@ export class DraftrollDeck {
     if (!this.id) throw new Error('A deck ID is required');
     if (!cards.length) throw new Error(`Deck '${this.id}' requires at least one card`);
     this.sampleIndex = samplerFromRandom(options.random);
+    let totalCopies = 0;
     const normalized = cards.map((card, index) => {
       if (typeof card.result !== 'number' && typeof card.result !== 'string')
         throw new Error(`Card ${index + 1} requires a result`);
@@ -184,15 +194,23 @@ export class DraftrollDeck {
       const copies = card.copies ?? 1;
       if (!Number.isSafeInteger(copies) || copies < 1)
         throw new Error(`Card ${index + 1} copies must be a positive safe integer`);
-      return { ...card, copies, metadata: cloneMetadata(card.metadata) };
+      totalCopies += copies;
+      if (totalCopies > MAXIMUM_DECK_SIZE) {
+        throw new Error(`Deck '${this.id}' may contain at most ${MAXIMUM_DECK_SIZE} card copies`);
+      }
+      return {
+        ...card,
+        copies,
+        metadata: cloneMetadata(card.metadata, `Card ${index + 1} metadata`),
+      };
     });
     this.definitionState = {
       id: this.id,
       renderAs: 'card',
-      metadata: cloneMetadata(options.metadata),
-      faces: normalized.map(({ copies: _copies, ...card }) => ({
+      metadata: cloneMetadata(options.metadata, `Deck '${this.id}' metadata`),
+      faces: normalized.map(({ copies: _copies, ...card }, index) => ({
         ...card,
-        metadata: cloneMetadata(card.metadata),
+        metadata: cloneMetadata(card.metadata, `Deck '${this.id}' face ${index + 1} metadata`),
       })),
     };
     this.source = normalized.flatMap((card, faceIndex) =>
@@ -204,10 +222,10 @@ export class DraftrollDeck {
         result: card.result,
         numericValue: card.value ?? (typeof card.result === 'number' ? card.result : 0),
         label: card.label ?? String(card.result),
-        metadata: cloneMetadata(card.metadata),
+        metadata: cloneMetadata(card.metadata, `Deck '${this.id}' face ${faceIndex + 1} metadata`),
       })),
     );
-    this.drawPile = this.source.map(cloneCard);
+    this.drawPile = toDrawPile(this.source);
     if (options.shuffle !== false) this.shuffle();
   }
 
@@ -232,9 +250,12 @@ export class DraftrollDeck {
   get active(): number {
     return this.inPlay.size;
   }
-  /** Returns detached snapshots of the cards currently available to draw. */
+  /** Returns detached snapshots in the same order they would be drawn. */
   get remainingCards(): readonly DraftrollCard[] {
-    return this.drawPile.map(snapshotCard);
+    return this.drawPile
+      .slice()
+      .reverse()
+      .map((card) => snapshotCard(card));
   }
   /** Returns detached snapshots of the cards currently discarded. */
   get discardedCards(): readonly DraftrollCard[] {
@@ -276,7 +297,7 @@ export class DraftrollDeck {
           kept: true,
           generatedBy: 'external',
           metadata: {
-            ...cloneMetadata(card.metadata ? { ...card.metadata } : undefined),
+            ...cloneMetadata(card.metadata, `Card '${card.id}' metadata`),
             deckId: this.id,
             copyIndex: card.copyIndex,
           },
@@ -291,7 +312,11 @@ export class DraftrollDeck {
           annotation: options.annotation,
           comment: options.comment,
           customDice: [cloneDefinition(this.definitionState)],
-          metadata: { ...cloneMetadata(options.metadata), deckId: this.id, cardDraw: true },
+          metadata: {
+            ...cloneMetadata(options.metadata, `Deck '${this.id}' display metadata`),
+            deckId: this.id,
+            cardDraw: true,
+          },
         };
       },
     });
@@ -307,17 +332,19 @@ export class DraftrollDeck {
     return this;
   }
 
-  /** Returns active cards to the draw pile as one atomic operation, optionally reshuffling them. */
+  /** Returns active cards to the top of the draw pile as one atomic operation, optionally reshuffling. */
   return(
     cards: DraftrollCard | string | readonly (DraftrollCard | string)[],
     options: { shuffle?: boolean } = {},
   ): this {
     const resolved = this.resolveActiveCards(cards);
-    for (const card of resolved) {
-      this.inPlay.delete(card.id);
-      this.drawPile.push(card);
+    for (const card of resolved) this.inPlay.delete(card.id);
+    if (options.shuffle === false) {
+      this.drawPile.push(...resolved.slice().reverse());
+    } else {
+      this.drawPile.push(...resolved);
+      this.shuffle();
     }
-    if (options.shuffle !== false) this.shuffle();
     return this;
   }
 
@@ -330,7 +357,7 @@ export class DraftrollDeck {
   reset(options: { shuffle?: boolean } = {}): this {
     this.inPlay.clear();
     this.discardPile = [];
-    this.drawPile = this.source.map(cloneCard);
+    this.drawPile = toDrawPile(this.source);
     if (options.shuffle !== false) this.shuffle();
     return this;
   }

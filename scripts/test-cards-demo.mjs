@@ -15,12 +15,12 @@ const [cardsSource, deckSource, demo, html, sdkPackage] = await Promise.all([
 
 assert.match(cardsSource, /createStandardDeck/);
 assert.match(cardsSource, /standardPlayingCards/);
-assert.match(cardsSource, /value: 0/);
 assert.match(cardsSource, /game-specific interpretation .*consuming application/);
 assert.match(deckSource, /class DraftrollDeck/);
 assert.match(deckSource, /reshuffleDiscard/);
 assert.match(deckSource, /getRandomValues/);
 assert.match(sdkPackage, /"\.\/cards"/);
+assert.match(sdkPackage, /"\.\/deck"/);
 
 assert.match(html, /id="card-deck"/);
 assert.match(html, /id="card-remaining"/);
@@ -28,9 +28,6 @@ assert.match(html, /id="card-discarded"/);
 assert.match(html, /id="card-shuffle"/);
 assert.match(html, /id="card-draw-count"/);
 assert.match(demo, /createStandardDeck/);
-assert.match(demo, /deck\.draw\(count\)/);
-assert.match(demo, /deck\.discard\(currentHand\)/);
-assert.match(demo, /deck\.reshuffleDiscard\(\)/);
 assert.match(demo, /draw\.toDisplayInput/);
 assert.match(demo, /draftroll\.display/);
 
@@ -53,10 +50,93 @@ try {
   const deckModule = await import(pathToFileURL(join(tempRoot, 'deck.js')).href);
   const cardsModule = await import(pathToFileURL(join(tempRoot, 'cards.js')).href);
   const { DraftrollDeck } = deckModule;
-  const { createStandardDeck } = cardsModule;
+  const { createStandardDeck, standardPlayingCards } = cardsModule;
+
+  const orderedDeck = new DraftrollDeck(
+    'ordered',
+    [{ result: 'A' }, { result: 'B' }, { result: 'C' }],
+    { shuffle: false },
+  );
+  assert.deepEqual(
+    orderedDeck.remainingCards.map((card) => card.result),
+    ['A', 'B', 'C'],
+    'remainingCards follows public draw order',
+  );
+  const orderedDraw = orderedDeck.draw(2);
+  assert.deepEqual(
+    orderedDraw.cards.map((card) => card.result),
+    ['A', 'B'],
+    'shuffle:false draws definitions from first to last',
+  );
+  orderedDeck.return(orderedDraw.cards, { shuffle: false });
+  assert.deepEqual(
+    orderedDeck.draw(2).cards.map((card) => card.result),
+    ['A', 'B'],
+    'return(..., { shuffle:false }) preserves caller order at the top of the deck',
+  );
+  orderedDeck.reset({ shuffle: false });
+  assert.deepEqual(
+    orderedDeck.draw(3).cards.map((card) => card.result),
+    ['A', 'B', 'C'],
+    'reset restores deterministic source order',
+  );
+
+  const copiedDeck = new DraftrollDeck(
+    'copies',
+    [{ result: 'A', copies: 2 }, { result: 'B' }],
+    { shuffle: false },
+  );
+  assert.equal(copiedDeck.size, 3);
+  assert.deepEqual(
+    copiedDeck.draw(3).cards.map((card) => [card.result, card.copyIndex]),
+    [
+      ['A', 0],
+      ['A', 1],
+      ['B', 0],
+    ],
+  );
+
+  assert.throws(
+    () =>
+      new DraftrollDeck('oversized', [{ result: 'x', copies: 100_001 }], { shuffle: false }),
+    /at most 100000 card copies/,
+  );
+  assert.throws(
+    () =>
+      new DraftrollDeck(
+        'uncloneable',
+        [{ result: 'x', metadata: { callback() {} } }],
+        { shuffle: false },
+      ),
+    /structured-cloneable/,
+  );
+  assert.throws(() => standardPlayingCards({ jokers: 3 }), /jokers must be 0, 1, or 2/);
+  assert.throws(() => createStandardDeck('invalid-jokers', { jokers: -1 }), /jokers must be 0, 1, or 2/);
+
+  const deterministicDefinitions = [{ result: 'A' }, { result: 'B' }, { result: 'C' }];
+  const deterministicA = new DraftrollDeck('deterministic-a', deterministicDefinitions, {
+    random: () => 0,
+  });
+  const deterministicB = new DraftrollDeck('deterministic-b', deterministicDefinitions, {
+    random: () => 0,
+  });
+  assert.deepEqual(
+    deterministicA.draw(3).cards.map((card) => card.result),
+    deterministicB.draw(3).cards.map((card) => card.result),
+    'the same injected random stream produces the same public draw order',
+  );
+  assert.throws(
+    () =>
+      new DraftrollDeck('invalid-rng', [{ result: 'A' }, { result: 'B' }], {
+        random: () => 1,
+      }),
+    /random\(\) must return a value in \[0, 1\)/,
+  );
 
   const discardDeck = createStandardDeck('discard-atomic', { shuffle: false });
   const discardDraw = discardDeck.draw(2);
+  assert.equal(discardDraw.cards[0].result, 'A♠');
+  assert.equal(discardDraw.cards[1].result, '2♠');
   assert.equal(discardDeck.active, 2);
   assert.equal(discardDeck.discarded, 0);
   assert.throws(
@@ -104,7 +184,9 @@ try {
   const isolatedDraw = isolatedDeck.draw();
   assert.ok(Object.isFrozen(isolatedDraw.cards));
   assert.ok(Object.isFrozen(isolatedDraw.cards[0]));
+  isolatedDraw.cards[0].metadata.nested.marker = 'snapshot mutation';
   const firstDisplay = isolatedDraw.toDisplayInput();
+  assert.equal(firstDisplay.dice[0].metadata.nested.marker, 'snapshot mutation');
   firstDisplay.customDice[0].faces[0].label = 'Display mutation';
   firstDisplay.customDice[0].faces[0].metadata.nested.marker = 'display mutation';
   const secondDisplay = isolatedDraw.toDisplayInput();
@@ -116,6 +198,10 @@ try {
       {
         ok: true,
         standardDeck: true,
+        deterministicOrder: true,
+        boundedExpansion: true,
+        strictMetadataIsolation: true,
+        runtimeValidation: true,
         interactiveDemo: true,
         systemAgnostic: true,
         atomicMutations: true,

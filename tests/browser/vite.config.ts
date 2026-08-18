@@ -33,6 +33,7 @@ export default defineConfig({
       input: {
         host: resolve(import.meta.dirname, 'fixtures/host.html'),
         overlay: resolve(import.meta.dirname, '../../overlay.html'),
+        cards: resolve(import.meta.dirname, '../../cards.html'),
       },
       output: {
         manualChunks(id) {

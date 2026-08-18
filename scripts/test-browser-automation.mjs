@@ -60,6 +60,9 @@ assert(
   'blocked connect fixture is missing',
 );
 
+const browserVite = readFileSync(join(root, 'tests/browser/vite.config.ts'), 'utf8');
+assert(browserVite.includes("'../../cards.html'"), 'cards browser fixture is not included in the test build');
+
 const specs = collectFiles(join(root, 'tests/browser/specs'), '.ts');
 assert(specs.length >= 3, 'browser spec suite is incomplete');
 const combinedSpecs = specs.map((file) => readFileSync(file, 'utf8')).join('\n');
@@ -84,6 +87,7 @@ for (const marker of [
   'additive generated physical roll preserves settled canonical dice',
   'generated physical dice receive heavy and low-gravity planner presets',
   'generated physical dice remain draggable after settlement',
+  'cards demo draws through the real overlay',
 ]) {
   assert(combinedSpecs.includes(marker), `browser suite is missing coverage: ${marker}`);
 }
@@ -148,6 +152,7 @@ console.log(
         'generated additive table preservation',
         'generated physical planner presets',
         'generated settled dragging',
+        'stateful card overlay integration',
       ],
     },
     null,

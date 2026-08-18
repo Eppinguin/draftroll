@@ -70,6 +70,14 @@ const RANKS: ReadonlyArray<{ id: StandardRank; label: string }> = [
   { id: 'K', label: 'King' },
 ];
 
+function normalizeJokerCount(value: StandardDeckOptions['jokers'] | undefined): 0 | 1 | 2 {
+  const jokers = value ?? 0;
+  if (jokers !== 0 && jokers !== 1 && jokers !== 2) {
+    throw new RangeError('Standard deck jokers must be 0, 1, or 2');
+  }
+  return jokers;
+}
+
 /**
  * Returns generic French-suited playing-card definitions.
  *
@@ -101,7 +109,7 @@ export function standardPlayingCards(
       });
     }
   }
-  const jokers = options.jokers ?? 0;
+  const jokers = normalizeJokerCount(options.jokers);
   for (let index = 0; index < jokers; index += 1) {
     cards.push({
       result: `joker-${index + 1}`,
@@ -122,7 +130,8 @@ export function createStandardDeck(
   id = 'standard-52',
   options: StandardDeckOptions = {},
 ): DraftrollDeck {
-  const { jokers = 0, ...deckOptions } = options;
+  const { jokers: rawJokers, ...deckOptions } = options;
+  const jokers = normalizeJokerCount(rawJokers);
   return new DraftrollDeck(id, standardPlayingCards({ jokers }), {
     ...deckOptions,
     metadata: {
