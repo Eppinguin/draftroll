@@ -70,6 +70,16 @@ try {
   const migrated = decodeNormalizedRollResult(legacy, { allowLegacyResults: true });
   assert.equal(migrated.success, true);
   assert.equal(migrated.data.schemaVersion, DRAFTROLL_RESULT_SCHEMA_VERSION);
+  assert.equal(legacy.schemaVersion, undefined);
+
+  const strictLegacy = decodeNormalizedRollResult(legacy, { allowLegacyResults: false });
+  assert.equal(strictLegacy.success, false);
+  assert.ok(
+    strictLegacy.error.issues.some(
+      (entry) => entry.code === 'invalid_result_schema_version' && entry.path === '$.schemaVersion',
+    ),
+  );
+  assert.equal(legacy.schemaVersion, undefined);
 
   const invalidDie = structuredClone(result);
   invalidDie.dice[0].kept = 'yes';
@@ -200,6 +210,7 @@ try {
         ok: true,
         tested: [
           'normalized-result schema version and legacy migration',
+          'strict rejection of legacy results when migration is disabled',
           'strict client and server event decoding',
           'unknown-field rejection',
           'metadata depth and payload limits',
