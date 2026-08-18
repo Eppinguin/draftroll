@@ -57,8 +57,18 @@ jobs:
         run: pnpm test:core:engine
       - name: SDK and realtime lifecycle
         run: pnpm test:core:sdk-realtime
-      - name: Renderer and physical dice
-        run: pnpm test:core:renderer
+      - name: Mixed renderer
+        run: pnpm test:mixed-renderer
+      - name: Coin and canonical physics
+        run: pnpm test:coin-physics
+      - name: Visual fallbacks
+        run: pnpm test:visual-fallbacks
+      - name: Generated polyhedra
+        run: pnpm test:generated-polyhedra
+      - name: Card presentation
+        run: pnpm test:cards-demo
+      - name: Runtime themes
+        run: pnpm test:themes
       - name: Room protocol and security
         run: pnpm test:core:rooms
       - name: Physics and package entrypoints
