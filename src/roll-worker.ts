@@ -56,13 +56,17 @@ self.addEventListener('message', (event: MessageEvent<PlanRequest>) => {
       captureImpacts: entry.captureImpacts !== false,
     };
   });
-  const lockedCount = Math.max(0, Math.min(entries.length, request.lockedCount ?? 0));
+  const requestedLockedCount = Math.max(0, Math.min(entries.length, request.lockedCount ?? 0));
+  const lockedMotion = readLockedMotion(request, requestedLockedCount);
+  // A lock is only real when a complete trajectory exists. Invalid/missing trajectory data must
+  // degrade to a normal dynamic simulation rather than silently excluding dice from planner logic.
+  const lockedCount = lockedMotion?.count ?? 0;
   const result = planner.simulate({
     entries,
     boundsX: request.boundsX,
     boundsZ: request.boundsZ,
     lockedCount,
-    lockedMotion: readLockedMotion(request, lockedCount),
+    lockedMotion,
     gravity: request.gravity,
   });
   const transforms = result.transforms;
