@@ -136,11 +136,13 @@ function samplerFromRandom(random?: () => number): IndexSampler {
   };
 }
 
-function shuffle<T>(items: T[], sampleIndex: IndexSampler): void {
-  for (let i = items.length - 1; i > 0; i -= 1) {
+function shuffled<T>(items: readonly T[], sampleIndex: IndexSampler): T[] {
+  const result = items.slice();
+  for (let i = result.length - 1; i > 0; i -= 1) {
     const j = sampleIndex(i + 1);
-    [items[i], items[j]] = [items[j], items[i]];
+    [result[i], result[j]] = [result[j], result[i]];
   }
+  return result;
 }
 
 function toDrawPile(cards: readonly CardReference[]): CardReference[] {
@@ -160,7 +162,7 @@ export class DraftrollDeck {
   private readonly source: readonly CardReference[];
   private drawPile: CardReference[];
   private discardPile: CardReference[] = [];
-  private inPlay = new Map<string, CardReference>();
+  private readonly inPlay = new Map<string, CardReference>();
 
   /**
    * Creates an independent deck from system-agnostic card definitions.
@@ -220,8 +222,9 @@ export class DraftrollDeck {
       }
     });
     this.source = source;
-    this.drawPile = toDrawPile(this.source);
-    if (options.shuffle !== false) this.shuffle();
+    const initialDrawPile = toDrawPile(this.source);
+    this.drawPile =
+      options.shuffle === false ? initialDrawPile : shuffled(initialDrawPile, this.sampleIndex);
   }
 
   /** Returns a detached custom-dice definition suitable for display/replay boundaries. */
@@ -257,9 +260,9 @@ export class DraftrollDeck {
     return this.discardPile.map((reference) => this.snapshotCard(reference));
   }
 
-  /** Randomizes the remaining draw pile in place. */
+  /** Randomizes the remaining draw pile atomically. */
   shuffle(): this {
-    shuffle(this.drawPile, this.sampleIndex);
+    this.drawPile = shuffled(this.drawPile, this.sampleIndex);
     return this;
   }
 
@@ -326,28 +329,31 @@ export class DraftrollDeck {
     options: { shuffle?: boolean } = {},
   ): this {
     const resolved = this.resolveActiveCards(cards);
+    const nextDrawPile =
+      options.shuffle === true
+        ? shuffled([...this.drawPile, ...resolved], this.sampleIndex)
+        : [...this.drawPile, ...resolved.slice().reverse()];
+
     for (const reference of resolved) this.inPlay.delete(this.cardId(reference));
-    if (options.shuffle === true) {
-      this.drawPile.push(...resolved);
-      this.shuffle();
-    } else {
-      this.drawPile.push(...resolved.slice().reverse());
-    }
+    this.drawPile = nextDrawPile;
     return this;
   }
 
-  /** Moves every discarded card back into the draw pile and shuffles it. */
+  /** Moves every discarded card back into the draw pile and shuffles it atomically. */
   reshuffleDiscard(): this {
     if (this.discardPile.length === 0) return this;
-    this.drawPile.push(...this.discardPile.splice(0));
-    return this.shuffle();
+    const nextDrawPile = shuffled([...this.drawPile, ...this.discardPile], this.sampleIndex);
+    this.drawPile = nextDrawPile;
+    this.discardPile = [];
+    return this;
   }
-  /** Restores every card copy to the draw pile and optionally shuffles it. */
+  /** Restores every card copy to the draw pile and optionally shuffles it atomically. */
   reset(options: { shuffle?: boolean } = {}): this {
+    const restored = toDrawPile(this.source);
+    const nextDrawPile = options.shuffle === false ? restored : shuffled(restored, this.sampleIndex);
     this.inPlay.clear();
     this.discardPile = [];
-    this.drawPile = toDrawPile(this.source);
-    if (options.shuffle !== false) this.shuffle();
+    this.drawPile = nextDrawPile;
     return this;
   }
 
