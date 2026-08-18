@@ -123,12 +123,16 @@ export interface PhysicalDieModel {
 /**
  * Supplies serializable host or theme geometry for a custom physical die.
  *
+ * @remarks
+ * Host-supplied geometry currently supports relabel targeting only. Other targeting modes require
+ * renderer-owned symmetry rotations or trajectory-search capabilities.
+ *
  * @public
  */
 export interface CustomPhysicalDieDefinitionInput {
   id: string;
   sides: number;
-  targeting?: PhysicalDieTargetingMode;
+  targeting?: 'relabel';
   radius: number;
   collisionScale?: number;
   collider: SerializedPhysicalCollider;
@@ -146,6 +150,7 @@ const MAXIMUM_VERTICES_PER_FACE = 256;
 const MAXIMUM_SUPPORT_NORMALS_PER_OUTCOME = 64;
 const MAXIMUM_LABEL_ANCHORS_PER_OUTCOME = 64;
 const MINIMUM_NON_DEGENERATE_AREA_SQUARED = 1e-18;
+const CONVEX_GEOMETRY_EPSILON = 1e-8;
 
 function cloneDefinitionVertex(value: PolyhedronVertex): PolyhedronVertex {
   return [value[0], value[1], value[2]];
@@ -260,6 +265,115 @@ function assertValidIndexedMesh(
   });
 }
 
+function subtractVertex(first: PolyhedronVertex, second: PolyhedronVertex): PolyhedronVertex {
+  return [first[0] - second[0], first[1] - second[1], first[2] - second[2]];
+}
+
+function crossVertex(first: PolyhedronVertex, second: PolyhedronVertex): PolyhedronVertex {
+  return [
+    first[1] * second[2] - first[2] * second[1],
+    first[2] * second[0] - first[0] * second[2],
+    first[0] * second[1] - first[1] * second[0],
+  ];
+}
+
+function dotVertex(first: PolyhedronVertex, second: PolyhedronVertex): number {
+  return first[0] * second[0] + first[1] * second[1] + first[2] * second[2];
+}
+
+function averageVertices(vertices: readonly PolyhedronVertex[]): PolyhedronVertex {
+  const sum: PolyhedronVertex = [0, 0, 0];
+  for (const vertex of vertices) {
+    sum[0] += vertex[0];
+    sum[1] += vertex[1];
+    sum[2] += vertex[2];
+  }
+  return [sum[0] / vertices.length, sum[1] / vertices.length, sum[2] / vertices.length];
+}
+
+function meshCoordinateScale(vertices: readonly PolyhedronVertex[]): number {
+  let scale = 1;
+  for (const vertex of vertices) {
+    scale = Math.max(scale, Math.abs(vertex[0]), Math.abs(vertex[1]), Math.abs(vertex[2]));
+  }
+  return scale;
+}
+
+function meshFaceNormal(
+  vertices: readonly PolyhedronVertex[],
+  face: readonly number[],
+): PolyhedronVertex {
+  const origin = vertices[face[0]];
+  for (let index = 1; index < face.length - 1; index += 1) {
+    const normal = crossVertex(
+      subtractVertex(vertices[face[index]], origin),
+      subtractVertex(vertices[face[index + 1]], origin),
+    );
+    if (vectorLengthSquared(normal) > MINIMUM_NON_DEGENERATE_AREA_SQUARED) return normal;
+  }
+  throw new Error('Convex physical die collider face must have non-zero area');
+}
+
+function assertClosedConvexMesh(
+  vertices: readonly PolyhedronVertex[],
+  faces: readonly number[][],
+  label: string,
+): void {
+  const centroid = averageVertices(vertices);
+  const coordinateTolerance = CONVEX_GEOMETRY_EPSILON * meshCoordinateScale(vertices);
+  const edgeUse = new Map<string, number>();
+  const referencedVertices = new Set<number>();
+
+  faces.forEach((face, faceIndex) => {
+    const origin = vertices[face[0]];
+    const normal = meshFaceNormal(vertices, face);
+    const normalLength = Math.sqrt(vectorLengthSquared(normal));
+    const planeTolerance = coordinateTolerance * normalLength;
+    const faceVertices = face.map((vertexIndex) => vertices[vertexIndex]);
+    const faceCentroid = averageVertices(faceVertices);
+
+    for (const vertexIndex of face) {
+      const distance = Math.abs(dotVertex(normal, subtractVertex(vertices[vertexIndex], origin)));
+      if (distance > planeTolerance) {
+        throw new Error(`${label} face ${faceIndex + 1} must be planar`);
+      }
+      referencedVertices.add(vertexIndex);
+    }
+
+    const centroidDirection = dotVertex(normal, subtractVertex(faceCentroid, centroid));
+    if (Math.abs(centroidDirection) <= planeTolerance) {
+      throw new Error(`${label} face ${faceIndex + 1} does not bound a three-dimensional volume`);
+    }
+    const outwardNormal: PolyhedronVertex =
+      centroidDirection > 0 ? normal : [-normal[0], -normal[1], -normal[2]];
+
+    vertices.forEach((vertex, vertexIndex) => {
+      const signedDistance = dotVertex(outwardNormal, subtractVertex(vertex, origin));
+      if (signedDistance > planeTolerance) {
+        throw new Error(
+          `${label} is not convex: vertex ${vertexIndex + 1} lies outside face ${faceIndex + 1}`,
+        );
+      }
+    });
+
+    for (let index = 0; index < face.length; index += 1) {
+      const first = face[index];
+      const second = face[(index + 1) % face.length];
+      const key = first < second ? `${first}:${second}` : `${second}:${first}`;
+      edgeUse.set(key, (edgeUse.get(key) ?? 0) + 1);
+    }
+  });
+
+  if (referencedVertices.size !== vertices.length) {
+    throw new Error(`${label} contains vertices that are not referenced by any face`);
+  }
+  for (const [edge, count] of edgeUse) {
+    if (count !== 2) {
+      throw new Error(`${label} must be a closed manifold; edge ${edge} belongs to ${count} faces`);
+    }
+  }
+}
+
 function colliderFaceCount(collider: SerializedPhysicalCollider): number {
   if (collider.kind === 'box') return 6;
   if (collider.kind === 'cylinder') return collider.segments + 2;
@@ -288,7 +402,9 @@ function assertValidCollider(collider: SerializedPhysicalCollider): void {
     return;
   }
 
-  assertValidIndexedMesh(collider.vertices, collider.faces, 'Convex physical die collider');
+  const label = 'Convex physical die collider';
+  assertValidIndexedMesh(collider.vertices, collider.faces, label);
+  assertClosedConvexMesh(collider.vertices, collider.faces, label);
 }
 
 function assertValidAnchor(anchor: PolyhedronLabelAnchor, label: string, faceCount: number): void {
