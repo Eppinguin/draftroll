@@ -1,0 +1,86 @@
+name: Agent canonical table index binding
+
+on:
+  push:
+    branches:
+      - agent/dicebox-learnings-cards
+
+jobs:
+  validate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/dicebox-learnings-cards
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.14.0
+
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.17.0 --activate
+
+      - name: Apply canonical table binding fix
+        run: |
+          node --check scripts/agent-fix-canonical-table-index-binding.mjs
+          node scripts/agent-fix-canonical-table-index-binding.mjs
+          rm scripts/agent-fix-canonical-table-index-binding.mjs
+          rm .github/workflows/agent-canonical-table-index-binding.yml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Format changed files
+        run: >-
+          pnpm exec oxfmt --write
+          src/physical-table.ts
+          src/main.ts
+          scripts/test-visual-fallbacks.mjs
+          tests/browser/specs/additive-duplicate-id.spec.ts
+
+      - name: Verify formatting
+        run: >-
+          pnpm exec oxfmt --check
+          src/physical-table.ts
+          src/main.ts
+          scripts/test-visual-fallbacks.mjs
+          tests/browser/specs/additive-duplicate-id.spec.ts
+
+      - name: Lint and typecheck
+        run: >-
+          pnpm lint &&
+          pnpm exec tsc --noEmit
+
+      - name: Core regression
+        run: pnpm test:core
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Build browser fixtures
+        run: pnpm test:browser:build
+
+      - name: Duplicate id regression
+        run: pnpm exec playwright test tests/browser/specs/additive-duplicate-id.spec.ts --project=chromium
+
+      - name: Overlay regression
+        run: pnpm exec playwright test tests/browser/specs/overlay.spec.ts --project=chromium
+
+      - name: Commit validated fix
+        run: |
+          git status --short
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Fix produced no changes"
+            exit 1
+          fi
+          git commit -m "bind canonical table entries by index"
+          git push origin HEAD:agent/dicebox-learnings-cards
