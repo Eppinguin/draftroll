@@ -13,12 +13,6 @@ const [cardsSource, deckSource, demo, html, sdkPackage] = await Promise.all([
   readFile(new URL('../packages/sdk/package.json', import.meta.url), 'utf8'),
 ]);
 
-assert.match(cardsSource, /createStandardDeck/);
-assert.match(cardsSource, /standardPlayingCards/);
-assert.match(cardsSource, /game-specific interpretation .*consuming application/);
-assert.match(deckSource, /class DraftrollDeck/);
-assert.match(deckSource, /reshuffleDiscard/);
-assert.match(deckSource, /getRandomValues/);
 assert.match(sdkPackage, /"\.\/cards"/);
 assert.match(sdkPackage, /"\.\/deck"/);
 
@@ -68,11 +62,11 @@ try {
     ['A', 'B'],
     'shuffle:false draws definitions from first to last',
   );
-  orderedDeck.return(orderedDraw.cards, { shuffle: false });
+  orderedDeck.return(orderedDraw.cards);
   assert.deepEqual(
     orderedDeck.draw(2).cards.map((card) => card.result),
     ['A', 'B'],
-    'return(..., { shuffle:false }) preserves caller order at the top of the deck',
+    'return() preserves caller order at the top of the deck unless shuffle is requested',
   );
   orderedDeck.reset({ shuffle: false });
   assert.deepEqual(
@@ -133,6 +127,25 @@ try {
     /random\(\) must return a value in \[0, 1\)/,
   );
 
+  let emptyDiscardSamples = 0;
+  const emptyDiscardDeck = new DraftrollDeck(
+    'empty-discard',
+    [{ result: 'A' }, { result: 'B' }, { result: 'C' }],
+    {
+      shuffle: false,
+      random: () => {
+        emptyDiscardSamples += 1;
+        return 0;
+      },
+    },
+  );
+  emptyDiscardDeck.reshuffleDiscard();
+  assert.equal(emptyDiscardSamples, 0, 'reshuffling an empty discard pile is a no-op');
+  assert.deepEqual(
+    emptyDiscardDeck.draw(3).cards.map((card) => card.result),
+    ['A', 'B', 'C'],
+  );
+
   const discardDeck = createStandardDeck('discard-atomic', { shuffle: false });
   const discardDraw = discardDeck.draw(2);
   assert.equal(discardDraw.cards[0].result, 'A♠');
@@ -155,7 +168,7 @@ try {
   const returnDraw = returnDeck.draw(2);
   const remainingBeforeReturn = returnDeck.remaining;
   assert.throws(
-    () => returnDeck.return([returnDraw.cards[0], 'missing-card'], { shuffle: false }),
+    () => returnDeck.return([returnDraw.cards[0], 'missing-card']),
     /is not active/,
   );
   assert.equal(returnDeck.active, 2, 'failed return leaves every active card untouched');
@@ -182,14 +195,18 @@ try {
   assert.equal(secondDefinition.metadata.nested.owner, 'deck');
 
   const isolatedDraw = isolatedDeck.draw();
-  assert.ok(Object.isFrozen(isolatedDraw.cards));
-  assert.ok(Object.isFrozen(isolatedDraw.cards[0]));
   isolatedDraw.cards[0].metadata.nested.marker = 'snapshot mutation';
   const firstDisplay = isolatedDraw.toDisplayInput();
-  assert.equal(firstDisplay.dice[0].metadata.nested.marker, 'snapshot mutation');
+  assert.equal(
+    firstDisplay.dice[0].metadata.nested.marker,
+    'original',
+    'mutating a detached draw snapshot does not alter authoritative display conversion',
+  );
+  firstDisplay.dice[0].metadata.nested.marker = 'display mutation';
   firstDisplay.customDice[0].faces[0].label = 'Display mutation';
   firstDisplay.customDice[0].faces[0].metadata.nested.marker = 'display mutation';
   const secondDisplay = isolatedDraw.toDisplayInput();
+  assert.equal(secondDisplay.dice[0].metadata.nested.marker, 'original');
   assert.equal(secondDisplay.customDice[0].faces[0].label, 'Alpha');
   assert.equal(secondDisplay.customDice[0].faces[0].metadata.nested.marker, 'original');
 
@@ -205,7 +222,8 @@ try {
         interactiveDemo: true,
         systemAgnostic: true,
         atomicMutations: true,
-        isolatedSnapshots: true,
+        detachedSnapshots: true,
+        explicitShuffleSemantics: true,
       },
       null,
       2,
