@@ -282,7 +282,7 @@ function dotVertex(first: PolyhedronVertex, second: PolyhedronVertex): number {
 }
 
 function averageVertices(vertices: readonly PolyhedronVertex[]): PolyhedronVertex {
-  const sum: PolyhedronVertex = [0, 0, 0];
+  const sum: [number, number, number] = [0, 0, 0];
   for (const vertex of vertices) {
     sum[0] += vertex[0];
     sum[1] += vertex[1];
