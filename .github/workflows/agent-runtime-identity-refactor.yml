@@ -43,14 +43,23 @@ jobs:
 
           const updateTestPath = 'scripts/test-roll-updates.mjs';
           let updateTests = await readFile(updateTestPath, 'utf8');
-          const structuredExpectation = `/Duplicate die id 'same-die' in structured roll/`;
-          if (!updateTests.includes(structuredExpectation)) {
-            throw new Error('Structured duplicate-id assertion marker missing');
-          }
           updateTests = updateTests.replace(
-            structuredExpectation,
-            `/Duplicate die id 'same-die'/`,
+            `  const coreModule = await import(pathToFileURL(join(outDir, 'core/src/index.js')).href);\n`,
+            '',
           );
+          updateTests = updateTests.replace(`  const { normalizeExternalRoll } = coreModule;\n`, '');
+          const duplicateTestStart = updateTests.indexOf(
+            `  assert.throws(\n    () =>\n      engine.evaluate({\n`,
+          );
+          const draftrollStart = updateTests.indexOf(
+            `  const draftroll = new Draftroll({ engine, renderer });`,
+            duplicateTestStart,
+          );
+          if (duplicateTestStart < 0 || draftrollStart < 0) {
+            throw new Error('Redundant duplicate-id test block marker missing');
+          }
+          updateTests =
+            updateTests.slice(0, duplicateTestStart) + updateTests.slice(draftrollStart);
           await writeFile(updateTestPath, updateTests);
           NODE
           cat > tests/browser/specs/additive-duplicate-id.spec.ts <<'EOF'
