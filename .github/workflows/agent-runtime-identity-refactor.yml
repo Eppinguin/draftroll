@@ -1,3 +1,4 @@
+# Temporary self-removing validation workflow.
 name: Agent runtime identity refactor
 
 on:
