@@ -4,7 +4,9 @@ import { pathToFileURL } from 'node:url';
 import { gunzipSync } from 'node:zlib';
 
 const payloads = [
-  ['scripts/.runtime-identity-payload-00', '0b13ac150d8d40fc8dc49ac2bb05852330842ca67ab335d5768f2cfba63f23b2'],
+  ['scripts/.runtime-identity-payload-00a', '569314154104ccf7e65eec587901fc53584638f1bc70c582a5aac78abe0c7fb9'],
+  ['scripts/.runtime-identity-payload-00b', 'b1138ec9d70a18ac3bc89163addc6fb7743ac569e8b8f16cbd2752587ea3666a'],
+  ['scripts/.runtime-identity-payload-00c', '8961aa6210d9edce03eae0186fae409e16afa84239cba93db1e76541e89ac277'],
   ['scripts/.runtime-identity-payload-01b', '5877526e28327df1e244c6d6aa91e212742ed58942f4fcfcf81b1234d7d2f8e0'],
   ['scripts/.runtime-identity-payload-02', 'e3be9bb2910f6108f9e6c9d108f570f6e6b26e2aad58fb75e5bacc6b9419774f'],
   ['scripts/.runtime-identity-payload-03', 'ab7442270087d4b3e0636e1f63caeb1aa3ff24871ce06ab2965af04424deaa48'],
@@ -28,7 +30,9 @@ const path = '/tmp/draftroll-runtime-identity-refactor.mjs';
 await writeFile(path, source);
 await import(pathToFileURL(path).href);
 await Promise.all(
-  [...payloads.map(([entry]) => entry), 'scripts/.runtime-identity-payload-01'].map((entry) =>
-    unlink(entry),
-  ),
+  [
+    ...payloads.map(([entry]) => entry),
+    'scripts/.runtime-identity-payload-00',
+    'scripts/.runtime-identity-payload-01',
+  ].map((entry) => unlink(entry)),
 );
