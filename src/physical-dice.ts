@@ -83,6 +83,16 @@ function normalize(value: PolyhedronVertex): [number, number, number] {
   return [value[0] / length, value[1] / length, value[2] / length];
 }
 
+function centroid(vertices: readonly PolyhedronVertex[]): [number, number, number] {
+  const center: [number, number, number] = [0, 0, 0];
+  for (const vertex of vertices) {
+    center[0] += vertex[0] / vertices.length;
+    center[1] += vertex[1] / vertices.length;
+    center[2] += vertex[2] / vertices.length;
+  }
+  return center;
+}
+
 function cloneVertex(value: PolyhedronVertex): PolyhedronVertex {
   return [value[0], value[1], value[2]];
 }
@@ -104,13 +114,15 @@ function faceNormal(
   const b = vertices[face[1]];
   const c = vertices[face[2]];
   let normal = normalize(cross(subtract(b, a), subtract(c, a)));
-  const center: [number, number, number] = [0, 0, 0];
+  const faceCenter: [number, number, number] = [0, 0, 0];
   for (const index of face) {
-    center[0] += vertices[index][0] / face.length;
-    center[1] += vertices[index][1] / face.length;
-    center[2] += vertices[index][2] / face.length;
+    faceCenter[0] += vertices[index][0] / face.length;
+    faceCenter[1] += vertices[index][1] / face.length;
+    faceCenter[2] += vertices[index][2] / face.length;
   }
-  if (dot(normal, center) < 0) normal = [-normal[0], -normal[1], -normal[2]];
+  if (dot(normal, subtract(faceCenter, centroid(vertices))) < 0) {
+    normal = [-normal[0], -normal[1], -normal[2]];
+  }
   return normal;
 }
 
@@ -303,9 +315,9 @@ export function createGeneratedPhysicalDieDefinition(sides: number): PhysicalDie
 
 /**
  * Validates and clones host/theme supplied physical geometry into the same definition contract.
- * Custom definitions default to relabel targeting so authoritative outcomes can be assigned after
- * a natural landing. Symmetry/fixed modes are reserved for renderers that also provide the required
- * rotation set or trajectory-search capability.
+ * Custom definitions use relabel targeting so authoritative outcomes can be assigned after a
+ * natural landing. Symmetry/fixed modes require renderer-owned rotation/search capabilities and
+ * are intentionally not part of the host input contract yet.
  */
 export function createCustomPhysicalDieDefinition(
   input: CustomPhysicalDieDefinitionInput,
@@ -314,7 +326,7 @@ export function createCustomPhysicalDieDefinition(
     id: input.id,
     sides: input.sides,
     geometrySource: 'theme',
-    targeting: input.targeting ?? 'relabel',
+    targeting: 'relabel',
     radius: input.radius,
     collisionScale: input.collisionScale ?? GENERATED_COLLISION_SCALE,
     collider: cloneCollider(input.collider),
@@ -392,19 +404,20 @@ export function createPhysicalDieCollider(
   const vertices = collider.vertices.map(
     ([x, y, z]) => new CANNON.Vec3(x * scale, y * scale, z * scale),
   );
+  const meshCenter = centroid(collider.vertices);
   const faces = collider.faces.map((source) => {
     const face = source.slice();
     const a = collider.vertices[face[0]];
     const b = collider.vertices[face[1]];
     const c = collider.vertices[face[2]];
     const winding = cross(subtract(b, a), subtract(c, a));
-    const center: [number, number, number] = [0, 0, 0];
+    const faceCenter: [number, number, number] = [0, 0, 0];
     for (const index of face) {
-      center[0] += collider.vertices[index][0] / face.length;
-      center[1] += collider.vertices[index][1] / face.length;
-      center[2] += collider.vertices[index][2] / face.length;
+      faceCenter[0] += collider.vertices[index][0] / face.length;
+      faceCenter[1] += collider.vertices[index][1] / face.length;
+      faceCenter[2] += collider.vertices[index][2] / face.length;
     }
-    if (dot(winding, center) < 0) face.reverse();
+    if (dot(winding, subtract(faceCenter, meshCenter)) < 0) face.reverse();
     return face;
   });
   return new CANNON.ConvexPolyhedron({ vertices, faces });
