@@ -15,6 +15,8 @@ const [cardsSource, deckSource, demo, html, sdkPackage] = await Promise.all([
 
 assert.match(sdkPackage, /"\.\/cards"/);
 assert.match(sdkPackage, /"\.\/deck"/);
+assert.match(deckSource, /DEFAULT_RUNTIME_VALIDATION_LIMITS\.maximumCustomFaces/);
+assert.match(deckSource, /DEFAULT_RUNTIME_VALIDATION_LIMITS\.maximumDice/);
 
 assert.match(html, /id="card-deck"/);
 assert.match(html, /id="card-remaining"/);
@@ -42,7 +44,17 @@ try {
   const transpile = (source, fileName) =>
     ts.transpileModule(source, { compilerOptions, fileName }).outputText;
   await writeFile(join(tempRoot, 'package.json'), '{"type":"module"}\n');
-  await writeFile(join(tempRoot, 'deck.js'), transpile(deckSource, 'deck.ts'));
+  await writeFile(
+    join(tempRoot, 'protocol.js'),
+    'export const DEFAULT_RUNTIME_VALIDATION_LIMITS = { maximumCustomFaces: 1000, maximumDice: 1000 };\n',
+  );
+  await writeFile(
+    join(tempRoot, 'deck.js'),
+    transpile(deckSource, 'deck.ts').replace(
+      /from ['"]\.\.\/\.\.\/protocol\/src\/index['"];/,
+      "from './protocol.js';",
+    ),
+  );
   await writeFile(
     join(tempRoot, 'cards.js'),
     transpile(cardsSource, 'cards.ts').replace(/from ['"]\.\/deck['"];/, "from './deck.js';"),
@@ -101,6 +113,27 @@ try {
     () =>
       new DraftrollDeck('oversized', [{ result: 'x', copies: 100_001 }], { shuffle: false }),
     /at most 100000 card copies/,
+  );
+  assert.throws(
+    () =>
+      new DraftrollDeck(
+        'too-many-faces',
+        Array.from({ length: 1_001 }, (_entry, index) => ({ result: `card-${index}` })),
+        { shuffle: false },
+      ),
+    /at most 1000 distinct card faces/,
+  );
+  const oversizedDisplayDeck = new DraftrollDeck(
+    'oversized-display',
+    [{ result: 'card', copies: 1_001 }],
+    { shuffle: false },
+  );
+  const oversizedDisplayDraw = oversizedDisplayDeck.draw(1_001);
+  assert.equal(oversizedDisplayDraw.cards.length, 1_001, 'large draws remain valid deck operations');
+  assert.throws(
+    () => oversizedDisplayDraw.toDisplayInput(),
+    /display input supports at most 1000/,
+    'display conversion enforces the protocol dice limit without constraining deck state',
   );
   assert.throws(
     () =>
@@ -226,6 +259,7 @@ try {
         standardDeck: true,
         deterministicOrder: true,
         boundedExpansion: true,
+        protocolBoundaryLimits: true,
         strictMetadataIsolation: true,
         runtimeValidation: true,
         interactiveDemo: true,
