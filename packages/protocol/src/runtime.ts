@@ -490,6 +490,7 @@ export function decodeServerToClientEvent(
   options: DecodeOptions = {},
 ): DecodeResult<ServerToClientEvent> {
   const cloned = structuredCloneIfObject(value);
+  if (options.allowLegacyResults ?? true) migrateLegacyResultsInServerEvent(cloned);
   const context = createContext({ rejectUnknownFields: true, ...options });
   validateServerEvent(cloned, '$', context);
   return context.result<ServerToClientEvent>(cloned, 'Server room event is invalid');
@@ -755,6 +756,31 @@ function validateClientEvent(value: unknown, path: string, context: ValidationCo
         ),
       );
   }
+}
+
+function migrateLegacyResultInRoomRollEvent(value: unknown): void {
+  if (!isRecord(value)) return;
+  if (
+    value.type !== 'roll_start' &&
+    value.type !== 'roll_updated' &&
+    value.type !== 'roll_visibility_updated'
+  ) {
+    return;
+  }
+  if (isRecord(value.result) && value.result.schemaVersion === undefined) {
+    value.result.schemaVersion = DRAFTROLL_RESULT_SCHEMA_VERSION;
+  }
+}
+
+function migrateLegacyResultsInServerEvent(value: unknown): void {
+  if (!isRecord(value)) return;
+  migrateLegacyResultInRoomRollEvent(value);
+  if (value.type !== 'room_state') return;
+  for (const collection of [value.recentEvents, value.recentRolls]) {
+    if (!Array.isArray(collection)) continue;
+    collection.forEach(migrateLegacyResultInRoomRollEvent);
+  }
+  migrateLegacyResultInRoomRollEvent(value.recentRoll);
 }
 
 function validateServerEvent(value: unknown, path: string, context: ValidationContext): void {
@@ -1846,7 +1872,6 @@ function validateRollUpdate(value: unknown, path: string, context: ValidationCon
 
 function validateNormalizedResult(value: unknown, path: string, context: ValidationContext): void {
   if (!expectRecord(value, path, context)) return;
-  if (value.schemaVersion === undefined) value.schemaVersion = DRAFTROLL_RESULT_SCHEMA_VERSION;
   unknownFields(
     value,
     [

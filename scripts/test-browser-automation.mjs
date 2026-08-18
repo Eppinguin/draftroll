@@ -61,7 +61,10 @@ assert(
 );
 
 const browserVite = readFileSync(join(root, 'tests/browser/vite.config.ts'), 'utf8');
-assert(browserVite.includes("'../../cards.html'"), 'cards browser fixture is not included in the test build');
+assert(
+  browserVite.includes("'../../cards.html'"),
+  'cards browser fixture is not included in the test build',
+);
 
 const specs = collectFiles(join(root, 'tests/browser/specs'), '.ts');
 assert(specs.length >= 3, 'browser spec suite is incomplete');

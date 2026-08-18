@@ -39,10 +39,7 @@ try {
   );
   await writeFile(
     join(tempRoot, 'deck.js'),
-    compiled.replace(
-      /from ['"]\.\.\/\.\.\/protocol\/src\/index['"];/,
-      "from './protocol.js';",
-    ),
+    compiled.replace(/from ['"]\.\.\/\.\.\/protocol\/src\/index['"];/, "from './protocol.js';"),
   );
 
   const { DraftrollDeck } = await import(pathToFileURL(join(tempRoot, 'deck.js')).href);
@@ -55,7 +52,11 @@ try {
     });
     const before = results(deck.remainingCards);
     assert.throws(() => deck.shuffle(), /synthetic RNG failure/);
-    assert.deepEqual(results(deck.remainingCards), before, 'failed shuffle must preserve draw order');
+    assert.deepEqual(
+      results(deck.remainingCards),
+      before,
+      'failed shuffle must preserve draw order',
+    );
     assert.equal(deck.active, 0);
     assert.equal(deck.discarded, 0);
   }

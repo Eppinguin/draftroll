@@ -58,6 +58,7 @@ export const CANONICAL_COLLISION_SCALE: Record<CanonicalDieKind, number> = {
 };
 
 const GENERATED_COLLISION_SCALE = 1.024;
+const COPLANAR_NORMAL_DOT_EPSILON = 1e-6;
 const generatedDefinitionCache = new Map<number, PhysicalDieDefinition>();
 const canonicalDefinitionCache = new Map<CanonicalDieKind, PhysicalDieDefinition>();
 
@@ -124,6 +125,22 @@ function faceNormal(
     normal = [-normal[0], -normal[1], -normal[2]];
   }
   return normal;
+}
+
+function groupCoplanarFaceNormals(
+  vertices: readonly PolyhedronVertex[],
+  faces: readonly number[][],
+): PolyhedronVertex[][] {
+  const groups: PolyhedronVertex[][] = [];
+  for (const face of faces) {
+    const normal = faceNormal(vertices, face);
+    const matching = groups.find(
+      (group) => dot(group[0], normal) >= 1 - COPLANAR_NORMAL_DOT_EPSILON,
+    );
+    if (matching) matching.push(normal);
+    else groups.push([normal]);
+  }
+  return groups;
 }
 
 function generatedSupportFaces(shape: ReadablePolyhedron, outcomeIndex: number): number[] {
@@ -193,21 +210,27 @@ function canonicalConvexDefinition(
   kind: Exclude<CanonicalDieKind, 'coin' | 'd6'>,
 ): PhysicalDieDefinition {
   const data = COLLIDER_DATA[kind];
-  const normals = data.faces.map((face) => faceNormal(data.vertices, face));
+  const sides = Number(kind.slice(1));
+  const supportNormalGroups = groupCoplanarFaceNormals(data.vertices, data.faces);
+  if (supportNormalGroups.length !== sides) {
+    throw new Error(
+      `Canonical ${kind} collider exposes ${supportNormalGroups.length} support planes; expected ${sides}`,
+    );
+  }
   return {
     id: kind,
-    sides: Number(kind.slice(1)),
+    sides,
     geometrySource: 'canonical',
     targeting: 'symmetry',
     radius: CANONICAL_DIE_RADIUS[kind],
     collisionScale: CANONICAL_COLLISION_SCALE[kind],
     collider: convexCollider(data.vertices, data.faces),
-    outcomes: normals.map((normal, index) => ({
+    outcomes: supportNormalGroups.map((supportNormals, index) => ({
       index,
       value: index + 1,
       result: index + 1,
       numericValue: index + 1,
-      supportNormals: [normal],
+      supportNormals,
       labelAnchors: [],
     })),
   };
@@ -345,10 +368,9 @@ export function createCustomPhysicalDieDefinition(
   // Validate the caller's geometry before normalization so invalid zero/non-finite vectors cannot
   // be silently converted into plausible-looking renderer data.
   assertValidPhysicalDieDefinition(definition);
-  definition.outcomes = definition.outcomes.map((outcome) => ({
-    ...outcome,
-    supportNormals: outcome.supportNormals.map((normal) => normalize(normal)),
-  }));
+  for (const outcome of definition.outcomes) {
+    outcome.supportNormals = outcome.supportNormals.map((normal) => normalize(normal));
+  }
 
   // The shared validator/cloner is the single contract boundary for all physical definitions.
   return clonePhysicalDieDefinition(definition);

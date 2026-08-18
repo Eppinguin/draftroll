@@ -16,11 +16,12 @@ const roll = draftroll.rollDice({
 });
 
 const [a, b] = roll.dice;
-const gameOutcome = a.result === b.result
-  ? { kind: 'critical', total: Number(a.result) + Number(b.result) }
-  : Number(a.result) > Number(b.result)
-    ? { kind: 'a', total: Number(a.result) + Number(b.result) }
-    : { kind: 'b', total: Number(a.result) + Number(b.result) };
+const gameOutcome =
+  a.result === b.result
+    ? { kind: 'critical', total: Number(a.result) + Number(b.result) }
+    : Number(a.result) > Number(b.result)
+      ? { kind: 'a', total: Number(a.result) + Number(b.result) }
+      : { kind: 'b', total: Number(a.result) + Number(b.result) };
 ```
 
 The application can then pass generic `positive`, `neutral`, or `negative` visual outcomes when presenting the result. Those meanings belong to the game integration; themes only decide how the generic outcome looks.
