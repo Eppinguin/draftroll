@@ -90,7 +90,7 @@ function cloneMetadata(
     throw new Error('DraftrollDeck requires structuredClone() to isolate metadata safely');
   }
   try {
-    return structuredClone(value) as Record<string, unknown>;
+    return structuredClone(value);
   } catch (cause) {
     throw new TypeError(`${context} must be structured-cloneable`, { cause });
   }
