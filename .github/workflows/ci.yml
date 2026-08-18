@@ -69,8 +69,22 @@ jobs:
         run: pnpm test:cards-demo
       - name: Runtime themes
         run: pnpm test:themes
-      - name: Room protocol and security
-        run: pnpm test:core:rooms
+      - name: Character client
+        run: pnpm test:client
+      - name: Room protocol
+        run: pnpm test:room-protocol
+      - name: Runtime validation
+        run: pnpm test:validation
+      - name: Room hardening
+        run: pnpm test:hardening
+      - name: Room password
+        run: pnpm test:password
+      - name: Token security
+        run: pnpm test:tokens
+      - name: Late events
+        run: pnpm test:late-events
+      - name: Concurrent table rolls
+        run: pnpm test:concurrent-table
       - name: Physics and package entrypoints
         run: pnpm test:core:physics
       - name: Public state isolation
