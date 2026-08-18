@@ -2,7 +2,8 @@
  * Public evaluator facade that preserves parsed-expression immutability.
  */
 
-export * from './evaluator-internal';
+export { evaluateStructuredInput } from './evaluator-internal';
+export type { EvaluateOptions } from './evaluator-internal';
 
 import type { NormalizedRollResult } from '../../protocol/src/index';
 import type { ParsedExpression } from './ast';

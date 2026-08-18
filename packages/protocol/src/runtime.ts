@@ -7,7 +7,32 @@
  * current normalized-result schema version.
  */
 
-export * from './runtime-internal';
+export {
+  DEFAULT_RUNTIME_VALIDATION_LIMITS,
+  DraftrollValidationError,
+  decodeClientToServerEvent,
+  decodeCustomDiceDefinitions,
+  decodeParticipantIdentityInput,
+  decodeRollInput,
+  decodeRollUpdateInput,
+  decodeRollVisibility,
+  decodeRoomCapabilityTokenPayload,
+  decodeRoomPolicy,
+  decodeRoomPolicyPatch,
+  isRollVisibility,
+  negotiateProtocolVersion,
+  parseClientToServerEvent,
+  parseRuntimeJson,
+  unwrapDecode,
+} from './runtime-internal';
+export type {
+  DecodeOptions,
+  DecodeResult,
+  RuntimeJsonOptions,
+  RuntimeValidationCode,
+  RuntimeValidationIssue,
+  RuntimeValidationLimits,
+} from './runtime-internal';
 
 import type { NormalizedRollResult, ServerToClientEvent } from './index';
 import {
