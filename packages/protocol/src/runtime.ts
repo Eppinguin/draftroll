@@ -1846,7 +1846,6 @@ function validateRollUpdate(value: unknown, path: string, context: ValidationCon
 
 function validateNormalizedResult(value: unknown, path: string, context: ValidationContext): void {
   if (!expectRecord(value, path, context)) return;
-  if (value.schemaVersion === undefined) value.schemaVersion = DRAFTROLL_RESULT_SCHEMA_VERSION;
   unknownFields(
     value,
     [
