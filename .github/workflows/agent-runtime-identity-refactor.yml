@@ -30,6 +30,16 @@ jobs:
         run: |
           node --check scripts/agent-refactor-runtime-identity.mjs
           node scripts/agent-refactor-runtime-identity.mjs
+          node --input-type=module <<'NODE'
+          import { readFile, writeFile } from 'node:fs/promises';
+          const path = 'src/main.ts';
+          let source = await readFile(path, 'utf8');
+          const before = `  return getPendingPhysicalLaunchParticipants(physicalTable.visualInstances()).map((entry) => ({\n    ...entry,\n    physicalIndex: physicalTable.physicalIndexForVisual(entry.visualIndex),\n  }));`;
+          const after = `  return getPendingPhysicalLaunchParticipants(physicalTable.visualInstances()).map((entry) => ({\n    visualIndex: entry.visualIndex,\n    radius: entry.radius,\n    coinLike: entry.coinLike,\n    physicalIndex: physicalTable.physicalIndexForVisual(entry.visualIndex),\n  }));`;
+          if (!source.includes(before)) throw new Error('Pending visual launch mapping marker missing');
+          source = source.replace(before, after);
+          await writeFile(path, source);
+          NODE
           rm scripts/agent-refactor-runtime-identity.mjs
           rm .github/workflows/agent-runtime-identity-refactor.yml
 
