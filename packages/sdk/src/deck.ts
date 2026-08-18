@@ -146,7 +146,7 @@ function shuffled<T>(items: readonly T[], sampleIndex: IndexSampler): T[] {
 }
 
 function toDrawPile(cards: readonly CardReference[]): CardReference[] {
-  return cards.slice().reverse();
+  return cards.toReversed();
 }
 
 /**
@@ -250,10 +250,7 @@ export class DraftrollDeck {
   }
   /** Returns detached snapshots in the same order they would be drawn. */
   get remainingCards(): readonly DraftrollCard[] {
-    return this.drawPile
-      .slice()
-      .reverse()
-      .map((reference) => this.snapshotCard(reference));
+    return this.drawPile.toReversed().map((reference) => this.snapshotCard(reference));
   }
   /** Returns detached snapshots of the cards currently discarded. */
   get discardedCards(): readonly DraftrollCard[] {
@@ -332,7 +329,7 @@ export class DraftrollDeck {
     const nextDrawPile =
       options.shuffle === true
         ? shuffled([...this.drawPile, ...resolved], this.sampleIndex)
-        : [...this.drawPile, ...resolved.slice().reverse()];
+        : [...this.drawPile, ...resolved.toReversed()];
 
     for (const reference of resolved) this.inPlay.delete(this.cardId(reference));
     this.drawPile = nextDrawPile;
