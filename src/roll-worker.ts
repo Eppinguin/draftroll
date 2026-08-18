@@ -1,3 +1,4 @@
+import { assertValidPhysicalDieDefinition } from '../packages/renderer/src/physical';
 import type { PhysicalDieDefinition } from './physical-dice';
 import {
   PhysicalRollPlanner,
@@ -44,7 +45,10 @@ function readLockedMotion(
 self.addEventListener('message', (event: MessageEvent<PlanRequest>) => {
   const request = event.data;
   const entries: PhysicalRollEntry[] = request.entries.map((entry) => {
-    if (entry.definition) definitions.set(entry.definitionKey, entry.definition);
+    if (entry.definition) {
+      assertValidPhysicalDieDefinition(entry.definition);
+      definitions.set(entry.definitionKey, entry.definition);
+    }
     const definition = definitions.get(entry.definitionKey);
     if (!definition) {
       throw new Error(`Physical definition is not registered: ${entry.definitionKey}`);
