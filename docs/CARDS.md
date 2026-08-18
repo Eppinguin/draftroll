@@ -40,7 +40,7 @@ console.log(deck.draw(2).cards.map((card) => card.result));
 // ['first', 'second']
 ```
 
-`remainingCards` uses that same draw order. Returning multiple active cards with `{ shuffle: false }` puts them back on top in the order supplied by the caller. `reset({ shuffle: false })` restores the original definition order.
+`remainingCards` uses that same draw order. `return(cards)` puts active cards back on top in caller order. Pass `{ shuffle: true }` when returning cards should randomize the remaining draw pile. `reset({ shuffle: false })` restores the original definition order.
 
 For deterministic shuffles, inject a `random()` source that returns values in `[0, 1)`. Production shuffling uses unbiased WebCrypto sampling.
 
@@ -52,7 +52,9 @@ A physical card copy is always in exactly one deck state:
 - active/in play
 - discard pile
 
-`draw()` moves cards from the draw pile to active state. `discard()` and `return()` validate every requested active card before mutating state, so invalid multi-card operations fail atomically. `reshuffleDiscard()` returns the discard pile and shuffles. `reset()` restores every original card copy and clears active/discard state.
+`draw()` moves cards from the draw pile to active state. `discard()` and `return()` validate every requested active card before mutating state, so invalid multi-card operations fail atomically. `reshuffleDiscard()` returns the discard pile and shuffles only when discarded cards exist. `reset()` restores every original card copy and clears active/discard state.
+
+Internally, pile state stores lightweight face/copy references rather than full cloned card objects. Face definitions and metadata are retained once and cloned only when data crosses a public snapshot or display boundary. This keeps large duplicate-heavy decks bounded by card-reference storage instead of multiplying metadata by every pile transition.
 
 ## Copies and resource limits
 
@@ -69,13 +71,17 @@ const deck = createDeck(
 );
 ```
 
-A deck may expand to at most 100,000 physical card copies. The constructor validates the cumulative copy count before allocating the expanded deck, preventing accidental or untrusted inputs from requesting pathological allocations.
+A deck may expand to at most 100,000 physical card copies. The constructor validates the cumulative copy count before allocating the reference list, preventing accidental or untrusted inputs from requesting pathological deck sizes.
 
-## Metadata isolation
+The deck limit is intentionally separate from Draftroll protocol/display limits. A headless deck can be larger than one renderable roll. `Draftroll.display()` remains the authoritative protocol validation boundary and rejects display payloads that exceed runtime limits such as maximum dice, custom faces, or metadata size.
 
-Deck, face, card, and display metadata are cloned across state and presentation boundaries. Metadata must therefore be structured-cloneable. Functions and other values that cannot be safely detached are rejected rather than silently retaining shared nested references.
+## Snapshot and metadata isolation
 
-This means a caller can inspect or mutate a returned definition or display payload without modifying the deck's authoritative source definition.
+Deck definitions, returned card snapshots, and display payloads are detached from authoritative deck state. Metadata must be structured-cloneable.
+
+Mutating a value returned by `deck.definition`, `remainingCards`, `discardedCards`, or `draw().cards` does not change the deck. `draw.toDisplayInput()` is built from the captured internal card references, not from caller-visible snapshots, so later snapshot mutations cannot alter the authoritative card results selected by the draw.
+
+Likewise, each `toDisplayInput()` call returns fresh card metadata and a fresh custom-dice definition. Mutating one display payload does not affect a later conversion.
 
 ## Standard French-suited decks
 
@@ -108,3 +114,5 @@ await response.wait();
 ```
 
 The generated display input includes the card face indices, physical copy indices, deck ID, detached custom-dice definition, and exact numeric total. The renderer recognizes the definition as `renderAs: 'card'` and uses the card fallback presentation rather than treating it as a physical polyhedral die.
+
+`toDisplayInput()` constructs an exact display request; `Draftroll.display()` performs the normal protocol runtime validation before normalization and presentation. Keeping validation at that shared boundary avoids a second, drifting copy of protocol limits inside the deck implementation.
