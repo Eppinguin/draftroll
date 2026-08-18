@@ -6,13 +6,15 @@ import {
   type PolyhedronVertex,
   type ReadablePolyhedron,
 } from '../packages/renderer/src/polyhedra';
-import type {
-  CustomPhysicalDieDefinitionInput,
-  PhysicalDieDefinition,
-  PhysicalDieFaceContent,
-  PhysicalDieOutcomeSlot,
-  PhysicalDiePresentation,
-  SerializedPhysicalCollider,
+import {
+  assertValidPhysicalDieDefinition,
+  clonePhysicalDieDefinition,
+  type CustomPhysicalDieDefinitionInput,
+  type PhysicalDieDefinition,
+  type PhysicalDieFaceContent,
+  type PhysicalDieOutcomeSlot,
+  type PhysicalDiePresentation,
+  type SerializedPhysicalCollider,
 } from '../packages/renderer/src/physical';
 export type {
   CustomPhysicalDieDefinitionInput,
@@ -160,6 +162,21 @@ function convexCollider(
   };
 }
 
+function cachedDefinition<K>(
+  cache: Map<K, PhysicalDieDefinition>,
+  key: K,
+  create: () => PhysicalDieDefinition,
+): PhysicalDieDefinition {
+  const cached = cache.get(key);
+  if (cached) return clonePhysicalDieDefinition(cached);
+
+  // Keep the authoritative cached object private. Public callers always receive a detached clone,
+  // so mutating a returned definition cannot poison later renderer/physics requests.
+  const validated = clonePhysicalDieDefinition(create());
+  cache.set(key, validated);
+  return clonePhysicalDieDefinition(validated);
+}
+
 function canonicalConvexDefinition(
   kind: Exclude<CanonicalDieKind, 'coin' | 'd6'>,
 ): PhysicalDieDefinition {
@@ -188,105 +205,100 @@ function canonicalConvexDefinition(
 export function createCanonicalPhysicalDieDefinition(
   kind: CanonicalDieKind,
 ): PhysicalDieDefinition {
-  const cached = canonicalDefinitionCache.get(kind);
-  if (cached) return cached;
-
-  let definition: PhysicalDieDefinition;
-  if (kind === 'coin') {
-    definition = {
-      id: kind,
-      sides: 2,
-      geometrySource: 'canonical',
-      targeting: 'symmetry',
-      radius: CANONICAL_DIE_RADIUS.coin,
-      collisionScale: CANONICAL_COLLISION_SCALE.coin,
-      collider: {
-        kind: 'cylinder',
-        radiusTop: CANONICAL_DIE_RADIUS.coin,
-        radiusBottom: CANONICAL_DIE_RADIUS.coin,
-        height: 0.16,
-        segments: 32,
-      },
-      outcomes: [
-        {
-          index: 0,
-          value: 1,
-          result: 1,
-          numericValue: 1,
-          supportNormals: [[0, 1, 0]],
-          labelAnchors: [],
+  return cachedDefinition(canonicalDefinitionCache, kind, () => {
+    if (kind === 'coin') {
+      return {
+        id: kind,
+        sides: 2,
+        geometrySource: 'canonical',
+        targeting: 'symmetry',
+        radius: CANONICAL_DIE_RADIUS.coin,
+        collisionScale: CANONICAL_COLLISION_SCALE.coin,
+        collider: {
+          kind: 'cylinder',
+          radiusTop: CANONICAL_DIE_RADIUS.coin,
+          radiusBottom: CANONICAL_DIE_RADIUS.coin,
+          height: 0.16,
+          segments: 32,
         },
-        {
-          index: 1,
-          value: 2,
-          result: 2,
-          numericValue: 2,
-          supportNormals: [[0, -1, 0]],
-          labelAnchors: [],
-        },
-      ],
-    };
-  } else if (kind === 'd6') {
-    const radius = CANONICAL_DIE_RADIUS.d6;
-    const half = radius * 0.86;
-    const normals: PolyhedronVertex[] = [
-      [1, 0, 0],
-      [-1, 0, 0],
-      [0, 1, 0],
-      [0, -1, 0],
-      [0, 0, 1],
-      [0, 0, -1],
-    ];
-    definition = {
-      id: kind,
-      sides: 6,
-      geometrySource: 'canonical',
-      targeting: 'symmetry',
-      radius,
-      collisionScale: CANONICAL_COLLISION_SCALE.d6,
-      collider: { kind: 'box', halfExtents: [half, half, half] },
-      outcomes: normals.map((normal, index) => ({
-        index,
-        value: index + 1,
-        result: index + 1,
-        numericValue: index + 1,
-        supportNormals: [normal],
-        labelAnchors: [],
-      })),
-    };
-  } else {
-    definition = canonicalConvexDefinition(kind);
-  }
+        outcomes: [
+          {
+            index: 0,
+            value: 1,
+            result: 1,
+            numericValue: 1,
+            supportNormals: [[0, 1, 0]],
+            labelAnchors: [],
+          },
+          {
+            index: 1,
+            value: 2,
+            result: 2,
+            numericValue: 2,
+            supportNormals: [[0, -1, 0]],
+            labelAnchors: [],
+          },
+        ],
+      };
+    }
 
-  canonicalDefinitionCache.set(kind, definition);
-  return definition;
+    if (kind === 'd6') {
+      const radius = CANONICAL_DIE_RADIUS.d6;
+      const half = radius * 0.86;
+      const normals: PolyhedronVertex[] = [
+        [1, 0, 0],
+        [-1, 0, 0],
+        [0, 1, 0],
+        [0, -1, 0],
+        [0, 0, 1],
+        [0, 0, -1],
+      ];
+      return {
+        id: kind,
+        sides: 6,
+        geometrySource: 'canonical',
+        targeting: 'symmetry',
+        radius,
+        collisionScale: CANONICAL_COLLISION_SCALE.d6,
+        collider: { kind: 'box', halfExtents: [half, half, half] },
+        outcomes: normals.map((normal, index) => ({
+          index,
+          value: index + 1,
+          result: index + 1,
+          numericValue: index + 1,
+          supportNormals: [normal],
+          labelAnchors: [],
+        })),
+      };
+    }
+
+    return canonicalConvexDefinition(kind);
+  });
 }
 
 /**
- * Creates a first-class physical die definition for any numeric side count.
- * The generated polar-dual geometry supplies collision faces and readable face/edge/tip anchors.
+ * Creates a first-class physical die definition for numeric side counts supported by the exact
+ * generated-geometry budget.
  */
 export function createGeneratedPhysicalDieDefinition(sides: number): PhysicalDieDefinition {
-  const cached = generatedDefinitionCache.get(sides);
-  if (cached) return cached;
-  const shape = createReadablePolyhedron(sides);
-  if (!shape.exact) {
-    throw new Error(`d${sides} exceeds the exact generated physical-die budget`);
-  }
-  const radius = Math.max(0.01, ...shape.vertices.map(magnitude));
-  const definition: PhysicalDieDefinition = {
-    id: `generated:d${sides}`,
-    sides,
-    geometrySource: 'generated',
-    targeting: 'relabel',
-    radius,
-    collisionScale: GENERATED_COLLISION_SCALE,
-    collider: convexCollider(shape.vertices, shape.faces),
-    outcomes: outcomesFromReadableShape(shape),
-    readableShape: shape,
-  };
-  generatedDefinitionCache.set(sides, definition);
-  return definition;
+  return cachedDefinition(generatedDefinitionCache, sides, () => {
+    const shape = createReadablePolyhedron(sides);
+    if (!shape.exact) {
+      throw new Error(`d${sides} exceeds the exact generated physical-die budget`);
+    }
+    const radius = Math.max(0.01, ...shape.vertices.map(magnitude));
+    return {
+      id: `generated:d${sides}`,
+      sides,
+      geometrySource: 'generated',
+      targeting: 'relabel',
+      radius,
+      collisionScale: GENERATED_COLLISION_SCALE,
+      collider: convexCollider(shape.vertices, shape.faces),
+      outcomes: outcomesFromReadableShape(shape),
+      readableShape: shape,
+    };
+  });
 }
 
 /**
@@ -298,59 +310,36 @@ export function createGeneratedPhysicalDieDefinition(sides: number): PhysicalDie
 export function createCustomPhysicalDieDefinition(
   input: CustomPhysicalDieDefinitionInput,
 ): PhysicalDieDefinition {
-  if (!input.id.trim()) throw new Error('Physical die definition requires an id');
-  if (!Number.isSafeInteger(input.sides) || input.sides < 1 || input.sides > 10_000) {
-    throw new Error('Physical die side count must be an integer from 1 to 10000');
-  }
-  if (!Number.isFinite(input.radius) || input.radius <= 0) {
-    throw new Error('Physical die radius must be positive');
-  }
-  if (input.outcomes.length !== input.sides) {
-    throw new Error('Physical die outcomes must match its logical side count');
-  }
-  const collisionScale = input.collisionScale ?? GENERATED_COLLISION_SCALE;
-  if (!Number.isFinite(collisionScale) || collisionScale <= 0.9 || collisionScale > 1.2) {
-    throw new Error('Physical die collision scale must be greater than 0.9 and at most 1.2');
-  }
-  if (input.collider.kind === 'convex') {
-    const collider = input.collider;
-    if (collider.vertices.length < 4 || collider.faces.length < 4) {
-      throw new Error('Convex physical dice require at least four vertices and four faces');
-    }
-    for (const face of collider.faces) {
-      if (
-        face.length < 3 ||
-        face.some(
-          (index) => !Number.isSafeInteger(index) || index < 0 || index >= collider.vertices.length,
-        )
-      ) {
-        throw new Error('Physical die collider contains an invalid face');
-      }
-    }
-  }
-  const outcomes = input.outcomes.map((outcome, index): PhysicalDieOutcomeSlot => {
-    if (outcome.supportNormals.length === 0) {
-      throw new Error(`Physical die outcome ${index + 1} requires a support normal`);
-    }
-    return {
-      index,
-      value: index + 1,
-      result: outcome.result ?? index + 1,
-      numericValue: outcome.numericValue,
-      supportNormals: outcome.supportNormals.map((normal) => normalize(normal)),
-      labelAnchors: (outcome.labelAnchors ?? []).map(cloneAnchor),
-    };
-  });
-  return {
+  const definition: PhysicalDieDefinition = {
     id: input.id,
     sides: input.sides,
     geometrySource: 'theme',
     targeting: input.targeting ?? 'relabel',
     radius: input.radius,
-    collisionScale,
+    collisionScale: input.collisionScale ?? GENERATED_COLLISION_SCALE,
     collider: cloneCollider(input.collider),
-    outcomes,
+    outcomes: input.outcomes.map(
+      (outcome, index): PhysicalDieOutcomeSlot => ({
+        index,
+        value: index + 1,
+        result: outcome.result ?? index + 1,
+        numericValue: outcome.numericValue,
+        supportNormals: outcome.supportNormals.map(cloneVertex),
+        labelAnchors: (outcome.labelAnchors ?? []).map(cloneAnchor),
+      }),
+    ),
   };
+
+  // Validate the caller's geometry before normalization so invalid zero/non-finite vectors cannot
+  // be silently converted into plausible-looking renderer data.
+  assertValidPhysicalDieDefinition(definition);
+  definition.outcomes = definition.outcomes.map((outcome) => ({
+    ...outcome,
+    supportNormals: outcome.supportNormals.map((normal) => normalize(normal)),
+  }));
+
+  // The shared validator/cloner is the single contract boundary for all physical definitions.
+  return clonePhysicalDieDefinition(definition);
 }
 
 export function createDefaultPhysicalDiePresentation(

@@ -140,6 +140,13 @@ export interface CustomPhysicalDieDefinitionInput {
   }>;
 }
 
+const MAXIMUM_CONVEX_VERTICES = 4_096;
+const MAXIMUM_CONVEX_FACES = 4_096;
+const MAXIMUM_VERTICES_PER_FACE = 256;
+const MAXIMUM_SUPPORT_NORMALS_PER_OUTCOME = 64;
+const MAXIMUM_LABEL_ANCHORS_PER_OUTCOME = 64;
+const MINIMUM_NON_DEGENERATE_AREA_SQUARED = 1e-18;
+
 function cloneDefinitionVertex(value: PolyhedronVertex): PolyhedronVertex {
   return [value[0], value[1], value[2]];
 }
@@ -177,12 +184,80 @@ function vectorLengthSquared(value: PolyhedronVertex): number {
 }
 
 function assertFiniteVector(value: PolyhedronVertex, label: string, allowZero = true): void {
-  if (value.length !== 3 || !value.every(Number.isFinite)) {
+  if (!Array.isArray(value) || value.length !== 3 || !value.every(Number.isFinite)) {
     throw new Error(`${label} must contain three finite coordinates`);
   }
-  if (!allowZero && vectorLengthSquared(value) <= 1e-18) {
+  if (!allowZero && vectorLengthSquared(value) <= MINIMUM_NON_DEGENERATE_AREA_SQUARED) {
     throw new Error(`${label} must not be a zero vector`);
   }
+}
+
+function triangleAreaSquared(
+  first: PolyhedronVertex,
+  second: PolyhedronVertex,
+  third: PolyhedronVertex,
+): number {
+  const abx = second[0] - first[0];
+  const aby = second[1] - first[1];
+  const abz = second[2] - first[2];
+  const acx = third[0] - first[0];
+  const acy = third[1] - first[1];
+  const acz = third[2] - first[2];
+  const x = aby * acz - abz * acy;
+  const y = abz * acx - abx * acz;
+  const z = abx * acy - aby * acx;
+  return x * x + y * y + z * z;
+}
+
+function faceHasArea(vertices: readonly PolyhedronVertex[], face: readonly number[]): boolean {
+  const first = vertices[face[0]];
+  for (let index = 1; index < face.length - 1; index += 1) {
+    if (
+      triangleAreaSquared(first, vertices[face[index]], vertices[face[index + 1]]) >
+      MINIMUM_NON_DEGENERATE_AREA_SQUARED
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function assertValidIndexedMesh(
+  vertices: readonly PolyhedronVertex[],
+  faces: readonly number[][],
+  label: string,
+): void {
+  if (vertices.length < 4 || faces.length < 4) {
+    throw new Error(`${label} requires at least four vertices and four faces`);
+  }
+  if (vertices.length > MAXIMUM_CONVEX_VERTICES) {
+    throw new Error(`${label} may contain at most ${MAXIMUM_CONVEX_VERTICES} vertices`);
+  }
+  if (faces.length > MAXIMUM_CONVEX_FACES) {
+    throw new Error(`${label} may contain at most ${MAXIMUM_CONVEX_FACES} faces`);
+  }
+
+  vertices.forEach((vertex, index) => assertFiniteVector(vertex, `${label} vertex ${index + 1}`));
+  faces.forEach((face, faceIndex) => {
+    if (!Array.isArray(face) || face.length < 3 || new Set(face).size !== face.length) {
+      throw new Error(`${label} face ${faceIndex + 1} must contain at least three unique vertices`);
+    }
+    if (face.length > MAXIMUM_VERTICES_PER_FACE) {
+      throw new Error(
+        `${label} face ${faceIndex + 1} may contain at most ${MAXIMUM_VERTICES_PER_FACE} vertices`,
+      );
+    }
+    if (
+      face.some(
+        (index) => !Number.isSafeInteger(index) || index < 0 || index >= vertices.length,
+      )
+    ) {
+      throw new Error(`${label} face ${faceIndex + 1} contains an invalid vertex index`);
+    }
+    if (!faceHasArea(vertices, face)) {
+      throw new Error(`${label} face ${faceIndex + 1} must have non-zero area`);
+    }
+  });
 }
 
 function colliderFaceCount(collider: SerializedPhysicalCollider): number {
@@ -213,23 +288,107 @@ function assertValidCollider(collider: SerializedPhysicalCollider): void {
     return;
   }
 
-  if (collider.vertices.length < 4 || collider.faces.length < 4) {
-    throw new Error('Convex physical dice require at least four vertices and four faces');
+  assertValidIndexedMesh(collider.vertices, collider.faces, 'Convex physical die collider');
+}
+
+function assertValidAnchor(anchor: PolyhedronLabelAnchor, label: string, faceCount: number): void {
+  if (!Number.isSafeInteger(anchor.faceIndex) || anchor.faceIndex < 0 || anchor.faceIndex >= faceCount) {
+    throw new Error(`${label} has an invalid face index`);
   }
-  collider.vertices.forEach((vertex, index) =>
-    assertFiniteVector(vertex, `Physical die collider vertex ${index + 1}`),
-  );
-  collider.faces.forEach((face, faceIndex) => {
-    if (face.length < 3 || new Set(face).size !== face.length) {
-      throw new Error(`Physical die collider face ${faceIndex + 1} must contain three unique vertices`);
+  assertFiniteVector(anchor.position, `${label} position`);
+  assertFiniteVector(anchor.normal, `${label} normal`, false);
+  assertFiniteVector(anchor.up, `${label} up`, false);
+  assertFiniteNumber(anchor.scale, `${label} scale`);
+  if (anchor.scale <= 0) throw new Error(`${label} scale must be positive`);
+}
+
+function assertValidReadablePolyhedron(shape: ReadablePolyhedron, expectedSides: number): void {
+  assertValidIndexedMesh(shape.vertices, shape.faces, 'Readable physical die geometry');
+
+  if (!Number.isSafeInteger(shape.requestedFacets) || shape.requestedFacets < 1 || shape.requestedFacets > 10_000) {
+    throw new Error('Readable physical die requestedFacets must be an integer from 1 to 10000');
+  }
+  if (shape.requestedFacets !== expectedSides) {
+    throw new Error('Readable physical die requestedFacets must match the logical side count');
+  }
+  if (
+    !Number.isSafeInteger(shape.displayFacets) ||
+    shape.displayFacets < 1 ||
+    shape.displayFacets > shape.faces.length
+  ) {
+    throw new Error('Readable physical die displayFacets must be a positive bounded face count');
+  }
+  if (typeof shape.exact !== 'boolean') {
+    throw new Error('Readable physical die exact must be a boolean');
+  }
+  if (!['d1-cylinder', 'd2-coin', 'd3-cube', 'generated-dual', 'representative'].includes(shape.family)) {
+    throw new Error('Readable physical die has an invalid geometry family');
+  }
+  if (!shape.exact || shape.family === 'representative') {
+    throw new Error('Physical die definitions require exact readable geometry');
+  }
+  if (!Array.isArray(shape.landingFaces) || shape.landingFaces.length === 0) {
+    throw new Error('Readable physical die requires at least one landing face');
+  }
+  if (new Set(shape.landingFaces).size !== shape.landingFaces.length) {
+    throw new Error('Readable physical die landing faces must be unique');
+  }
+  if (
+    shape.landingFaces.some(
+      (faceIndex) =>
+        !Number.isSafeInteger(faceIndex) || faceIndex < 0 || faceIndex >= shape.faces.length,
+    )
+  ) {
+    throw new Error('Readable physical die contains an invalid landing face index');
+  }
+  if (shape.faceKinds) {
+    if (shape.faceKinds.length !== shape.faces.length) {
+      throw new Error('Readable physical die faceKinds must match its face count');
     }
     if (
-      face.some(
-        (index) => !Number.isSafeInteger(index) || index < 0 || index >= collider.vertices.length,
+      shape.faceKinds.some(
+        (kind) => !['landing', 'cap', 'rim', 'decorative'].includes(kind),
       )
     ) {
-      throw new Error(`Physical die collider face ${faceIndex + 1} contains an invalid vertex index`);
+      throw new Error('Readable physical die contains an invalid face kind');
     }
+  }
+  if (!Array.isArray(shape.outcomes) || shape.outcomes.length !== expectedSides) {
+    throw new Error('Readable physical die outcomes must match its logical side count');
+  }
+
+  shape.outcomes.forEach((outcome, outcomeIndex) => {
+    assertFiniteNumber(outcome.value, `Readable physical die outcome ${outcomeIndex + 1} value`);
+    if (
+      !Number.isSafeInteger(outcome.supportFace) ||
+      outcome.supportFace < 0 ||
+      outcome.supportFace >= shape.faces.length
+    ) {
+      throw new Error(`Readable physical die outcome ${outcomeIndex + 1} has an invalid support face`);
+    }
+    assertFiniteVector(
+      outcome.settledUp,
+      `Readable physical die outcome ${outcomeIndex + 1} settledUp`,
+      false,
+    );
+    if (!['face', 'edge', 'vertex'].includes(outcome.labelKind)) {
+      throw new Error(`Readable physical die outcome ${outcomeIndex + 1} has an invalid label kind`);
+    }
+    if (!Array.isArray(outcome.labels) || outcome.labels.length === 0) {
+      throw new Error(`Readable physical die outcome ${outcomeIndex + 1} requires a label anchor`);
+    }
+    if (outcome.labels.length > MAXIMUM_LABEL_ANCHORS_PER_OUTCOME) {
+      throw new Error(
+        `Readable physical die outcome ${outcomeIndex + 1} may contain at most ${MAXIMUM_LABEL_ANCHORS_PER_OUTCOME} label anchors`,
+      );
+    }
+    outcome.labels.forEach((anchor, anchorIndex) =>
+      assertValidAnchor(
+        anchor,
+        `Readable physical die outcome ${outcomeIndex + 1} label anchor ${anchorIndex + 1}`,
+        shape.faces.length,
+      ),
+    );
   });
 }
 
@@ -240,7 +399,12 @@ function assertValidCollider(collider: SerializedPhysicalCollider): void {
  * @public
  */
 export function assertValidPhysicalDieDefinition(definition: PhysicalDieDefinition): void {
-  if (!definition.id.trim()) throw new Error('Physical die definition requires an id');
+  if (!definition || typeof definition !== 'object') {
+    throw new Error('Physical die definition must be an object');
+  }
+  if (typeof definition.id !== 'string' || !definition.id.trim()) {
+    throw new Error('Physical die definition requires an id');
+  }
   if (!Number.isSafeInteger(definition.sides) || definition.sides < 1 || definition.sides > 10_000) {
     throw new Error('Physical die side count must be an integer from 1 to 10000');
   }
@@ -256,9 +420,12 @@ export function assertValidPhysicalDieDefinition(definition: PhysicalDieDefiniti
   if (definition.collisionScale <= 0.9 || definition.collisionScale > 1.2) {
     throw new Error('Physical die collision scale must be greater than 0.9 and at most 1.2');
   }
+  if (!definition.collider || typeof definition.collider !== 'object') {
+    throw new Error('Physical die definition requires a collider');
+  }
   assertValidCollider(definition.collider);
 
-  if (definition.outcomes.length !== definition.sides) {
+  if (!Array.isArray(definition.outcomes) || definition.outcomes.length !== definition.sides) {
     throw new Error('Physical die outcomes must match its logical side count');
   }
   const faceCount = colliderFaceCount(definition.collider);
@@ -275,8 +442,13 @@ export function assertValidPhysicalDieDefinition(definition: PhysicalDieDefiniti
     if (outcome.numericValue !== undefined) {
       assertFiniteNumber(outcome.numericValue, `Physical die outcome ${outcomeIndex + 1} numericValue`);
     }
-    if (outcome.supportNormals.length === 0) {
+    if (!Array.isArray(outcome.supportNormals) || outcome.supportNormals.length === 0) {
       throw new Error(`Physical die outcome ${outcomeIndex + 1} requires a support normal`);
+    }
+    if (outcome.supportNormals.length > MAXIMUM_SUPPORT_NORMALS_PER_OUTCOME) {
+      throw new Error(
+        `Physical die outcome ${outcomeIndex + 1} may contain at most ${MAXIMUM_SUPPORT_NORMALS_PER_OUTCOME} support normals`,
+      );
     }
     outcome.supportNormals.forEach((normal, normalIndex) =>
       assertFiniteVector(
@@ -285,37 +457,26 @@ export function assertValidPhysicalDieDefinition(definition: PhysicalDieDefiniti
         false,
       ),
     );
-    outcome.labelAnchors.forEach((anchor, anchorIndex) => {
-      if (!Number.isSafeInteger(anchor.faceIndex) || anchor.faceIndex < 0 || anchor.faceIndex >= faceCount) {
-        throw new Error(
-          `Physical die outcome ${outcomeIndex + 1} label anchor ${anchorIndex + 1} has an invalid face index`,
-        );
-      }
-      assertFiniteVector(
-        anchor.position,
-        `Physical die outcome ${outcomeIndex + 1} label anchor ${anchorIndex + 1} position`,
+    if (!Array.isArray(outcome.labelAnchors)) {
+      throw new Error(`Physical die outcome ${outcomeIndex + 1} label anchors must be an array`);
+    }
+    if (outcome.labelAnchors.length > MAXIMUM_LABEL_ANCHORS_PER_OUTCOME) {
+      throw new Error(
+        `Physical die outcome ${outcomeIndex + 1} may contain at most ${MAXIMUM_LABEL_ANCHORS_PER_OUTCOME} label anchors`,
       );
-      assertFiniteVector(
-        anchor.normal,
-        `Physical die outcome ${outcomeIndex + 1} label anchor ${anchorIndex + 1} normal`,
-        false,
-      );
-      assertFiniteVector(
-        anchor.up,
-        `Physical die outcome ${outcomeIndex + 1} label anchor ${anchorIndex + 1} up`,
-        false,
-      );
-      assertFiniteNumber(
-        anchor.scale,
-        `Physical die outcome ${outcomeIndex + 1} label anchor ${anchorIndex + 1} scale`,
-      );
-      if (anchor.scale <= 0) {
-        throw new Error(
-          `Physical die outcome ${outcomeIndex + 1} label anchor ${anchorIndex + 1} scale must be positive`,
-        );
-      }
-    });
+    }
+    outcome.labelAnchors.forEach((anchor, anchorIndex) =>
+      assertValidAnchor(
+        anchor,
+        `Physical die outcome ${outcomeIndex + 1} label anchor ${anchorIndex + 1}`,
+        faceCount,
+      ),
+    );
   });
+
+  if (definition.readableShape) {
+    assertValidReadablePolyhedron(definition.readableShape, definition.sides);
+  }
 }
 
 /**

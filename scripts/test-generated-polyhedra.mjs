@@ -114,6 +114,45 @@ try {
   assert.equal(validDefinition.collider.halfExtents[0], 0.5, 'collider clone is detached');
   assert.equal(validDefinition.outcomes[0].supportNormals[0][1], 1, 'outcome clone is detached');
 
+  function definitionFromReadableShape(shape, id) {
+    return {
+      id,
+      sides: shape.requestedFacets,
+      geometrySource: 'generated',
+      targeting: 'relabel',
+      radius: 1,
+      collisionScale: 1.02,
+      collider: {
+        kind: 'convex',
+        vertices: shape.vertices,
+        faces: shape.faces,
+      },
+      outcomes: shape.outcomes.map((outcome, index) => ({
+        index,
+        value: outcome.value,
+        result: outcome.value,
+        numericValue: outcome.value,
+        supportNormals: [outcome.settledUp],
+        labelAnchors: outcome.labels,
+      })),
+      readableShape: shape,
+    };
+  }
+
+  for (const sides of [1, 2, 3, 4]) {
+    assert.doesNotThrow(
+      () => assertValidPhysicalDieDefinition(definitionFromReadableShape(createReadablePolyhedron(sides), `readable:d${sides}`)),
+      `d${sides} readable geometry satisfies the strict physical contract`,
+    );
+  }
+
+  const invalidReadableDefinition = definitionFromReadableShape(createReadablePolyhedron(4), 'readable:invalid');
+  invalidReadableDefinition.readableShape.landingFaces = [999];
+  assert.throws(
+    () => assertValidPhysicalDieDefinition(invalidReadableDefinition),
+    /invalid landing face index/,
+  );
+
   assert.throws(
     () =>
       assertValidPhysicalDieDefinition({
@@ -152,6 +191,45 @@ try {
       }),
     /segments must be an integer from 3 to 1024/,
   );
+  assert.throws(
+    () =>
+      assertValidPhysicalDieDefinition({
+        ...validDefinition,
+        collider: {
+          kind: 'convex',
+          vertices: [
+            [0, 0, 0],
+            [1, 0, 0],
+            [2, 0, 0],
+            [0, 1, 0],
+          ],
+          faces: [
+            [0, 1, 2],
+            [0, 3, 1],
+            [1, 3, 2],
+            [0, 2, 3],
+          ],
+        },
+      }),
+    /must have non-zero area/,
+  );
+  assert.throws(
+    () =>
+      assertValidPhysicalDieDefinition({
+        ...validDefinition,
+        collider: {
+          kind: 'convex',
+          vertices: Array.from({ length: 4_097 }, (_entry, index) => [index, 0, 0]),
+          faces: [
+            [0, 1, 2],
+            [0, 3, 1],
+            [1, 3, 2],
+            [0, 2, 3],
+          ],
+        },
+      }),
+    /at most 4096 vertices/,
+  );
 
   console.log(JSON.stringify({
     ok: true,
@@ -163,6 +241,9 @@ try {
       'high-count representative',
       'physical definition validation',
       'physical definition clone isolation',
+      'readable geometry validation',
+      'bounded convex geometry',
+      'degenerate face rejection',
     ],
   }, null, 2));
 } finally {
