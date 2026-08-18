@@ -9,15 +9,49 @@ on:
     branches:
       - main
       - dev
+      - agent/core-hardening
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  format-baseline:
+    name: Normalize formatter baseline
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/agent/core-hardening' &&
+      github.event.head_commit.message != 'format workspace baseline'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/core-hardening
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.17.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm fmt
+      - name: Commit formatter output
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add --all
+          git commit -m "format workspace baseline"
+          git push origin HEAD:agent/core-hardening
+
   quality:
     name: Quality and type safety
     runs-on: ubuntu-latest
