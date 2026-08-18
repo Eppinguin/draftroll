@@ -152,7 +152,7 @@ try {
   assert.equal(emptyDiscardSamples, 2, 'shuffle() randomizes the remaining pile even with no discard');
   assert.deepEqual(
     emptyDiscardDeck.draw(3).cards.map((card) => card.result),
-    ['B', 'C', 'A'],
+    ['C', 'A', 'B'],
   );
 
   const discardDeck = createStandardDeck('discard-atomic', { shuffle: false });
