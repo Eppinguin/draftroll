@@ -114,6 +114,34 @@ try {
   assert.equal(validDefinition.collider.halfExtents[0], 0.5, 'collider clone is detached');
   assert.equal(validDefinition.outcomes[0].supportNormals[0][1], 1, 'outcome clone is detached');
 
+  const cubeVertices = [
+    [-1, -1, -1],
+    [1, -1, -1],
+    [1, 1, -1],
+    [-1, 1, -1],
+    [-1, -1, 1],
+    [1, -1, 1],
+    [1, 1, 1],
+    [-1, 1, 1],
+  ];
+  const cubeFaces = [
+    [0, 1, 2, 3],
+    [4, 7, 6, 5],
+    [0, 4, 5, 1],
+    [3, 2, 6, 7],
+    [0, 3, 7, 4],
+    [1, 5, 6, 2],
+  ];
+  const validConvexDefinition = {
+    ...validDefinition,
+    id: 'test:convex-cube',
+    collider: { kind: 'convex', vertices: cubeVertices, faces: cubeFaces },
+  };
+  assert.doesNotThrow(
+    () => assertValidPhysicalDieDefinition(validConvexDefinition),
+    'closed planar convex colliders satisfy the shared contract',
+  );
+
   function definitionFromReadableShape(shape, id) {
     return {
       id,
@@ -216,6 +244,47 @@ try {
   assert.throws(
     () =>
       assertValidPhysicalDieDefinition({
+        ...validConvexDefinition,
+        id: 'test:open-collider',
+        collider: { kind: 'convex', vertices: cubeVertices, faces: cubeFaces.slice(0, 5) },
+      }),
+    /must be a closed manifold/,
+  );
+  const nonPlanarVertices = cubeVertices.map((vertex) => [...vertex]);
+  nonPlanarVertices[6][2] = 0.5;
+  assert.throws(
+    () =>
+      assertValidPhysicalDieDefinition({
+        ...validConvexDefinition,
+        id: 'test:non-planar-collider',
+        collider: { kind: 'convex', vertices: nonPlanarVertices, faces: cubeFaces },
+      }),
+    /must be planar/,
+  );
+  const concaveVertices = [...cubeVertices.map((vertex) => [...vertex]), [0, 0, 0]];
+  const concaveFaces = [
+    [0, 1, 2, 3],
+    [4, 7, 6, 5],
+    [0, 4, 5, 1],
+    [0, 3, 7, 4],
+    [1, 5, 6, 2],
+    [3, 2, 8],
+    [2, 6, 8],
+    [6, 7, 8],
+    [7, 3, 8],
+  ];
+  assert.throws(
+    () =>
+      assertValidPhysicalDieDefinition({
+        ...validConvexDefinition,
+        id: 'test:concave-collider',
+        collider: { kind: 'convex', vertices: concaveVertices, faces: concaveFaces },
+      }),
+    /is not convex/,
+  );
+  assert.throws(
+    () =>
+      assertValidPhysicalDieDefinition({
         ...validDefinition,
         collider: {
           kind: 'convex',
@@ -243,6 +312,9 @@ try {
       'physical definition clone isolation',
       'readable geometry validation',
       'bounded convex geometry',
+      'closed convex manifold validation',
+      'non-planar face rejection',
+      'concave collider rejection',
       'degenerate face rejection',
     ],
   }, null, 2));
