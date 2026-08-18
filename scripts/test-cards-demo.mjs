@@ -24,6 +24,13 @@ assert.match(html, /id="card-draw-count"/);
 assert.match(demo, /createStandardDeck/);
 assert.match(demo, /draw\.toDisplayInput/);
 assert.match(demo, /draftroll\.display/);
+assert.match(demo, /drawCount\.disabled = busy/);
+assert.match(demo, /theme\.disabled = busy/);
+assert.match(demo, /jokers\.disabled = busy/);
+assert.match(
+  demo,
+  /if \(deck\.discarded > 0\) deck\.reshuffleDiscard\(\);\s*else deck\.shuffle\(\);/,
+);
 
 const ts = loadTypeScript();
 const tempRoot = await mkdtemp(join(tmpdir(), 'draftroll-card-behavior-'));
@@ -141,9 +148,11 @@ try {
   );
   emptyDiscardDeck.reshuffleDiscard();
   assert.equal(emptyDiscardSamples, 0, 'reshuffling an empty discard pile is a no-op');
+  emptyDiscardDeck.shuffle();
+  assert.equal(emptyDiscardSamples, 2, 'shuffle() randomizes the remaining pile even with no discard');
   assert.deepEqual(
     emptyDiscardDeck.draw(3).cards.map((card) => card.result),
-    ['A', 'B', 'C'],
+    ['B', 'C', 'A'],
   );
 
   const discardDeck = createStandardDeck('discard-atomic', { shuffle: false });
