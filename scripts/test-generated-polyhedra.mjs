@@ -10,7 +10,8 @@ const outDir = join(tempRoot, 'build');
 
 try {
   await mkdir(outDir, { recursive: true });
-  const source = join(projectRoot, 'packages/renderer/src/polyhedra.ts');
+  const polyhedraSource = join(projectRoot, 'packages/renderer/src/polyhedra.ts');
+  const physicalSource = join(projectRoot, 'packages/renderer/src/physical.ts');
   const compile = runTsc([
     '--strict',
     '--target', 'ES2022',
@@ -18,7 +19,8 @@ try {
     '--module', 'ESNext',
     '--moduleResolution', 'Bundler',
     '--outDir', outDir,
-    source,
+    polyhedraSource,
+    physicalSource,
   ], { cwd: projectRoot });
   if (compile.status !== 0) {
     process.stderr.write(compile.stdout);
@@ -26,8 +28,10 @@ try {
     throw new Error('Generated polyhedra compilation failed');
   }
   await writeFile(join(outDir, 'package.json'), '{"type":"module"}\n');
-  const module = await import(pathToFileURL(join(outDir, 'polyhedra.js')).href);
-  const { createReadablePolyhedron } = module;
+  const polyhedraModule = await import(pathToFileURL(join(outDir, 'polyhedra.js')).href);
+  const physicalModule = await import(pathToFileURL(join(outDir, 'physical.js')).href);
+  const { createReadablePolyhedron } = polyhedraModule;
+  const { assertValidPhysicalDieDefinition, clonePhysicalDieDefinition } = physicalModule;
 
   for (const sides of [4, 5, 7, 9, 12, 20, 100, 256]) {
     const shape = createReadablePolyhedron(sides);
@@ -71,9 +75,90 @@ try {
   assert.equal(huge.faces.length, 256);
   assert.equal(huge.requestedFacets, 300);
 
+  const validDefinition = {
+    id: 'test:d2',
+    sides: 2,
+    geometrySource: 'theme',
+    targeting: 'relabel',
+    radius: 0.7,
+    collisionScale: 1.02,
+    collider: { kind: 'box', halfExtents: [0.5, 0.5, 0.5] },
+    outcomes: [
+      {
+        index: 0,
+        value: 1,
+        result: 'one',
+        numericValue: 1,
+        supportNormals: [[0, 1, 0]],
+        labelAnchors: [],
+      },
+      {
+        index: 1,
+        value: 2,
+        result: 'two',
+        numericValue: 2,
+        supportNormals: [[0, -1, 0]],
+        labelAnchors: [],
+      },
+    ],
+  };
+  assert.doesNotThrow(() => assertValidPhysicalDieDefinition(validDefinition));
+  const clonedDefinition = clonePhysicalDieDefinition(validDefinition);
+  clonedDefinition.collider.halfExtents[0] = 0.25;
+  clonedDefinition.outcomes[0].supportNormals[0][1] = 0.5;
+  assert.equal(validDefinition.collider.halfExtents[0], 0.5, 'collider clone is detached');
+  assert.equal(validDefinition.outcomes[0].supportNormals[0][1], 1, 'outcome clone is detached');
+
+  assert.throws(
+    () =>
+      assertValidPhysicalDieDefinition({
+        ...validDefinition,
+        outcomes: validDefinition.outcomes.map((outcome, index) => ({
+          ...outcome,
+          index: index === 1 ? 0 : outcome.index,
+        })),
+      }),
+    /must use index 1/,
+  );
+  assert.throws(
+    () =>
+      assertValidPhysicalDieDefinition({
+        ...validDefinition,
+        collider: { kind: 'box', halfExtents: [Number.NaN, 0.5, 0.5] },
+      }),
+    /finite coordinates/,
+  );
+  assert.throws(
+    () =>
+      assertValidPhysicalDieDefinition({
+        ...validDefinition,
+        outcomes: [
+          { ...validDefinition.outcomes[0], supportNormals: [[0, 0, 0]] },
+          validDefinition.outcomes[1],
+        ],
+      }),
+    /must not be a zero vector/,
+  );
+  assert.throws(
+    () =>
+      assertValidPhysicalDieDefinition({
+        ...validDefinition,
+        collider: { kind: 'cylinder', radiusTop: 0.5, radiusBottom: 0.5, height: 0.2, segments: 2 },
+      }),
+    /segments must be an integer from 3 to 1024/,
+  );
+
   console.log(JSON.stringify({
     ok: true,
-    tested: ['d1-d3 duplicate supports', 'd4 tip labels', 'd5 edge labels', 'arbitrary exact dN', 'high-count representative'],
+    tested: [
+      'd1-d3 duplicate supports',
+      'd4 tip labels',
+      'd5 edge labels',
+      'arbitrary exact dN',
+      'high-count representative',
+      'physical definition validation',
+      'physical definition clone isolation',
+    ],
   }, null, 2));
 } finally {
   await rm(tempRoot, { recursive: true, force: true });
