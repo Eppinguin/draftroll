@@ -47,7 +47,7 @@ try {
   await writeFile(join(tempRoot, 'deck.js'), transpile(deckSource, 'deck.ts'));
   await writeFile(
     join(tempRoot, 'cards.js'),
-    transpile(cardsSource, 'cards.ts').replace("from './deck';", "from './deck.js';"),
+    transpile(cardsSource, 'cards.ts').replace(/from ['"]\.\/deck['"];/, "from './deck.js';"),
   );
 
   const deckModule = await import(pathToFileURL(join(tempRoot, 'deck.js')).href);
