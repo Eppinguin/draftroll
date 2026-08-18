@@ -30,7 +30,7 @@ jobs:
           run_install: false
       - uses: actions/setup-node@v4
         with:
-          node-version: 22.12.0
+          node-version: 22.13.0
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
@@ -47,7 +47,7 @@ jobs:
           run_install: false
       - uses: actions/setup-node@v4
         with:
-          node-version: 22.12.0
+          node-version: 22.13.0
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm test:core
@@ -65,7 +65,7 @@ jobs:
           run_install: false
       - uses: actions/setup-node@v4
         with:
-          node-version: 22.12.0
+          node-version: 22.13.0
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm test:release
@@ -82,7 +82,7 @@ jobs:
           run_install: false
       - uses: actions/setup-node@v4
         with:
-          node-version: 22.12.0
+          node-version: 22.13.0
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium
