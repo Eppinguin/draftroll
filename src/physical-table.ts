@@ -143,11 +143,21 @@ export class PhysicalTableRegistry {
   }
 
   bindCanonical(id: string, die: DieInstance): void {
+    const entries = this.entriesById.get(id);
+    const alreadyBound = entries?.find(
+      (candidate) => candidate.implementation === 'canonical' && candidate.die === die,
+    );
+    if (alreadyBound) return;
     const entry = this.requireEntry(id, 'canonical', (candidate) => candidate.die === null);
     entry.die = die;
   }
 
   bindVisual(id: string, visual: PhysicalDieVisualInstance): void {
+    const entries = this.entriesById.get(id);
+    const alreadyBound = entries?.find(
+      (candidate) => candidate.implementation === 'visual' && candidate.visual === visual,
+    );
+    if (alreadyBound) return;
     const entry = this.requireEntry(id, 'visual', (candidate) => candidate.visual === null);
     entry.visual = visual;
   }
