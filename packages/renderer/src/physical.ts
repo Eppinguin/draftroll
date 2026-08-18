@@ -150,7 +150,9 @@ const MAXIMUM_VERTICES_PER_FACE = 256;
 const MAXIMUM_SUPPORT_NORMALS_PER_OUTCOME = 64;
 const MAXIMUM_LABEL_ANCHORS_PER_OUTCOME = 64;
 const MINIMUM_NON_DEGENERATE_AREA_SQUARED = 1e-18;
-const CONVEX_GEOMETRY_EPSILON = 1e-8;
+// Collider assets may originate from Float32 geometry. Use a relative tolerance above the
+// ~2.4e-8 coordinate drift present in canonical meshes while still rejecting material concavity.
+const CONVEX_GEOMETRY_EPSILON = 5e-8;
 
 function cloneDefinitionVertex(value: PolyhedronVertex): PolyhedronVertex {
   return [value[0], value[1], value[2]];
