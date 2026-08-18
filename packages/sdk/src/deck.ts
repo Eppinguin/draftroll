@@ -3,11 +3,12 @@
  *
  * @packageDocumentation
  */
-import type {
-  CustomDiceDefinition,
-  CustomDieFace,
-  DisplayRollInput,
-  ExternalDieResult,
+import {
+  DEFAULT_RUNTIME_VALIDATION_LIMITS,
+  type CustomDiceDefinition,
+  type CustomDieFace,
+  type DisplayRollInput,
+  type ExternalDieResult,
 } from '../../protocol/src/index';
 
 /**
@@ -77,6 +78,8 @@ type CardReference = Readonly<{
 }>;
 
 const MAXIMUM_DECK_SIZE = 100_000;
+const MAXIMUM_DECK_DEFINITIONS = DEFAULT_RUNTIME_VALIDATION_LIMITS.maximumCustomFaces;
+const MAXIMUM_DISPLAY_CARDS = DEFAULT_RUNTIME_VALIDATION_LIMITS.maximumDice;
 
 function cloneMetadata(
   value?: Readonly<Record<string, unknown>>,
@@ -170,6 +173,11 @@ export class DraftrollDeck {
     this.id = id.trim();
     if (!this.id) throw new Error('A deck ID is required');
     if (!cards.length) throw new Error(`Deck '${this.id}' requires at least one card`);
+    if (cards.length > MAXIMUM_DECK_DEFINITIONS) {
+      throw new Error(
+        `Deck '${this.id}' may define at most ${MAXIMUM_DECK_DEFINITIONS} distinct card faces`,
+      );
+    }
     this.sampleIndex = samplerFromRandom(options.random);
 
     let totalCopies = 0;
@@ -276,22 +284,29 @@ export class DraftrollDeck {
       deckId: this.id,
       cards,
       total,
-      toDisplayInput: (options: DraftrollCardDisplayOptions = {}): DisplayRollInput => ({
-        mode: 'display',
-        dice: references.map((reference) => this.externalResult(reference)),
-        total,
-        name: options.name,
-        expression: options.expression,
-        themeId: options.themeId,
-        annotation: options.annotation,
-        comment: options.comment,
-        customDice: [cloneDefinition(this.definitionState)],
-        metadata: {
-          ...cloneMetadata(options.metadata, `Deck '${this.id}' display metadata`),
-          deckId: this.id,
-          cardDraw: true,
-        },
-      }),
+      toDisplayInput: (options: DraftrollCardDisplayOptions = {}): DisplayRollInput => {
+        if (references.length > MAXIMUM_DISPLAY_CARDS) {
+          throw new Error(
+            `Card draw contains ${references.length} cards; Draftroll display input supports at most ${MAXIMUM_DISPLAY_CARDS}`,
+          );
+        }
+        return {
+          mode: 'display',
+          dice: references.map((reference) => this.externalResult(reference)),
+          total,
+          name: options.name,
+          expression: options.expression,
+          themeId: options.themeId,
+          annotation: options.annotation,
+          comment: options.comment,
+          customDice: [cloneDefinition(this.definitionState)],
+          metadata: {
+            ...cloneMetadata(options.metadata, `Deck '${this.id}' display metadata`),
+            deckId: this.id,
+            cardDraw: true,
+          },
+        };
+      },
     };
   }
 
@@ -367,20 +382,21 @@ export class DraftrollDeck {
   }
 
   private externalResult(reference: CardReference): ExternalDieResult {
-    const card = this.snapshotCard(reference);
+    const face = this.face(reference);
+    const id = this.cardId(reference);
     return {
-      id: card.id,
+      id,
       type: this.id,
       customDiceId: this.id,
-      faceIndex: card.faceIndex,
-      result: card.result,
-      numericValue: card.numericValue,
+      faceIndex: reference.faceIndex,
+      result: face.result,
+      numericValue: this.numericValue(reference),
       kept: true,
       generatedBy: 'external',
       metadata: {
-        ...cloneMetadata(card.metadata, `Card '${card.id}' metadata`),
+        ...cloneMetadata(face.metadata, `Card '${id}' metadata`),
         deckId: this.id,
-        copyIndex: card.copyIndex,
+        copyIndex: reference.copyIndex,
       },
     };
   }
