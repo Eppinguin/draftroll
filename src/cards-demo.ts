@@ -96,6 +96,9 @@ function renderDeckState(): void {
   discarded.textContent = String(deck.discarded);
   const top = deck.discardedCards.at(-1);
   discardTop.textContent = top ? top.label : '—';
+  drawCount.disabled = busy;
+  theme.disabled = busy;
+  jokers.disabled = busy;
   drawButton.disabled = busy || deck.remaining === 0;
   deckButton.disabled = busy || deck.remaining === 0;
   shuffleButton.disabled = busy;
@@ -149,12 +152,13 @@ async function drawCards(): Promise<void> {
 function shuffleAll(): void {
   if (busy) return;
   sweepCurrentHand();
-  deck.reshuffleDiscard();
+  if (deck.discarded > 0) deck.reshuffleDiscard();
+  else deck.shuffle();
   currentHand = [];
   void draftroll.clearDice();
   renderHand();
   renderDeckState();
-  status.textContent = 'Discard returned and deck shuffled';
+  status.textContent = 'Deck shuffled';
 }
 
 function resetDeck(): void {
