@@ -258,9 +258,12 @@ export function evaluateStructuredInput(
     const dice: NormalizedDieResult[] = [];
     const templatesByRoot = new Map<string, PlannedDie>();
     const rootByDieId = new Map<string, string>();
+    const initialIds = new Set<string>();
     for (let index = 0; index < planned.length; index += 1) {
       const die = planned[index];
       const id = die.id || `die_${index + 1}`;
+      if (initialIds.has(id)) throw new Error(`Duplicate die id '${id}' in structured roll`);
+      initialIds.add(id);
       const template = { ...die, id };
       const resolved = resolveStructuredDie(template, rng, resolveCustom);
       const normalized = normalizedStructuredDie(

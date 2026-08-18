@@ -95,6 +95,7 @@ export type DraftrollEffectOutcome = 'positive' | 'neutral' | 'negative' | 'none
  * @public
  */
 export interface DraftrollPhysicalVisual {
+  /** Logical die ID from the originating roll; it is not a table-global runtime identifier. */
   id: string;
   /** Original normalized die type or custom die identifier. */
   type: string;
@@ -149,6 +150,7 @@ export interface RendererPerformanceOptions {
  * @public
  */
 export interface DraftrollFallbackVisual {
+  /** Logical die ID from the originating roll; it is not a table-global runtime identifier. */
   id: string;
   /** Original normalized die type. */
   type: string;
@@ -638,7 +640,7 @@ interface TableRollContextEntry {
   expression?: string;
   physicalStart: number;
   physicalCount: number;
-  /** Stable IDs make group ownership independent from internal visual storage/ranges. */
+  /** Roll-scoped logical die IDs retained for semantic reporting only. */
   dieIds: string[];
   fallbackStart: number;
   fallbackCount: number;
@@ -948,6 +950,16 @@ export class DraftrollRenderer implements DiceRenderer {
     } = {},
     presentationGeneration = this.presentationGeneration,
   ): Promise<PreparedRollPresentation> {
+    const logicalIds = new Set<string>();
+    for (const die of result.dice) {
+      if (logicalIds.has(die.id)) {
+        throw new UnsupportedRollError(
+          `Normalized roll contains duplicate die id '${die.id}'`,
+          result,
+        );
+      }
+      logicalIds.add(die.id);
+    }
     const requestedIds = internal.dieIds ?? options.dieIds;
     const selectedIds = requestedIds ? new Set(requestedIds) : null;
     const dice = selectedIds ? result.dice.filter((die) => selectedIds.has(die.id)) : result.dice;

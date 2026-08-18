@@ -6,7 +6,6 @@ export interface PhysicalLaunchBounds {
 }
 
 export interface PhysicalLaunchParticipant {
-  id: string;
   radius: number;
   coinLike?: boolean;
 }

@@ -139,6 +139,7 @@ The renderer remains responsible for geometry, Cannon-es planning, fixed-face sh
 - local viewport-aware trajectory planning
 - persistent in-flight physical additions
 - one physical-table registry as the sole owner of live canonical/generated/custom runtime bindings
+- normalized die IDs are logical identities scoped to one roll; live table ownership, planner assignments, launch state, effects, and group membership use physical/canonical/visual indexes instead of die-ID strings, so additive/concurrent rolls may safely reuse IDs such as `die_1`
 - theme geometry profiles change render silhouettes/labels only; physical definitions, colliders, support topology, and authoritative outcomes remain unchanged
 - renderer-owned generated dice share built-in theme surface maps and rounded-box semantics where their support geometry is cube-based (d3), while retaining independent physical outcome mappings
 - shape-symmetry targeting diagnostics without changing normalized results

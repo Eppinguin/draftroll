@@ -1088,22 +1088,26 @@ function clearGenericPhysicalVisuals(): void {
   for (const entry of physicalTable.visualEntries()) {
     const visual = entry.visual;
     if (!visual) continue;
+    const visualIndex = entry.visualIndex;
+    if (visualIndex === null) throw new Error('Physical table visual entry has no visual index.');
     scene.remove(visual.group);
     visual.dispose();
-    physicalTable.unbindVisual(entry.id);
+    physicalTable.unbindVisualAt(visualIndex, visual);
   }
 }
 
 function rebindCanonicalPhysicalTableRuntime(): void {
-  const canonicalEntries = physicalTable.canonicalEntries();
-  if (canonicalEntries.length === dice.length) {
-    dice.forEach((die, index) => physicalTable.bindCanonical(canonicalEntries[index].id, die));
+  if (physicalTable.canonicalCount !== dice.length) {
+    throw new Error(
+      `Physical table canonical runtime count mismatch: ${physicalTable.canonicalCount} entries for ${dice.length} dice`,
+    );
   }
+  dice.forEach((die, canonicalIndex) => physicalTable.bindCanonicalAt(canonicalIndex, die));
 }
 
 function physicalTableSpec(spec: DraftrollPhysicalVisual) {
   return {
-    id: spec.id,
+    dieId: spec.id,
     implementation: usesCanonicalPhysicalImplementation(spec)
       ? ('canonical' as const)
       : ('visual' as const),
@@ -1143,11 +1147,11 @@ function clearDice(): void {
 function spawnGenericPhysicalVisuals(specs: readonly DraftrollPhysicalVisual[]): void {
   clearGenericPhysicalVisuals();
   if (specs.length === 0) return;
-  specs.forEach((spec) => {
+  specs.forEach((spec, visualIndex) => {
     const visual = new PhysicalDieVisualInstance(spec);
     visual.prepare();
     scene.add(visual.group);
-    physicalTable.bindVisual(spec.id, visual);
+    physicalTable.bindVisualAt(visualIndex, visual);
   });
 }
 
@@ -1779,6 +1783,7 @@ function normalizeVisualOrder(
 
 interface ActiveTableRollGroup {
   groupId: string;
+  /** Logical die IDs retained only for semantic/reporting state. */
   dieIds?: string[];
   actorLabel?: string;
   rollLabel?: string;
@@ -1788,6 +1793,21 @@ interface ActiveTableRollGroup {
   fallbackStart: number;
   fallbackCount: number;
   visualCount: number;
+  /** Exact runtime table membership; unlike logical die IDs, these are unique on the live table. */
+  physicalIndexes: number[];
+  fallbackIndexes: number[];
+}
+
+function tableIndexRange(start: number, count: number): number[] {
+  return Array.from({ length: Math.max(0, count) }, (_value, offset) => start + offset);
+}
+
+function readTableIndexes(value: unknown, start: number, count: number): number[] {
+  if (!Array.isArray(value)) return tableIndexRange(start, count);
+  const indexes = value
+    .filter((entry): entry is number => Number.isSafeInteger(entry) && entry >= 0)
+    .map((entry) => Math.floor(entry));
+  return [...new Set(indexes)].toSorted((left, right) => left - right);
 }
 
 function readActiveTableRolls(): ActiveTableRollGroup[] {
@@ -1808,6 +1828,10 @@ function readActiveTableRolls(): ActiveTableRollGroup[] {
       )
     )
       return [];
+    const normalizedPhysicalStart = Math.max(0, Math.floor(physicalStart));
+    const normalizedPhysicalCount = Math.max(0, Math.floor(physicalCount));
+    const normalizedFallbackStart = Math.max(0, Math.floor(fallbackStart));
+    const normalizedFallbackCount = Math.max(0, Math.floor(fallbackCount));
     return [
       {
         groupId: typeof entry.groupId === 'string' ? entry.groupId : `table-roll-${physicalStart}`,
@@ -1817,11 +1841,21 @@ function readActiveTableRolls(): ActiveTableRollGroup[] {
         actorLabel: typeof entry.actorLabel === 'string' ? entry.actorLabel : undefined,
         rollLabel: typeof entry.rollLabel === 'string' ? entry.rollLabel : undefined,
         total,
-        physicalStart: Math.max(0, Math.floor(physicalStart)),
-        physicalCount: Math.max(0, Math.floor(physicalCount)),
-        fallbackStart: Math.max(0, Math.floor(fallbackStart)),
-        fallbackCount: Math.max(0, Math.floor(fallbackCount)),
+        physicalStart: normalizedPhysicalStart,
+        physicalCount: normalizedPhysicalCount,
+        fallbackStart: normalizedFallbackStart,
+        fallbackCount: normalizedFallbackCount,
         visualCount: Math.max(0, Math.floor(visualCount)),
+        physicalIndexes: readTableIndexes(
+          entry.physicalIndexes,
+          normalizedPhysicalStart,
+          normalizedPhysicalCount,
+        ),
+        fallbackIndexes: readTableIndexes(
+          entry.fallbackIndexes,
+          normalizedFallbackStart,
+          normalizedFallbackCount,
+        ),
       },
     ];
   });
@@ -1830,10 +1864,21 @@ function readActiveTableRolls(): ActiveTableRollGroup[] {
 interface CanonicalLaunchParticipant {
   die: DieInstance;
   index: number;
-  id: string;
+  physicalIndex: number;
 }
 
-type GenericLaunchParticipant = PendingPhysicalLaunchParticipant;
+interface GenericLaunchParticipant extends PendingPhysicalLaunchParticipant {
+  physicalIndex: number;
+}
+
+function pendingGenericLaunchParticipants(): GenericLaunchParticipant[] {
+  return getPendingPhysicalLaunchParticipants(physicalTable.visualInstances()).map((entry) => ({
+    visualIndex: entry.visualIndex,
+    radius: entry.radius,
+    coinLike: entry.coinLike,
+    physicalIndex: physicalTable.physicalIndexForVisual(entry.visualIndex),
+  }));
+}
 
 function toLaunchState(state: PhysicalLaunchState): LaunchState {
   return {
@@ -1854,12 +1899,11 @@ function createMixedPhysicalLaunchStates(
   delayOffset = 0,
 ): LaunchState[] {
   const participants: PhysicalLaunchParticipant[] = [
-    ...canonical.map(({ die, id }) => ({
-      id,
+    ...canonical.map(({ die }) => ({
       radius: DIE_COLLIDER_RADIUS[die.kind],
       coinLike: die.kind === 'coin',
     })),
-    ...generic.map((entry) => ({ ...entry })),
+    ...generic.map(({ radius, coinLike }) => ({ radius, coinLike })),
   ];
   const generated = createPhysicalLaunchStates(participants, {
     bounds: screenBounds,
@@ -1873,7 +1917,7 @@ function createMixedPhysicalLaunchStates(
   assignPendingPhysicalLaunchStates(
     physicalTable.visualInstances(),
     generic.map((entry, index) => ({
-      id: entry.id,
+      visualIndex: entry.visualIndex,
       state: generated[canonical.length + index],
     })),
   );
@@ -1884,27 +1928,33 @@ function allCanonicalLaunchParticipants(): CanonicalLaunchParticipant[] {
   return dice.map((die, index) => ({
     die,
     index,
-    id: physicalVisualId(physicalTable.physicalIndexForCanonical(index)),
+    physicalIndex: physicalTable.physicalIndexForCanonical(index),
   }));
+}
+
+function groupContainsPhysicalIndex(group: ActiveTableRollGroup, physicalIndex: number): boolean {
+  return group.physicalIndexes.includes(physicalIndex);
 }
 
 function createLaunchStates(swipe: THREE.Vector2 | undefined, seed: string): LaunchState[] {
   const canonical = allCanonicalLaunchParticipants();
-  const generic = getPendingPhysicalLaunchParticipants(physicalTable.visualInstances());
-  const tableRolls = readActiveTableRolls().filter((group) =>
-    group.dieIds?.some(
-      (id) =>
-        canonical.some((entry) => entry.id === id) || generic.some((entry) => entry.id === id),
-    ),
+  const generic = pendingGenericLaunchParticipants();
+  const tableRolls = readActiveTableRolls().filter(
+    (group) =>
+      canonical.some((entry) => groupContainsPhysicalIndex(group, entry.physicalIndex)) ||
+      generic.some((entry) => groupContainsPhysicalIndex(group, entry.physicalIndex)),
   );
-  if (tableRolls.length > 1 && tableRolls.every((group) => (group.dieIds?.length ?? 0) > 0)) {
+  if (tableRolls.length > 1) {
     const states: Array<LaunchState | undefined> = Array.from({ length: canonical.length });
     let assignedGeneric = 0;
     for (let groupIndex = 0; groupIndex < tableRolls.length; groupIndex += 1) {
       const group = tableRolls[groupIndex];
-      const ids = new Set(group.dieIds ?? []);
-      const groupCanonical = canonical.filter((entry) => ids.has(entry.id));
-      const groupGeneric = generic.filter((entry) => ids.has(entry.id));
+      const groupCanonical = canonical.filter((entry) =>
+        groupContainsPhysicalIndex(group, entry.physicalIndex),
+      );
+      const groupGeneric = generic.filter((entry) =>
+        groupContainsPhysicalIndex(group, entry.physicalIndex),
+      );
       if (groupCanonical.length + groupGeneric.length === 0) continue;
       const lane = THREE.MathUtils.lerp(-0.82, 0.82, groupIndex / (tableRolls.length - 1));
       const random = createSeededRandom(`${seed}:${group.groupId}`);
@@ -2098,10 +2148,9 @@ function createWorkerPhysicalEntries(states: readonly LaunchState[]): WorkerPhys
   if (genericEntries.length !== physicalTable.visualCount) {
     throw new Error('Generic physical visuals do not match the active physical descriptors.');
   }
-  const genericById = new Map(genericEntries.map((entry) => [entry.id, entry] as const));
-  if (genericById.size !== genericEntries.length) {
-    throw new Error('Generic physical visual ids must be unique.');
-  }
+  const genericByVisualIndex = new Map(
+    genericEntries.map((entry) => [entry.visualIndex, entry] as const),
+  );
   return activePhysicalSpecs.map((spec, physicalIndex) => {
     const canonicalIndex = physicalTable.canonicalIndex(physicalIndex);
     if (canonicalIndex >= 0) {
@@ -2124,7 +2173,11 @@ function createWorkerPhysicalEntries(states: readonly LaunchState[]): WorkerPhys
         captureImpacts: true,
       };
     }
-    const generic = genericById.get(spec.id);
+    const visualIndex = physicalTable.visualIndex(physicalIndex);
+    if (visualIndex < 0) {
+      throw new Error(`Generic physical visual index is missing at ${physicalIndex}.`);
+    }
+    const generic = genericByVisualIndex.get(visualIndex);
     if (!generic) throw new Error(`Generic physical state is missing at ${physicalIndex}.`);
     return {
       definition: generic.definition,
@@ -2258,10 +2311,15 @@ function applyShapeSymmetryTargets(plan: RollPlan, preservedPhysicalCount = 0): 
 const mainThreadPhysicalPlanner = new PhysicalRollPlanner();
 
 function activeGenericPlanAssignments() {
-  return physicalTable.visualEntries().map((entry) => ({
-    id: entry.id,
-    physicalIndex: entry.physicalIndex,
-  }));
+  return physicalTable.visualEntries().map((entry) => {
+    if (entry.visualIndex === null) {
+      throw new Error(`Physical table visual index is missing at ${entry.physicalIndex}.`);
+    }
+    return {
+      visualIndex: entry.visualIndex,
+      physicalIndex: entry.physicalIndex,
+    };
+  });
 }
 
 function plannerResultAsRollPlan(
@@ -3110,16 +3168,16 @@ function appendPhysicalDice(
 
 function appendGenericPhysicalVisuals(
   specs: readonly DraftrollPhysicalVisual[],
+  firstVisualIndex: number,
 ): PhysicalDieVisualInstance[] {
   if (specs.length === 0) return [];
-  const appended = specs.map((spec) => {
+  return specs.map((spec, offset) => {
     const visual = new PhysicalDieVisualInstance(spec);
     visual.prepare();
     scene.add(visual.group);
-    physicalTable.bindVisual(spec.id, visual);
+    physicalTable.bindVisualAt(firstVisualIndex + offset, visual);
     return visual;
   });
-  return appended;
 }
 
 function appendFallbackVisuals(
@@ -3143,12 +3201,13 @@ function appendFallbackVisuals(
 
 function removeAppendedGenericPhysicalVisuals(
   appended: readonly PhysicalDieVisualInstance[],
+  firstVisualIndex: number,
 ): void {
-  for (const visual of appended) {
+  appended.forEach((visual, offset) => {
     scene.remove(visual.group);
     visual.dispose();
-  }
-  for (const visual of appended) physicalTable.unbindVisual(visual.spec.id);
+    physicalTable.unbindVisualAt(firstVisualIndex + offset, visual);
+  });
 }
 
 function removeAppendedFallbackVisuals(appended: readonly FallbackVisualInstance[]): void {
@@ -3180,6 +3239,18 @@ function incomingTableRolls(
     return raw.flatMap((value, index) => {
       if (!isRecord(value)) return [];
       const entry = value;
+      const localPhysicalStart = Math.max(0, Math.floor(Number(entry.physicalStart) || 0));
+      const localPhysicalCount = Math.max(
+        0,
+        Math.floor(Number(entry.physicalCount) || physicalCount),
+      );
+      const localFallbackStart = Math.max(0, Math.floor(Number(entry.fallbackStart) || 0));
+      const localFallbackCount = Math.max(
+        0,
+        Math.floor(Number(entry.fallbackCount) || fallbackCount),
+      );
+      const resolvedPhysicalStart = physicalStart + localPhysicalStart;
+      const resolvedFallbackStart = fallbackStart + localFallbackStart;
       return [
         {
           groupId:
@@ -3192,14 +3263,16 @@ function incomingTableRolls(
           actorLabel: typeof entry.actorLabel === 'string' ? entry.actorLabel : undefined,
           rollLabel: typeof entry.rollLabel === 'string' ? entry.rollLabel : undefined,
           total: Number.isFinite(Number(entry.total)) ? Number(entry.total) : 0,
-          physicalStart: physicalStart + Math.max(0, Math.floor(Number(entry.physicalStart) || 0)),
-          physicalCount: Math.max(0, Math.floor(Number(entry.physicalCount) || physicalCount)),
-          fallbackStart: fallbackStart + Math.max(0, Math.floor(Number(entry.fallbackStart) || 0)),
-          fallbackCount: Math.max(0, Math.floor(Number(entry.fallbackCount) || fallbackCount)),
+          physicalStart: resolvedPhysicalStart,
+          physicalCount: localPhysicalCount,
+          fallbackStart: resolvedFallbackStart,
+          fallbackCount: localFallbackCount,
           visualCount: Math.max(
             0,
-            Math.floor(Number(entry.visualCount) || physicalCount + fallbackCount),
+            Math.floor(Number(entry.visualCount) || localPhysicalCount + localFallbackCount),
           ),
+          physicalIndexes: tableIndexRange(resolvedPhysicalStart, localPhysicalCount),
+          fallbackIndexes: tableIndexRange(resolvedFallbackStart, localFallbackCount),
         },
       ];
     });
@@ -3219,6 +3292,8 @@ function incomingTableRolls(
       fallbackStart,
       fallbackCount,
       visualCount: physicalCount + fallbackCount,
+      physicalIndexes: tableIndexRange(physicalStart, physicalCount),
+      fallbackIndexes: tableIndexRange(fallbackStart, fallbackCount),
     },
   ];
 }
@@ -3267,15 +3342,25 @@ function mergeTableRollGroups(
       continue;
     }
     const previous = merged[index];
+    const physicalIndexes = [
+      ...new Set([...previous.physicalIndexes, ...addition.physicalIndexes]),
+    ].toSorted((left, right) => left - right);
+    const fallbackIndexes = [
+      ...new Set([...previous.fallbackIndexes, ...addition.fallbackIndexes]),
+    ].toSorted((left, right) => left - right);
     merged[index] = {
       ...previous,
       actorLabel: addition.actorLabel ?? previous.actorLabel,
       rollLabel: addition.rollLabel ?? previous.rollLabel,
       total: singleRollCompletedTotal ?? previous.total,
       dieIds: [...new Set([...(previous.dieIds ?? []), ...(addition.dieIds ?? [])])],
-      physicalCount: previous.physicalCount + addition.physicalCount,
-      fallbackCount: previous.fallbackCount + addition.fallbackCount,
-      visualCount: previous.visualCount + addition.visualCount,
+      physicalStart: physicalIndexes[0] ?? previous.physicalStart,
+      physicalCount: physicalIndexes.length,
+      fallbackStart: fallbackIndexes[0] ?? previous.fallbackStart,
+      fallbackCount: fallbackIndexes.length,
+      visualCount: physicalIndexes.length + fallbackIndexes.length,
+      physicalIndexes,
+      fallbackIndexes,
     };
   }
   return merged;
@@ -3352,6 +3437,7 @@ async function appendTableRoll(request: DiceRollRequest): Promise<DraftrollRollC
   }
   if (dissolveAnimation) cancelDissolve(false);
   const existingCanonicalCount = dice.length;
+  const existingVisualCount = physicalTable.visualCount;
   const existingPhysicalCount = activePhysicalSpecs.length;
   const existingFallbackCount = activeFallbackSpecs.length;
   if (
@@ -3394,7 +3480,10 @@ async function appendTableRoll(request: DiceRollRequest): Promise<DraftrollRollC
     normalized.canonicalThemes,
     normalized.canonicalPhysics,
   );
-  const appendedAdditional = appendGenericPhysicalVisuals(normalized.genericPhysical);
+  const appendedAdditional = appendGenericPhysicalVisuals(
+    normalized.genericPhysical,
+    existingVisualCount,
+  );
   const appendedFallbacks = appendFallbackVisuals(
     normalized.fallbacks,
     String(normalized.seed ?? `table-add:${Date.now()}`),
@@ -3406,11 +3495,9 @@ async function appendTableRoll(request: DiceRollRequest): Promise<DraftrollRollC
     activeTargets.push(...normalized.canonicalResults);
     activeOutcomes.push(...normalized.canonicalOutcomes);
     activePhysicalSpecs.push(...normalized.physical.map(clonePhysicalVisual));
-    normalized.canonicalPhysicalIndexes.forEach((physicalIndex, index) => {
-      const spec = normalized.physical[physicalIndex];
-      const die = appended[index];
-      if (spec && die) physicalTable.bindCanonical(spec.id, die);
-    });
+    appended.forEach((die, index) =>
+      physicalTable.bindCanonicalAt(existingCanonicalCount + index, die),
+    );
     activeFallbackSpecs.push(...normalized.fallbacks);
     normalized.visualOrder.forEach((entry) =>
       activeVisualOrder.push(
@@ -3451,11 +3538,11 @@ async function appendTableRoll(request: DiceRollRequest): Promise<DraftrollRollC
     const appendedCanonical = appended.map((die, index) => ({
       die,
       index: existingCanonicalCount + index,
-      id: physicalVisualId(physicalTable.physicalIndexForCanonical(existingCanonicalCount + index)),
+      physicalIndex: physicalTable.physicalIndexForCanonical(existingCanonicalCount + index),
     }));
     const newStates = createMixedPhysicalLaunchStates(
       appendedCanonical,
-      getPendingPhysicalLaunchParticipants(physicalTable.visualInstances()),
+      pendingGenericLaunchParticipants(),
       random,
       direction,
       lane,
@@ -3488,7 +3575,7 @@ async function appendTableRoll(request: DiceRollRequest): Promise<DraftrollRollC
     registered.pending.reject(error instanceof Error ? error : new Error(String(error)));
     if (generation !== presentationGeneration) throw presentationClearedError();
     removeAppendedDice(appended);
-    removeAppendedGenericPhysicalVisuals(appendedAdditional);
+    removeAppendedGenericPhysicalVisuals(appendedAdditional, existingVisualCount);
     removeAppendedFallbackVisuals(appendedFallbacks);
     activeKinds = previous.activeKinds;
     activeThemes = previous.activeThemes;
@@ -3690,30 +3777,19 @@ function readRenderedDieState(dieId: string): { kept?: boolean; generatedBy?: st
   return undefined;
 }
 
-function physicalVisualId(index: number): string {
-  return (
-    activeVisualOrder.find((entry) => entry.kind === 'physical' && entry.index === index)?.dieId ??
-    activePhysicalSpecs[index]?.id ??
-    `physical_${index}`
-  );
+function physicalRuntimeKey(index: number): string {
+  return `physical:${index}`;
 }
 
-function fallbackVisualId(index: number): string {
-  return (
-    activeVisualOrder.find((entry) => entry.kind === 'fallback' && entry.index === index)?.dieId ??
-    activeFallbackSpecs[index]?.id ??
-    `fallback_${index}`
-  );
+function fallbackRuntimeKey(index: number): string {
+  return `fallback:${index}`;
 }
 
 function effectGroupId(kind: 'physical' | 'fallback', index: number): string {
-  const dieId = kind === 'physical' ? physicalVisualId(index) : fallbackVisualId(index);
-  const group = readActiveTableRolls().find(
-    (entry) =>
-      entry.dieIds?.includes(dieId) ??
-      (kind === 'physical'
-        ? index >= entry.physicalStart && index < entry.physicalStart + entry.physicalCount
-        : index >= entry.fallbackStart && index < entry.fallbackStart + entry.fallbackCount),
+  const group = readActiveTableRolls().find((entry) =>
+    kind === 'physical'
+      ? entry.physicalIndexes.includes(index)
+      : entry.fallbackIndexes.includes(index),
   );
   if (group) return group.groupId;
   if (typeof activeContext.rollId === 'string') return activeContext.rollId;
@@ -3735,13 +3811,13 @@ function markOutcomeEffectsThrough(plan: RollPlan, time: number): void {
     plan.settleTimes?.length === plan.dieCount ? plan.settleTimes : deriveDieSettleTimes(plan);
   plan.settleTimes = settleTimes;
   consumeSettledVisualIndexes(
-    Array.from({ length: plan.dieCount }, (_value, index) => physicalVisualId(index)),
+    Array.from({ length: plan.dieCount }, (_value, index) => physicalRuntimeKey(index)),
     settleTimes,
     time,
     playedOutcomeEffectIds,
   );
   consumeSettledVisualIndexes(
-    activeFallbackSpecs.map((_spec, index) => fallbackVisualId(index)),
+    activeFallbackSpecs.map((_spec, index) => fallbackRuntimeKey(index)),
     fallbackVisuals.map((visual) => visual.getSettleTime(plan.duration)),
     time,
     playedOutcomeEffectIds,
@@ -3753,13 +3829,13 @@ function playSettledOutcomeEffects(plan: RollPlan, currentTime: number): void {
     plan.settleTimes?.length === plan.dieCount ? plan.settleTimes : deriveDieSettleTimes(plan);
   plan.settleTimes = settleTimes;
   const physicalIndexes = consumeSettledVisualIndexes(
-    Array.from({ length: plan.dieCount }, (_value, index) => physicalVisualId(index)),
+    Array.from({ length: plan.dieCount }, (_value, index) => physicalRuntimeKey(index)),
     settleTimes,
     currentTime,
     playedOutcomeEffectIds,
   );
   const fallbackIndexes = consumeSettledVisualIndexes(
-    activeFallbackSpecs.map((_spec, index) => fallbackVisualId(index)),
+    activeFallbackSpecs.map((_spec, index) => fallbackRuntimeKey(index)),
     fallbackVisuals.map((visual) => visual.getSettleTime(plan.duration)),
     currentTime,
     playedOutcomeEffectIds,
@@ -3814,20 +3890,12 @@ function outcomeSummaryForGroups(groups: readonly ActiveTableRollGroup[]): {
   let positive = false;
   let negative = false;
   for (const group of groups) {
-    for (
-      let index = group.physicalStart;
-      index < group.physicalStart + group.physicalCount;
-      index += 1
-    ) {
+    for (const index of group.physicalIndexes) {
       const outcome = physicalOutcomeAt(index);
       if (outcome === 'positive') positive = true;
       if (outcome === 'negative') negative = true;
     }
-    for (
-      let index = group.fallbackStart;
-      index < group.fallbackStart + group.fallbackCount;
-      index += 1
-    ) {
+    for (const index of group.fallbackIndexes) {
       if (activeFallbackSpecs[index]?.outcome === 'positive') positive = true;
       if (activeFallbackSpecs[index]?.outcome === 'negative') negative = true;
     }
@@ -3851,6 +3919,8 @@ function announceCompletedOutcomeOnce(tableRolls: readonly ActiveTableRollGroup[
             fallbackStart: 0,
             fallbackCount: activeFallbackSpecs.length,
             visualCount: activePhysicalSpecs.length + activeFallbackSpecs.length,
+            physicalIndexes: tableIndexRange(0, activePhysicalSpecs.length),
+            fallbackIndexes: tableIndexRange(0, activeFallbackSpecs.length),
           },
         ];
   const newlyCompleted = groups.filter((group) => !announcedOutcomeGroupIds.has(group.groupId));
@@ -3957,6 +4027,8 @@ function revealResults(): void {
             fallbackStart: 0,
             fallbackCount: activeFallbackSpecs.length,
             visualCount: activePhysicalSpecs.length + activeFallbackSpecs.length,
+            physicalIndexes: tableIndexRange(0, activePhysicalSpecs.length),
+            fallbackIndexes: tableIndexRange(0, activeFallbackSpecs.length),
           },
         ],
   );
@@ -4479,7 +4551,7 @@ function finishDieDrag(event: PointerEvent, cancelled = false): boolean {
       detail: {
         action: 'move',
         dieIndex: current.entry.physicalIndex,
-        dieId: current.entry.id,
+        dieId: current.entry.dieId,
         position: { x: position.x, y: position.y, z: position.z },
       },
       bubbles: true,

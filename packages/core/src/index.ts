@@ -851,7 +851,11 @@ export function normalizeExternalRoll(
   if (decoded.mode !== 'display') throw new Error('normalizeExternalRoll requires display mode');
   input = decoded;
   const inlineCustomDice = customDiceMap(input.customDice);
+  const usedDieIds = new Set<string>();
   const dice: NormalizedDieResult[] = input.dice.map((die, index) => {
+    const id = die.id || `die_${index + 1}`;
+    if (usedDieIds.has(id)) throw new Error(`Duplicate die id '${id}' in external roll`);
+    usedDieIds.add(id);
     const customId = die.customDiceId ?? (inlineCustomDice.has(die.type) ? die.type : undefined);
     const definition = customId ? inlineCustomDice.get(customId) : undefined;
     let faceIndex = die.faceIndex;
@@ -887,7 +891,7 @@ export function normalizeExternalRoll(
     }
 
     return {
-      id: die.id || `die_${index + 1}`,
+      id,
       type: die.type,
       sides: definition ? undefined : (die.sides ?? numericSides(die.type)),
       result: die.result,

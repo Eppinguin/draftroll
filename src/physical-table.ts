@@ -5,12 +5,15 @@ import type { PhysicalDieVisualInstance } from './physical-die-visuals';
 export type PhysicalTableImplementation = 'canonical' | 'visual';
 
 export interface PhysicalTableSpec {
-  id: string;
+  /** Logical die identity from the originating roll. Never used as a runtime lookup key. */
+  dieId: string;
   implementation: PhysicalTableImplementation;
 }
 
 export interface PhysicalTableEntry {
-  id: string;
+  /** Logical die identity from the originating roll; it may repeat across table groups. */
+  dieId: string;
+  /** Unique runtime identity for this physical table lifetime. */
   physicalIndex: number;
   implementation: PhysicalTableImplementation;
   canonicalIndex: number | null;
@@ -22,13 +25,13 @@ export interface PhysicalTableEntry {
 /**
  * Runtime registry for every physical die currently represented on the table.
  *
- * The ordered physical descriptor array remains authoritative for replay/protocol data; this
- * registry owns only runtime identity and implementation bindings. Logical die IDs are scoped to
- * one roll and may therefore repeat across additive/concurrent table groups. Physical order keeps
- * those live entries distinct while preserving canonical bodies where they are genuinely useful.
+ * @remarks
+ * Logical die IDs belong to normalized rolls and are intentionally allowed to repeat across
+ * additive/concurrent groups. Runtime ownership is positional: physicalIndex identifies the table
+ * entry, while canonicalIndex and visualIndex identify the implementation-specific binding. No
+ * live physics or rendering state is keyed by a logical die ID.
  */
 export class PhysicalTableRegistry {
-  private readonly entriesById = new Map<string, PhysicalTableEntry[]>();
   private readonly entriesInOrder: PhysicalTableEntry[] = [];
   private readonly canonicalEntriesInOrder: PhysicalTableEntry[] = [];
   private readonly visualEntriesInOrder: PhysicalTableEntry[] = [];
@@ -47,7 +50,6 @@ export class PhysicalTableRegistry {
 
   reset(specs: readonly PhysicalTableSpec[], preserveBindings = false): void {
     const previousEntries = preserveBindings ? this.entriesInOrder.slice() : null;
-    this.entriesById.clear();
     this.entriesInOrder.length = 0;
     this.canonicalEntriesInOrder.length = 0;
     this.visualEntriesInOrder.length = 0;
@@ -58,7 +60,7 @@ export class PhysicalTableRegistry {
       const previous = previousEntries[index];
       if (
         !previous ||
-        previous.id !== entry.id ||
+        previous.dieId !== entry.dieId ||
         previous.implementation !== entry.implementation
       ) {
         continue;
@@ -71,7 +73,7 @@ export class PhysicalTableRegistry {
   append(specs: readonly PhysicalTableSpec[]): void {
     for (const spec of specs) {
       const entry: PhysicalTableEntry = {
-        id: spec.id,
+        dieId: spec.dieId,
         physicalIndex: this.entriesInOrder.length,
         implementation: spec.implementation,
         canonicalIndex:
@@ -83,9 +85,6 @@ export class PhysicalTableRegistry {
       this.entriesInOrder.push(entry);
       if (spec.implementation === 'canonical') this.canonicalEntriesInOrder.push(entry);
       else this.visualEntriesInOrder.push(entry);
-      const matchingEntries = this.entriesById.get(entry.id);
-      if (matchingEntries) matchingEntries.push(entry);
-      else this.entriesById.set(entry.id, [entry]);
     }
   }
 
@@ -104,7 +103,9 @@ export class PhysicalTableRegistry {
   visualInstances(): PhysicalDieVisualInstance[] {
     return this.visualEntriesInOrder.map((entry) => {
       if (!entry.visual) {
-        throw new Error(`Physical table visual entry is unbound: ${entry.id}`);
+        throw new Error(
+          `Physical table visual entry is unbound at visual index ${String(entry.visualIndex)} (die ${entry.dieId})`,
+        );
       }
       return entry.visual;
     });
@@ -116,14 +117,6 @@ export class PhysicalTableRegistry {
 
   entryAt(physicalIndex: number): PhysicalTableEntry | undefined {
     return this.entriesInOrder[physicalIndex];
-  }
-
-  entryById(id: string): PhysicalTableEntry | undefined {
-    return this.entriesById.get(id)?.[0];
-  }
-
-  physicalIndexForId(id: string): number | null {
-    return this.entriesById.get(id)?.[0]?.physicalIndex ?? null;
   }
 
   canonicalIndex(physicalIndex: number): number {
@@ -142,46 +135,39 @@ export class PhysicalTableRegistry {
     return entry.physicalIndex;
   }
 
-  bindCanonical(id: string, die: DieInstance): void {
-    const entries = this.entriesById.get(id);
-    const alreadyBound = entries?.find(
-      (candidate) => candidate.implementation === 'canonical' && candidate.die === die,
-    );
-    if (alreadyBound) return;
-    const entry = this.requireEntry(id, 'canonical', (candidate) => candidate.die === null);
+  physicalIndexForVisual(visualIndex: number): number {
+    const entry = this.visualEntriesInOrder[visualIndex];
+    if (!entry) {
+      throw new Error(`Physical table visual index is missing: ${visualIndex}`);
+    }
+    return entry.physicalIndex;
+  }
+
+  bindCanonicalAt(canonicalIndex: number, die: DieInstance): void {
+    const entry = this.canonicalEntriesInOrder[canonicalIndex];
+    if (!entry) {
+      throw new Error(`Physical table canonical index is missing: ${canonicalIndex}`);
+    }
     entry.die = die;
   }
 
-  bindVisual(id: string, visual: PhysicalDieVisualInstance): void {
-    const entries = this.entriesById.get(id);
-    const alreadyBound = entries?.find(
-      (candidate) => candidate.implementation === 'visual' && candidate.visual === visual,
-    );
-    if (alreadyBound) return;
-    const entry = this.requireEntry(id, 'visual', (candidate) => candidate.visual === null);
+  bindVisualAt(visualIndex: number, visual: PhysicalDieVisualInstance): void {
+    const entry = this.visualEntriesInOrder[visualIndex];
+    if (!entry) {
+      throw new Error(`Physical table visual index is missing: ${visualIndex}`);
+    }
     entry.visual = visual;
   }
 
-  unbindVisual(id: string): void {
-    const entries = this.entriesById.get(id);
-    const entry =
-      entries?.find(
-        (candidate) =>
-          candidate.implementation === 'visual' &&
-          candidate.visual !== null &&
-          candidate.visual.group.parent === null,
-      ) ??
-      entries?.find(
-        (candidate) => candidate.implementation === 'visual' && candidate.visual !== null,
-      );
-    if (entry) entry.visual = null;
-  }
-
-  unbindCanonical(id: string): void {
-    const entry = this.entriesById
-      .get(id)
-      ?.find((candidate) => candidate.implementation === 'canonical' && candidate.die !== null);
-    if (entry) entry.die = null;
+  unbindVisualAt(visualIndex: number, expected?: PhysicalDieVisualInstance): void {
+    const entry = this.visualEntriesInOrder[visualIndex];
+    if (!entry) {
+      throw new Error(`Physical table visual index is missing: ${visualIndex}`);
+    }
+    if (expected && entry.visual !== expected) {
+      throw new Error(`Physical table visual binding changed unexpectedly: ${visualIndex}`);
+    }
+    entry.visual = null;
   }
 
   forEachVisual(
@@ -211,22 +197,5 @@ export class PhysicalTableRegistry {
       }
     }
     return null;
-  }
-
-  private requireEntry(
-    id: string,
-    implementation: PhysicalTableImplementation,
-    predicate?: (entry: PhysicalTableEntry) => boolean,
-  ): PhysicalTableEntry {
-    const entry = this.entriesById
-      .get(id)
-      ?.find(
-        (candidate) =>
-          candidate.implementation === implementation && (!predicate || predicate(candidate)),
-      );
-    if (!entry) {
-      throw new Error(`Physical table ${implementation} entry is missing: ${id}`);
-    }
-    return entry;
   }
 }
