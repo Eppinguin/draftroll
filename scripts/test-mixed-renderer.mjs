@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { runTsc } from './lib/load-typescript.mjs';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -48,21 +48,21 @@ try {
   const bridge = {
     async roll(request) {
       calls.push(request);
-      const physicalResults = Array.isArray(request.results)
-        ? request.results
-        : request.results === undefined
-          ? []
-          : [request.results];
+      const physicalResults = (request.physical ?? []).map((visual) => visual.result);
+      const physicalValues = (request.physical ?? []).map((visual) =>
+        typeof visual.numericValue === 'number'
+          ? visual.numericValue
+          : typeof visual.result === 'number'
+            ? visual.result
+            : 0,
+      );
       const fallbackResults = (request.fallbacks ?? []).map((fallback) => fallback.result);
       return {
         results: [...physicalResults, ...fallbackResults],
-        total: physicalResults.reduce((sum, value) => sum + value, 0),
+        total: physicalValues.reduce((sum, value) => sum + value, 0),
         replay: null,
       };
     },
-    setDie() {},
-    setQuantity() {},
-    setTheme() {},
     getThemes() {
       return [
         { id: 'dragon', name: 'Wyrmfire' },
@@ -91,9 +91,18 @@ try {
   const completion = await renderer.playRoll(result, { animationSeed: 'mixed-test' });
   assert.equal(completion.total, 31);
   assert.equal(calls.length, 1);
-  assert.deepEqual(calls[0].kinds, ['d20', 'd8', 'd6', 'd6']);
-  assert.deepEqual(calls[0].results, [17, 6, 4, 4]);
-  assert.deepEqual(calls[0].themes, ['dragon', 'frost', 'ember', 'dragon']);
+  assert.deepEqual(
+    calls[0].physical.map((visual) => visual.canonicalKind),
+    ['d20', 'd8', 'd6', 'd6'],
+  );
+  assert.deepEqual(
+    calls[0].physical.map((visual) => visual.result),
+    [17, 6, 4, 4],
+  );
+  assert.deepEqual(
+    calls[0].physical.map((visual) => visual.theme),
+    ['dragon', 'frost', 'ember', 'dragon'],
+  );
   assert.equal(calls[0].context.name, 'Mara Voss');
 
   const universalResult = {
@@ -168,29 +177,124 @@ try {
   });
   assert.equal(universalCompletion.total, 108);
   assert.equal(calls.length, 2);
-  assert.deepEqual(calls[1].kinds, ['d20', 'coin']);
-  assert.deepEqual(calls[1].results, [17, 2]);
+  assert.deepEqual(
+    calls[1].physical.map((visual) => visual.type),
+    ['d20', 'd2', 'coin', 'dF', 'd9', 'd100'],
+  );
+  assert.deepEqual(
+    calls[1].physical.map((visual) => visual.outcomeIndex),
+    [16, 1, 0, 0, 6, 81],
+  );
   assert.deepEqual(
     calls[1].fallbacks.map((fallback) => fallback.kind),
-    ['coin', 'fate', 'spinner', 'percentile', 'card', 'token'],
+    ['card', 'token'],
   );
   assert.deepEqual(
     calls[1].visualOrder.map((entry) => entry.kind),
     [
       'physical',
       'physical',
-      'fallback',
-      'fallback',
-      'fallback',
-      'fallback',
+      'physical',
+      'physical',
+      'physical',
+      'physical',
       'fallback',
       'fallback',
     ],
   );
-  assert.equal(calls[1].fallbacks[0].oppositeLabel, 'Tails');
-  assert.equal(calls[1].fallbacks[1].label, '−');
-  assert.equal(calls[1].fallbacks[4].label, 'Success');
-  assert.equal(calls[1].fallbacks[5].label, 'Storm');
+  assert.equal(calls[1].physical[2].presentation.contents[0].text, 'Heads');
+  assert.equal(calls[1].physical[3].presentation.contents[0].text, '−');
+  assert.equal(calls[1].fallbacks[0].label, 'Success');
+  assert.equal(calls[1].fallbacks[1].label, 'Storm');
+
+  const customModelResult = {
+    authority: 'local',
+    name: 'Custom physical model',
+    expression: '1d3',
+    total: 2,
+    dice: [{ id: 'custom-d3', type: 'd3', sides: 3, result: 2, kept: true, themeId: 'dragon' }],
+    operations: [],
+    createdAt: new Date(0).toISOString(),
+  };
+  const customModel = {
+    definition: {
+      id: 'host:triad:v1',
+      sides: 3,
+      geometrySource: 'theme',
+      targeting: 'relabel',
+      radius: 0.72,
+      collisionScale: 1.02,
+      collider: { kind: 'box', halfExtents: [0.55, 0.55, 0.55] },
+      outcomes: [
+        {
+          index: 0,
+          value: 1,
+          result: 1,
+          numericValue: 1,
+          supportNormals: [[0, 1, 0]],
+          labelAnchors: [],
+        },
+        {
+          index: 1,
+          value: 2,
+          result: 2,
+          numericValue: 2,
+          supportNormals: [[1, 0, 0]],
+          labelAnchors: [],
+        },
+        {
+          index: 2,
+          value: 3,
+          result: 3,
+          numericValue: 3,
+          supportNormals: [[0, 0, 1]],
+          labelAnchors: [],
+        },
+      ],
+    },
+    presentation: {
+      contents: [
+        { kind: 'text', text: 'ONE' },
+        { kind: 'icon', icon: '◆' },
+        { kind: 'text', text: 'THREE' },
+      ],
+    },
+  };
+  const customCompletion = await renderer.playRoll(customModelResult, {
+    animationSeed: 'custom-model',
+    physicalModels: { d3: customModel },
+  });
+  assert.equal(customCompletion.total, 2);
+  assert.equal(calls.length, 3);
+  assert.equal(calls[2].physical.length, 1);
+  assert.equal(calls[2].physical[0].canonicalKind, undefined);
+  assert.equal(calls[2].physical[0].definition.id, 'host:triad:v1');
+  assert.equal(calls[2].physical[0].definition.targeting, 'relabel');
+  assert.equal(calls[2].physical[0].presentation.contents[1].icon, '◆');
+  await assert.rejects(
+    renderer.playRoll(customModelResult, {
+      physicalModels: {
+        d3: {
+          ...customModel,
+          definition: { ...customModel.definition, targeting: 'fixed' },
+        },
+      },
+    }),
+    /currently require relabel targeting/,
+  );
+  assert.equal(calls.length, 3);
+
+  const browserHost = await readFile(join(projectRoot, 'src/main.ts'), 'utf8');
+  assert.match(
+    browserHost,
+    /activeVisualOrder\.length !== activePhysicalSpecs\.length \+ fallbacks\.length/,
+    'browser host must validate visual order against every physical descriptor, not only canonical dice',
+  );
+  assert.doesNotMatch(
+    browserHost,
+    /activeVisualOrder\.length !== quantity \+ fallbacks\.length/,
+    'generated/custom physical dice must not be omitted from browser-host visual-order validation',
+  );
 
   const totalOnly = {
     authority: 'local',
@@ -203,16 +307,16 @@ try {
   };
   const totalOnlyCompletion = await renderer.playRoll(totalOnly, { animationSeed: 'total-only' });
   assert.equal(totalOnlyCompletion.total, 5);
-  assert.deepEqual(calls[2].results, []);
-  assert.equal(calls[2].fallbacks[0].kind, 'token');
-  assert.equal(calls[2].fallbacks[0].label, '5');
-  assert.equal(calls[2].fallbacks[0].metadata.synthetic, true);
+  assert.deepEqual(calls[3].physical, []);
+  assert.equal(calls[3].fallbacks[0].kind, 'token');
+  assert.equal(calls[3].fallbacks[0].label, '5');
+  assert.equal(calls[3].fallbacks[0].metadata.synthetic, true);
 
   console.log(
     JSON.stringify(
       {
         ok: true,
-        physicalKinds: calls[0].kinds,
+        physicalKinds: calls[0].physical.map((visual) => visual.canonicalKind ?? visual.type),
         fallbackKinds: calls[1].fallbacks.map((fallback) => fallback.kind),
         total: universalCompletion.total,
       },

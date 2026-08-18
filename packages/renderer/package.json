@@ -11,6 +11,14 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./polyhedra": {
+      "types": "./dist/polyhedra.d.ts",
+      "default": "./dist/polyhedra.js"
+    },
+    "./physical": {
+      "types": "./dist/physical.d.ts",
+      "default": "./dist/physical.js"
     }
   },
   "scripts": {

@@ -1339,7 +1339,6 @@ function validatePolicyRenderer(
       'maximumConcurrentVisuals',
       'autoClearMs',
       'reducedMotion',
-      'fallbackOnly',
       'requireRendererReady',
       'requireThemesReady',
       'readinessTimeoutMs',
@@ -1378,8 +1377,6 @@ function validatePolicyRenderer(
     readBoundedInteger(value.autoClearMs, `${path}.autoClearMs`, context, 0, 24 * 60 * 60 * 1000);
   if (value.reducedMotion !== undefined)
     readBoolean(value.reducedMotion, `${path}.reducedMotion`, context, true);
-  if (value.fallbackOnly !== undefined)
-    readBoolean(value.fallbackOnly, `${path}.fallbackOnly`, context, true);
   if (value.requireRendererReady !== undefined)
     readBoolean(value.requireRendererReady, `${path}.requireRendererReady`, context, true);
   if (value.requireThemesReady !== undefined)

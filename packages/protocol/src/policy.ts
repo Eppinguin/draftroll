@@ -93,7 +93,6 @@ export interface RoomRendererPolicy {
   maximumConcurrentVisuals: number;
   autoClearMs?: number;
   reducedMotion: boolean;
-  fallbackOnly: boolean;
   /** Require all connected visual clients to report renderer readiness before synchronized starts. */
   requireRendererReady: boolean;
   /** Require all connected visual clients to report theme readiness before synchronized starts. */
@@ -220,7 +219,6 @@ const OPEN_TABLE_POLICY: RoomPolicy = {
     concurrentTableRolls: true,
     maximumConcurrentVisuals: 30,
     reducedMotion: false,
-    fallbackOnly: false,
     requireRendererReady: false,
     requireThemesReady: false,
     readinessTimeoutMs: 1_500,

@@ -18,10 +18,11 @@ try {
     JSON.stringify(
       {
         compilerOptions: {
-          target: 'ES2022',
+          target: 'ES2023',
+          lib: ['ES2023', 'DOM'],
           module: 'CommonJS',
           moduleResolution: 'Node',
-          rootDir: join(projectRoot, 'src'),
+          rootDir: projectRoot,
           outDir,
           strict: true,
           skipLibCheck: true,
@@ -31,6 +32,7 @@ try {
           join(projectRoot, 'src/physics-shapes.ts'),
           join(projectRoot, 'src/collider-data.ts'),
           join(projectRoot, 'src/resting-physics.ts'),
+          join(projectRoot, 'src/physical-dice.ts'),
         ],
       },
       null,
@@ -47,13 +49,112 @@ try {
   await writeFile(join(outDir, 'package.json'), '{"type":"commonjs"}\n');
 
   const require = createRequire(import.meta.url);
-  const { createDiePhysicsShape } = require(join(outDir, 'physics-shapes.js'));
+  const { createDiePhysicsShape } = require(join(outDir, 'src/physics-shapes.js'));
+  const {
+    createCanonicalPhysicalDieDefinition,
+    createCustomPhysicalDieDefinition,
+    createGeneratedPhysicalDieDefinition,
+  } = require(join(outDir, 'src/physical-dice.js'));
   const {
     markUnobstructedTableDice,
     minimumRestingAlignment,
     readRestingAlignment,
     releaseUnstableRestPose,
-  } = require(join(outDir, 'resting-physics.js'));
+  } = require(join(outDir, 'src/resting-physics.js'));
+
+  const cachedD6 = createCanonicalPhysicalDieDefinition('d6');
+  cachedD6.collider.halfExtents[0] = 99;
+  cachedD6.outcomes[0].supportNormals[0][0] = 0;
+  const freshD6 = createCanonicalPhysicalDieDefinition('d6');
+  assert.ok(freshD6.collider.halfExtents[0] < 1, 'canonical cache is isolated from caller mutation');
+  assert.equal(
+    freshD6.outcomes[0].supportNormals[0][0],
+    1,
+    'canonical outcome cache is isolated from caller mutation',
+  );
+
+  const cachedD7 = createGeneratedPhysicalDieDefinition(7);
+  cachedD7.collider.vertices[0][0] = 99;
+  cachedD7.readableShape.vertices[0][0] = 99;
+  const freshD7 = createGeneratedPhysicalDieDefinition(7);
+  assert.ok(
+    Math.abs(freshD7.collider.vertices[0][0]) < 2,
+    'generated collider cache is isolated from caller mutation',
+  );
+  assert.ok(
+    Math.abs(freshD7.readableShape.vertices[0][0]) < 2,
+    'generated readable-shape cache is isolated from caller mutation',
+  );
+
+  const customBase = {
+    id: 'test:custom-d2',
+    sides: 2,
+    radius: 0.7,
+    collider: { kind: 'box', halfExtents: [0.5, 0.5, 0.5] },
+    outcomes: [{ supportNormals: [[0, 2, 0]] }, { supportNormals: [[0, -3, 0]] }],
+  };
+  const custom = createCustomPhysicalDieDefinition(customBase);
+  assert.deepEqual(
+    custom.outcomes.map((outcome) => outcome.supportNormals[0]),
+    [
+      [0, 1, 0],
+      [0, -1, 0],
+    ],
+    'valid custom support normals are normalized only after validation',
+  );
+  assert.throws(
+    () =>
+      createCustomPhysicalDieDefinition({
+        ...customBase,
+        collider: { kind: 'box', halfExtents: [-0.5, 0.5, 0.5] },
+      }),
+    /halfExtents must be positive/,
+  );
+  assert.throws(
+    () =>
+      createCustomPhysicalDieDefinition({
+        ...customBase,
+        collider: {
+          kind: 'cylinder',
+          radiusTop: 0.5,
+          radiusBottom: 0.5,
+          height: 0.2,
+          segments: 2,
+        },
+      }),
+    /segments must be an integer from 3 to 1024/,
+  );
+  assert.throws(
+    () =>
+      createCustomPhysicalDieDefinition({
+        ...customBase,
+        collider: {
+          kind: 'convex',
+          vertices: [
+            [Number.NaN, 0, 0],
+            [1, 0, 0],
+            [0, 1, 0],
+            [0, 0, 1],
+          ],
+          faces: [
+            [0, 1, 2],
+            [0, 3, 1],
+            [0, 2, 3],
+            [1, 3, 2],
+          ],
+        },
+      }),
+    /finite coordinates/,
+  );
+  assert.throws(
+    () =>
+      createCustomPhysicalDieDefinition({
+        ...customBase,
+        outcomes: [{ supportNormals: [[0, 0, 0]] }, customBase.outcomes[1]],
+      }),
+    /must not be a zero vector/,
+  );
+
   const coinShape = createDiePhysicsShape('coin');
   assert.ok(coinShape instanceof CANNON.Cylinder, 'coin uses a Cannon cylinder');
 
@@ -259,6 +360,8 @@ try {
       {
         ok: true,
         tested: [
+          'physical definition cache isolation',
+          'custom physical definition shared validation',
           'production cylinder collider',
           'coin-to-d6 momentum transfer',
           'coin edge-balance release',

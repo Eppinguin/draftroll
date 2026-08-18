@@ -114,16 +114,11 @@ try {
   const bridge = {
     async roll(request) {
       bridgeCalls.push(['roll', request]);
-      return { results: request.results ?? [], total: 4, replay: { ok: true } };
-    },
-    setDie(value) {
-      bridgeCalls.push(['setDie', value]);
-    },
-    setQuantity(value) {
-      bridgeCalls.push(['setQuantity', value]);
-    },
-    setTheme(value) {
-      bridgeCalls.push(['setTheme', value]);
+      return {
+        results: (request.physical ?? []).map((visual) => visual.result),
+        total: 4,
+        replay: { ok: true },
+      };
     },
     getThemes() {
       return [{ id: 'dragon', name: 'Dragon' }];
@@ -181,9 +176,18 @@ try {
   const symbolicCompletion = await renderer.playRoll(symbolic, { physicsPreset: 'heavy' });
   assert.equal(symbolicCompletion.total, 2);
   const request = bridgeCalls.find(([name]) => name === 'roll')[1];
-  assert.deepEqual(request.results, [5]);
-  assert.deepEqual(request.kinds, ['d6']);
-  assert.deepEqual(request.physics, [{ sizeScale: 1.2, massScale: 1.5, inertiaScale: 0.8 }]);
+  assert.equal(request.results, undefined);
+  assert.equal(request.kinds, undefined);
+  assert.equal(request.physics, undefined);
+  assert.equal(request.physical.length, 1);
+  assert.equal(request.physical[0].canonicalKind, 'd6');
+  assert.equal(request.physical[0].result, 'symbol-4');
+  assert.equal(request.physical[0].outcomeIndex, 4);
+  assert.deepEqual(request.physical[0].physics, {
+    sizeScale: 1.2,
+    massScale: 1.5,
+    inertiaScale: 0.8,
+  });
   assert.equal(request.physicsPreset, 'heavy');
   await renderer.pause();
   await renderer.resume();

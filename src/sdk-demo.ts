@@ -99,19 +99,21 @@ export async function initSdkDemo(): Promise<void> {
       version: '1.0.0',
       description: 'Local constrained runtime-theme test manifest.',
       availableDice: ['d4', 'd6', 'd8', 'd10', 'd12', 'd20'],
-      material: {
-        color: '#17131f',
-        emissive: '#3d1859',
-        emissiveIntensity: 0.34,
-        roughness: 0.36,
-        metalness: 0.42,
-        clearcoat: 0.48,
-        clearcoatRoughness: 0.2,
-      },
-      labels: {
-        color: '#f8eaff',
-        glowColor: '#c468ff',
-        fontFamily: 'Georgia',
+      physical: {
+        material: {
+          color: '#17131f',
+          emissive: '#3d1859',
+          emissiveIntensity: 0.34,
+          roughness: 0.36,
+          metalness: 0.42,
+          clearcoat: 0.48,
+          clearcoatRoughness: 0.2,
+        },
+        labels: {
+          color: '#f8eaff',
+          glowColor: '#c468ff',
+          fontFamily: 'Georgia',
+        },
       },
       effects: {
         positive: 'major-burst',

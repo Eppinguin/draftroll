@@ -48,11 +48,12 @@ try {
   const bridge = {
     async roll(request) {
       calls.push(request);
-      return { results: request.results ?? [], total: 999, replay: { batch: calls.length } };
+      return {
+        results: (request.physical ?? []).map((visual) => visual.result),
+        total: 999,
+        replay: { batch: calls.length },
+      };
     },
-    setDie() {},
-    setQuantity() {},
-    setTheme() {},
     getThemes() {
       return [{ id: 'dragon', name: 'Wyrmfire' }];
     },
@@ -116,8 +117,16 @@ try {
     'add',
     'concurrent room rolls should target the persistent table path',
   );
-  assert.deepEqual(calls[0].results, [15, 4, 5]);
-  assert.deepEqual(calls[0].kinds, ['d20', 'd6', 'd6']);
+  assert.deepEqual(
+    calls[0].physical.map((visual) => visual.result),
+    [15, 4, 5],
+  );
+  assert.deepEqual(
+    calls[0].physical.map((visual) => visual.canonicalKind),
+    ['d20', 'd6', 'd6'],
+  );
+  assert.equal(calls[0].results, undefined);
+  assert.equal(calls[0].kinds, undefined);
   assert.equal(calls[0].context.tableRolls.length, 2);
   assert.deepEqual(
     calls[0].context.tableRolls.map((entry) => ({
@@ -162,7 +171,7 @@ try {
   assert.match(rendererSource, /tableRolls/);
   assert.match(sdkSource, /concurrentTableRolls\?: boolean/);
   assert.match(sdkSource, /actorLabel: event\.actor\.name/);
-  assert.match(mainSource, /createLaunchStatesForGroup/);
+  assert.match(mainSource, /createMixedPhysicalLaunchStates/);
   // The in-motion panel names each roller (Alice  •  Bob) instead of a generic count, so it
   // keeps the same shape as the settled panel. See the browser spec "near-simultaneous room
   // rolls share one visible table throw with both roller labels".
@@ -183,7 +192,9 @@ try {
   assert.match(mainSource, /createLockedTableTrajectory/);
   assert.match(mainSource, /const lockedTrajectory = isRolling/);
   assert.match(mainSource, /Keep the completed plan while the table remains visible/);
-  assert.match(workerSource, /updateLockedBodies/);
+  assert.match(workerSource, /lockedMotion: readLockedMotion\(request, lockedCount\)/);
+  const plannerSource = await readFile(join(projectRoot, 'src/physical-roll-planner.ts'), 'utf8');
+  assert.match(plannerSource, /updateLockedBodies/);
   assert.doesNotMatch(mainSource, /mapLandingFaceToValue/);
 
   const rootPackage = JSON.parse(await readFile(join(projectRoot, 'package.json'), 'utf8'));

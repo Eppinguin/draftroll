@@ -211,6 +211,7 @@ export interface DiceAppearance {
  * @public
  */
 export interface NormalizedDieResult {
+  /** Logical die identity, unique within this die's containing NormalizedRollResult. */
   id: string;
   type: string;
   sides?: number;

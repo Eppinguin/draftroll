@@ -7,6 +7,7 @@ export type { DieKind } from './physics-shapes';
 import { THEMES, type ThemeGeometryProfile, type ThemeName, type ThemePalette } from './themes';
 import {
   getRuntimeThemeFont,
+  getRuntimeThemeLabelStyle,
   getRuntimeThemeMaterial,
   getRuntimeThemeMesh,
   getRuntimeThemeTexture,
@@ -390,6 +391,26 @@ function createGeometry(kind: DieKind): GeometrySet {
 const themedVisualCache = new Map<string, THREE.BufferGeometry>();
 
 /**
+ * Builds a rounded-box render mesh using the same theme geometry semantics as the canonical d6.
+ *
+ * This is intentionally visual-only. Callers keep their existing collider and outcome topology.
+ */
+export function createThemedRoundedBoxVisual(theme: ThemeName, size: number): THREE.BufferGeometry {
+  const palette = THEMES[theme] ?? THEMES.dragon;
+  const profile = palette.geometry;
+  const radius = size / 1.72;
+  const visual = new RoundedBoxGeometry(
+    size,
+    size,
+    size,
+    6,
+    radius * THREE.MathUtils.clamp(profile.cornerRadius, 0.02, 0.42),
+  );
+  applyPlanarFaceUvs(visual, radius);
+  return visual;
+}
+
+/**
  * Builds the display mesh for one theme and die, applying that theme's chamfer.
  *
  * @remarks
@@ -414,14 +435,7 @@ function createThemedVisual(theme: ThemeName, kind: DieKind): THREE.BufferGeomet
   } else if (kind === 'd6') {
     // The d6 is a rounded box, so the profile drives its corner radius directly.
     const size = radius * 1.72;
-    visual = new RoundedBoxGeometry(
-      size,
-      size,
-      size,
-      6,
-      radius * THREE.MathUtils.clamp(profile.cornerRadius, 0.02, 0.42),
-    );
-    applyPlanarFaceUvs(visual, radius);
+    visual = createThemedRoundedBoxVisual(theme, size);
   } else if (profile.bevel <= 0.001) {
     visual = createGeometry(kind).visual.clone();
   } else {
@@ -621,6 +635,7 @@ function createNumberAtlas(theme: ThemeName): THREE.CanvasTexture {
   const cached = numberAtlasCache.get(theme);
   if (cached) return cached;
   const palette = THEMES[theme] ?? THEMES.dragon;
+  const style = getRuntimeThemeLabelStyle(theme, 'default');
   const size = 1024;
   const cellWidth = size / ATLAS_COLUMNS;
   const cellHeight = size / ATLAS_ROWS;
@@ -652,12 +667,12 @@ function createNumberAtlas(theme: ThemeName): THREE.CanvasTexture {
     const fontSize = value >= 10 ? cellHeight * 0.48 : cellHeight * 0.57;
     const runtimeFont = getRuntimeThemeFont(theme);
     context.font = `700 ${fontSize}px ${runtimeFont ? `'${runtimeFont}', ` : ''}Cinzel, Georgia, serif`;
-    context.lineWidth = cellHeight * 0.055;
-    context.strokeStyle = outline;
-    context.shadowColor = palette.labelGlow;
+    context.lineWidth = fontSize * (style?.outlineWidth ?? 0.1);
+    context.strokeStyle = style?.outlineColor ?? outline;
+    context.shadowColor = style?.glowColor ?? palette.labelGlow;
     context.shadowBlur = engraved ? 3 : theme === 'tempest' ? 18 : 10;
     context.strokeText(String(value), x, y - cellHeight * 0.015);
-    context.fillStyle = palette.label;
+    context.fillStyle = style?.color ?? palette.label;
     context.fillText(String(value), x, y - cellHeight * 0.015);
     if (value === 6 || value === 9) {
       context.shadowBlur = engraved ? 2 : 4;
@@ -1645,6 +1660,20 @@ function createSurface(theme: ThemeName, palette: ThemePalette): SurfaceSet {
   }
   surfaceCache.set(theme, surface);
   return surface;
+}
+
+/**
+ * Returns the cached built-in theme surface maps used by every renderer-owned physical die.
+ * Runtime theme textures still take precedence at the caller.
+ */
+export function getThemeSurfaceTextures(theme: ThemeName): {
+  map: THREE.CanvasTexture;
+  normalMap: THREE.CanvasTexture;
+  roughnessMap: THREE.CanvasTexture;
+} {
+  const normalized = Object.hasOwn(THEMES, theme) ? theme : 'dragon';
+  const palette = THEMES[normalized] ?? THEMES.dragon;
+  return createSurface(normalized, palette);
 }
 
 const SURFACE_VARIANT_COUNT = 12;

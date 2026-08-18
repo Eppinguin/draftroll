@@ -25,6 +25,14 @@ assert.deepEqual(sdkManifest.exports, {
     types: './dist/index.d.ts',
     default: './dist/index.js',
   },
+  './deck': {
+    types: './dist/deck.d.ts',
+    default: './dist/deck.js',
+  },
+  './cards': {
+    types: './dist/cards.d.ts',
+    default: './dist/cards.js',
+  },
 });
 
 const serverEntries = [

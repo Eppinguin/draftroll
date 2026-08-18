@@ -138,6 +138,8 @@ try {
     import * as rootSdk from '@draftroll/sdk';
     import * as headless from '@draftroll/sdk/headless';
     import * as browser from '@draftroll/sdk/browser';
+    import * as deck from '@draftroll/sdk/deck';
+    import * as cards from '@draftroll/sdk/cards';
     import * as server from '@draftroll/server';
     import * as react from '@draftroll/react';
     import * as vue from '@draftroll/vue';
@@ -153,6 +155,12 @@ try {
     assert.equal(new headless.DiceEngine().roll('1d1').total, 1);
     assert.equal(typeof rootSdk.DraftrollSession, 'function');
     assert.equal(typeof browser.DraftrollTextRenderer, 'function');
+    assert.equal(typeof deck.DraftrollDeck, 'function');
+    assert.equal(typeof deck.createDeck, 'function');
+    assert.equal(typeof cards.standardPlayingCards, 'function');
+    assert.equal(typeof cards.createStandardDeck, 'function');
+    const packedDeck = cards.createStandardDeck('packed-standard', { shuffle: false });
+    assert.equal(packedDeck.draw().cards[0].result, 'A♠');
     assert.equal(typeof server.createRoomCapabilityToken, 'function');
     assert.equal(typeof react.createDraftrollReactBindings, 'function');
     assert.equal(typeof vue.useDraftroll, 'function');
@@ -168,6 +176,10 @@ try {
   assert.equal(manifest.exports['.'].default, './dist/index.js');
   assert.equal(manifest.exports['.'].browser.types, './dist/browser.d.ts');
   assert.equal(manifest.exports['.'].browser.default, './dist/browser.js');
+  assert.equal(manifest.exports['./deck'].types, './dist/deck.d.ts');
+  assert.equal(manifest.exports['./deck'].default, './dist/deck.js');
+  assert.equal(manifest.exports['./cards'].types, './dist/cards.d.ts');
+  assert.equal(manifest.exports['./cards'].default, './dist/cards.js');
   assert.equal(manifest.dependencies['@draftroll/core'], '0.1.0');
   console.log('Package distribution smoke test passed.');
 } finally {

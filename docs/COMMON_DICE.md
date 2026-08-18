@@ -88,7 +88,7 @@ const deck = commonDice.cardDraw('minor-deck', [
 ]);
 ```
 
-These helpers perform independent weighted draws **with replacement**, matching the custom-die evaluator. Stateful deck behavior—shuffle order, depletion, discard piles, and draws without replacement—belongs to the host application. The host can submit the chosen card as an exact structured or external result while retaining the same definition for labels and rendering.
+These helpers perform independent weighted draws **with replacement**, matching the custom-die evaluator. Use the dedicated `@draftroll/sdk/deck` and `@draftroll/sdk/cards` entrypoints when the application needs persistent shuffle order, depletion, active cards, discard piles, returns, resets, or draws without replacement. A stateful deck draw converts to an exact external result through `draw.toDisplayInput()`, so both APIs share the same card renderer and normalized-result boundary. See [`CARDS.md`](CARDS.md).
 
 `commonDice.table` and `commonDice.cards` are terse aliases.
 

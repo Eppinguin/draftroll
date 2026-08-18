@@ -6,3 +6,4 @@ dist/
 test-results/browser-artifacts/
 playwright-report/
 dist-browser/
+.DS_Store

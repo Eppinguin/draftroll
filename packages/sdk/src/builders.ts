@@ -259,7 +259,7 @@ function fateDefinition(id = 'fate', options: CommonDiceFactoryOptions = {}): Cu
       { result: 1, value: 1, label: '+' },
       { result: 1, value: 1, label: '+' },
     ],
-    'fate',
+    'd6',
     options,
   );
 }
@@ -287,7 +287,7 @@ function percentilePairDefinition(
       },
     };
   });
-  return makeCommonDefinition(id, faces, 'percentile', options);
+  return makeCommonDefinition(id, faces, 'd100', options);
 }
 
 function symbolPoolDefinition(
@@ -303,7 +303,7 @@ function tableDefinition(
   entries: readonly CommonDiceFaceInput[],
   options: CommonDiceFactoryOptions = {},
 ): CustomDiceDefinition {
-  return makeCommonDefinition(id, entries, 'spinner', options);
+  return makeCommonDefinition(id, entries, 'token', options);
 }
 
 function cardDefinition(

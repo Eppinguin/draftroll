@@ -61,15 +61,26 @@ try {
     version: '1.2.3',
     availableDice: ['d6', 'd20'],
     previews: { d20: '/previews/test-obsidian-d20.webp' },
-    material: {
-      color: '#17131f',
-      roughness: 0.44,
-      metalness: 0.3,
-      surfaceTexture: { src: 'assets/obsidian.webp', mimeType: 'image/webp' },
-    },
-    labels: {
-      color: '#ffffff',
-      atlas: { src: 'assets/labels.png', mimeType: 'image/png' },
+    physical: {
+      material: {
+        color: '#17131f',
+        roughness: 0.44,
+        metalness: 0.3,
+        surfaceTexture: { src: 'assets/obsidian.webp', mimeType: 'image/webp' },
+      },
+      labels: { color: '#ffffff', outlineColor: '#110d18', outlineWidth: 0.06 },
+      dice: {
+        d20: {
+          labels: { atlas: { src: 'assets/labels.png', mimeType: 'image/png' } },
+          presentation: {
+            contents: Array.from({ length: 20 }, (_entry, index) =>
+              index === 19
+                ? { kind: 'icon', icon: '★', label: 'critical' }
+                : { kind: 'number', value: index + 1 },
+            ),
+          },
+        },
+      },
     },
     effects: { positive: 'major-burst', neutral: 'subtle-pulse', negative: 'void-fracture' },
     metadata: { rendererThemeId: 'test-obsidian' },
@@ -101,12 +112,11 @@ try {
   const bridge = {
     async roll(request) {
       bridgeCalls.push(['roll', request]);
-      return { results: request.results ?? [], total: 12, replay: null };
-    },
-    setDie() {},
-    setQuantity() {},
-    setTheme(themeId) {
-      bridgeCalls.push(['setTheme', themeId]);
+      return {
+        results: request.physical?.map((entry) => entry.result) ?? [],
+        total: 12,
+        replay: null,
+      };
     },
     getThemes() {
       return [...bridgeThemes.values()];
@@ -132,10 +142,12 @@ try {
     onThemeLoad: (event) => rendererEvents.push(event),
   });
   await renderer.warmup([manifest.id]);
-  assert.deepEqual(bridgeCalls.slice(0, 2), [
-    ['installTheme', manifest.id],
-    ['setTheme', manifest.id],
-  ]);
+  assert.deepEqual(bridgeCalls.slice(0, 1), [['installTheme', manifest.id]]);
+  assert.equal(
+    bridgeCalls.some(([name]) => name === 'setTheme'),
+    false,
+    'theme choice is carried by each physical visual, not mutable bridge state',
+  );
   assert.equal(rendererEvents.at(-1).type, 'complete');
 
   await renderer.playRoll({
@@ -151,7 +163,13 @@ try {
     1,
     'theme should only install once',
   );
-  assert.deepEqual(bridgeCalls.find(([name]) => name === 'roll')[1].themes, [manifest.id]);
+  const rollRequest = bridgeCalls.find(([name]) => name === 'roll')[1];
+  assert.equal(rollRequest.results, undefined);
+  assert.equal(rollRequest.kinds, undefined);
+  assert.equal(rollRequest.themes, undefined);
+  assert.equal(rollRequest.physics, undefined);
+  assert.equal(rollRequest.physical.length, 1);
+  assert.equal(rollRequest.physical[0].theme, manifest.id);
 
   assert.throws(() => decodeDiceTheme({ ...manifest, schemaVersion: 99 }), InvalidThemeError);
   await assert.rejects(

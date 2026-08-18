@@ -4,9 +4,12 @@ import { resolve, join } from 'node:path';
 
 const root = resolve(import.meta.dirname, '..');
 const main = await readFile(join(root, 'src/main.ts'), 'utf8');
+const launch = await readFile(join(root, 'src/physical-launch.ts'), 'utf8');
 const worker = await readFile(join(root, 'src/roll-worker.ts'), 'utf8');
+const physicalPlanner = await readFile(join(root, 'src/physical-roll-planner.ts'), 'utf8');
 const dice = await readFile(join(root, 'src/dice.ts'), 'utf8');
 const physicsShapes = await readFile(join(root, 'src/physics-shapes.ts'), 'utf8');
+const physicalDice = await readFile(join(root, 'src/physical-dice.ts'), 'utf8');
 const restingPhysics = await readFile(join(root, 'src/resting-physics.ts'), 'utf8');
 const colliders = await readFile(join(root, 'src/collider-data.ts'), 'utf8');
 const renderer = await readFile(join(root, 'packages/renderer/src/index.ts'), 'utf8');
@@ -18,23 +21,34 @@ const wrangler = await readFile(join(root, 'apps/worker/wrangler.jsonc'), 'utf8'
 
 assert.match(dice, /getTargetNormal\(value: number\)/);
 assert.match(dice, /getResultSymmetryRotation\(fromValue: number, toValue: number\)/);
-assert.match(physicsShapes, /kind === 'coin'[\s\S]*?new CANNON\.Cylinder/);
+assert.match(
+  physicsShapes,
+  /createPhysicalDieCollider\(createCanonicalPhysicalDieDefinition\(kind\), sizeScale\)/,
+);
+assert.match(physicalDice, /collider\.kind === 'cylinder'[\s\S]*?new CANNON\.Cylinder/);
 assert.match(dice, /this\.kind === 'coin'[\s\S]*?Math\.PI/);
-assert.match(main, /die\.kind === 'coin'[\s\S]*?rollingX \* 1\.22/);
-assert.match(renderer, /normalized === 'd2'\) return 'coin'/);
-assert.match(main, /allWellSeated[\s\S]*?releaseUnstableRestPose/);
-assert.match(worker, /allWellSeated[\s\S]*?releaseUnstableRestPose/);
+assert.match(launch, /participant\.coinLike[\s\S]*?rollingX \* 1\.22/);
+assert.match(renderer, /normalized === 'd2'[\s\S]{0,100}'coin'/);
+assert.match(physicalPlanner, /allWellSeated[\s\S]*?releaseUnstableRestPose/);
 assert.match(restingPhysics, /minimumRestingAlignment/);
-assert.match(restingPhysics, /closest face is already determined by the natural trajectory/);
+assert.match(
+  restingPhysics,
+  /closest support state is already determined by the natural trajectory/,
+);
 assert.doesNotMatch(restingPhysics, /activeTargets|requested result/);
 assert.match(dice, /mapsShape/);
 assert.match(main, /function applyShapeSymmetryTargets/);
 assert.match(main, /baseQuaternion[\s\S]*?\.multiply\(symmetry\)/);
 assert.match(main, /createLockedTableTrajectory/);
-assert.match(worker, /updateLockedBodies/);
-assert.match(worker, /CANNON\.Body\.KINEMATIC/);
-assert.match(main, /targetingMethod: 'shape-symmetry'/);
-assert.match(main, /plan = applyShapeSymmetryTargets\(buildRollPlanSync\(states\)\)/);
+assert.match(physicalPlanner, /updateLockedBodies/);
+assert.match(physicalPlanner, /CANNON\.Body\.KINEMATIC/);
+assert.match(main, /targetingMethod: activeTargeting\.length === 1/);
+assert.match(main, /targetingCounts/);
+assert.match(main, /'symmetry', 'relabel', 'fixed'/);
+assert.doesNotMatch(main, /targetingMethod: 'shape-symmetry'/);
+assert.match(main, /const mainThreadPhysicalPlanner = new PhysicalRollPlanner/);
+assert.match(main, /mainThreadPhysicalPlanner\.simulate/);
+assert.doesNotMatch(main, /buildRollPlanSync|cloneDynamicBody|contactSimilarity/);
 assert.doesNotMatch(main, /Natural target planner failed to settle the requested faces/);
 assert.doesNotMatch(main, /mapLandingFaceToValue/);
 assert.doesNotMatch(main, /workerless-assisted-target/);
@@ -42,8 +56,9 @@ assert.doesNotMatch(worker, /applyTargetAssistance/);
 assert.doesNotMatch(worker, /applyMicroOrientationCorrection/);
 assert.doesNotMatch(worker, /searchCandidate/);
 assert.doesNotMatch(worker, /targetNormals/);
-assert.match(worker, /candidateAttempts: 1/);
-assert.match(worker, /assistedDice: \[\]/);
+assert.match(worker, /entries: PlanEntry\[\]/);
+assert.match(worker, /landings: landings\.buffer/);
+assert.doesNotMatch(worker, /AdditionalPhysical|additionalTransforms|additionalLandings/);
 
 assert.match(
   renderer,
@@ -54,10 +69,13 @@ assert.match(main, /\(isRolling \|\| hasCast\)/);
 assert.match(main, /sampleActiveLaunchStates/);
 assert.match(main, /tableReplanPaused/);
 assert.match(main, /const lockedTrajectory = isRolling[\s\S]*?createLockedTableTrajectory/);
+assert.match(main, /createLockedTableTrajectory\(activePlan, planTime, existingPhysicalCount\)/);
 assert.match(
   main,
-  /newStates\.length > 0[\s\S]*?buildRollPlan\(\[\.\.\.existingStates, \.\.\.newStates\], existingCount, lockedTrajectory\)[\s\S]*?createStaticTablePlan/,
+  /buildRollPlan\([\s\S]{0,220}existingPhysicalCount,[\s\S]{0,120}lockedTrajectory/,
 );
+assert.match(main, /hasPendingPhysicalVisuals/);
+assert.match(main, /createStaticTablePlan/);
 assert.match(main, /Keep the completed plan while the table remains visible/);
 assert.match(overlay, /table: options\.table \? \{ \.\.\.options\.table \} : undefined/);
 assert.match(playground, /id="sdk-second-delay"[^>]*value="80"/);
@@ -198,6 +216,7 @@ console.log(
         'shape-symmetry exact-result targeting',
         'all result-to-result symmetries for d4/d6/d8/d10/d12/d20',
         'physical d2 cylinder with coin-specific exact-result symmetry and launch flip',
+        'canonical and generated dice share one hand-launch generator',
         'result-independent edge/corner resting-pose release',
         'constant local-space trajectory rotation',
         'no post-impact target torque assistance',

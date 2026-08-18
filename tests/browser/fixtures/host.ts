@@ -5,6 +5,7 @@ import {
   DraftrollTextRenderer,
   type DraftrollRoomRoll,
   type DraftrollRoomSession,
+  type PhysicalDieModel,
   type RollVisibility,
 } from '../../../packages/sdk/src/browser';
 
@@ -36,10 +37,18 @@ interface BrowserFixtureState {
   errors: string[];
 }
 
+type BrowserPhysicsPreset = 'standard' | 'compact' | 'heavy' | 'low-gravity';
+
 interface BrowserFixtureApi {
   ready: Promise<void>;
   getState(): BrowserFixtureState;
   rollLocal(expression?: string): Promise<{ total: number; dice: number }>;
+  rollLocalWithPhysicsPreset(
+    expression?: string,
+    physicsPreset?: BrowserPhysicsPreset,
+  ): Promise<{ total: number; dice: number }>;
+  rollLocalWithPhysicalModel(expression?: string): Promise<{ total: number; dice: number }>;
+  configureOverlayDrag(draggable?: boolean): Promise<void>;
   connectRoom(options?: {
     roomId?: string;
     participantId?: string;
@@ -107,11 +116,140 @@ const TrackedWebSocket = new Proxy(WebSocket, {
   },
 });
 
+const browserCustomD6Model: PhysicalDieModel = {
+  definition: {
+    id: 'browser-custom-symbol-d6-v1',
+    sides: 6,
+    geometrySource: 'theme',
+    targeting: 'relabel',
+    radius: 0.96,
+    collisionScale: 1.02,
+    collider: { kind: 'box', halfExtents: [0.55, 0.55, 0.55] },
+    outcomes: [
+      {
+        index: 0,
+        value: 1,
+        result: 1,
+        numericValue: 1,
+        supportNormals: [[-1, 0, 0]],
+        labelAnchors: [
+          {
+            kind: 'face',
+            faceIndex: 0,
+            position: [0.561, 0, 0],
+            normal: [1, 0, 0],
+            up: [0, 1, 0],
+            scale: 0.34,
+          },
+        ],
+      },
+      {
+        index: 1,
+        value: 2,
+        result: 2,
+        numericValue: 2,
+        supportNormals: [[1, 0, 0]],
+        labelAnchors: [
+          {
+            kind: 'face',
+            faceIndex: 1,
+            position: [-0.561, 0, 0],
+            normal: [-1, 0, 0],
+            up: [0, 1, 0],
+            scale: 0.34,
+          },
+        ],
+      },
+      {
+        index: 2,
+        value: 3,
+        result: 3,
+        numericValue: 3,
+        supportNormals: [[0, -1, 0]],
+        labelAnchors: [
+          {
+            kind: 'face',
+            faceIndex: 2,
+            position: [0, 0.561, 0],
+            normal: [0, 1, 0],
+            up: [0, 0, -1],
+            scale: 0.34,
+          },
+        ],
+      },
+      {
+        index: 3,
+        value: 4,
+        result: 4,
+        numericValue: 4,
+        supportNormals: [[0, 1, 0]],
+        labelAnchors: [
+          {
+            kind: 'face',
+            faceIndex: 3,
+            position: [0, -0.561, 0],
+            normal: [0, -1, 0],
+            up: [0, 0, 1],
+            scale: 0.34,
+          },
+        ],
+      },
+      {
+        index: 4,
+        value: 5,
+        result: 5,
+        numericValue: 5,
+        supportNormals: [[0, 0, -1]],
+        labelAnchors: [
+          {
+            kind: 'face',
+            faceIndex: 4,
+            position: [0, 0, 0.561],
+            normal: [0, 0, 1],
+            up: [0, 1, 0],
+            scale: 0.34,
+          },
+        ],
+      },
+      {
+        index: 5,
+        value: 6,
+        result: 6,
+        numericValue: 6,
+        supportNormals: [[0, 0, 1]],
+        labelAnchors: [
+          {
+            kind: 'face',
+            faceIndex: 5,
+            position: [0, 0, -0.561],
+            normal: [0, 0, -1],
+            up: [0, 1, 0],
+            scale: 0.34,
+          },
+        ],
+      },
+    ],
+  },
+  presentation: {
+    contents: [
+      { kind: 'icon', icon: '◆', label: 'one' },
+      { kind: 'icon', icon: '●', label: 'two' },
+      { kind: 'icon', icon: '▲', label: 'three' },
+      { kind: 'icon', icon: '■', label: 'four' },
+      { kind: 'icon', icon: '★', label: 'five' },
+      { kind: 'icon', icon: '✦', label: 'six' },
+    ],
+  },
+};
+
 const ready = initialize();
 window.__draftrollTest = {
   ready,
   getState: () => structuredClone(state),
   rollLocal,
+  rollLocalWithPhysicsPreset,
+  rollLocalWithPhysicalModel,
+  configureOverlayDrag,
   connectRoom,
   rollRoom,
   revealLast,
@@ -194,6 +332,47 @@ async function rollLocal(
   state.localPresentationCount += 1;
   state.lastTotal = roll.total;
   setStatus('Local roll complete');
+  renderState();
+  return { total: roll.total, dice: roll.dice.length };
+}
+
+async function rollLocalWithPhysicsPreset(
+  expression = '1d9',
+  physicsPreset: BrowserPhysicsPreset = 'heavy',
+): Promise<{ total: number; dice: number }> {
+  await ready;
+  const roll = draftroll.roll(expression, {
+    render: rendererEnabled,
+    renderer: { animationDurationMs: 720, physicsPreset },
+  });
+  await roll.wait();
+  state.localPresentationCount += 1;
+  state.lastTotal = roll.total;
+  setStatus(`Local ${physicsPreset} roll complete`);
+  renderState();
+  return { total: roll.total, dice: roll.dice.length };
+}
+
+async function configureOverlayDrag(draggable = true): Promise<void> {
+  await ready;
+  if (!overlay) throw new Error('Overlay renderer is unavailable');
+  await overlay.configureInteractions({ draggable });
+}
+
+async function rollLocalWithPhysicalModel(
+  expression = '1d6',
+): Promise<{ total: number; dice: number }> {
+  await ready;
+  const roll = draftroll.roll(expression, {
+    render: rendererEnabled,
+    renderer: {
+      physicalModels: { d6: browserCustomD6Model },
+    },
+  });
+  await roll.wait();
+  state.localPresentationCount += 1;
+  state.lastTotal = roll.total;
+  setStatus('Custom physical roll complete');
   renderState();
   return { total: roll.total, dice: roll.dice.length };
 }

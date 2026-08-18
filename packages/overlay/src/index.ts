@@ -14,8 +14,9 @@ import {
   type ThemeLoadEvent,
   type ThemeProvider,
 } from '../../themes/src/index';
-import type {
-  DiceRenderer,
+import {
+  clonePhysicalDieDefinition,
+  type DiceRenderer,
   DraftrollEffectOutcome,
   RendererCompletion,
   RendererPlayOptions,
@@ -64,6 +65,23 @@ export interface OverlaySerializablePlayOptions extends Omit<
   RendererPlayOptions,
   'outcomeResolver' | 'signal'
 > {}
+
+function cloneOverlayPhysicalModels(
+  models: RendererPlayOptions['physicalModels'],
+): OverlaySerializablePlayOptions['physicalModels'] {
+  if (!models) return undefined;
+  return Object.fromEntries(
+    Object.entries(models).map(([key, model]) => [
+      key,
+      {
+        definition: clonePhysicalDieDefinition(model.definition),
+        presentation: {
+          contents: model.presentation.contents.map((content) => ({ ...content })),
+        },
+      },
+    ]),
+  );
+}
 
 /**
  * Controls overlay dismissal timing and animation.
@@ -325,6 +343,10 @@ export class DraftrollOverlayRenderer implements DiceRenderer {
     Set<(payload: never) => void>
   >();
   private participantFilter?: RendererParticipantFilter;
+  private interactionOptions: Required<RendererInteractionOptions> = {
+    click: 'none',
+    draggable: false,
+  };
 
   /**
    * Creates an iframe-backed overlay renderer.
@@ -567,6 +589,7 @@ export class DraftrollOverlayRenderer implements DiceRenderer {
       startTime: options.startTime,
       animationSeed: options.animationSeed,
       defaultThemeId: options.defaultThemeId,
+      physicalModels: cloneOverlayPhysicalModels(options.physicalModels),
       dieIds: options.dieIds ? [...options.dieIds] : undefined,
       preservePreviousDice: options.preservePreviousDice,
       stateDieIds: options.stateDieIds ? [...options.stateDieIds] : undefined,
@@ -577,7 +600,6 @@ export class DraftrollOverlayRenderer implements DiceRenderer {
       table: options.table ? { ...options.table } : undefined,
       autoClearMs: options.autoClearMs,
       reducedMotion: options.reducedMotion,
-      forceFallback: options.forceFallback,
       physicsPreset: options.physicsPreset,
       modifierSequence: options.modifierSequence,
     };
@@ -769,7 +791,15 @@ export class DraftrollOverlayRenderer implements DiceRenderer {
    * Configure interactions.
    */
   async configureInteractions(options: RendererInteractionOptions): Promise<void> {
+    const next = {
+      click: options.click ?? this.interactionOptions.click,
+      draggable: options.draggable ?? this.interactionOptions.draggable,
+    };
     await this.command({ type: 'configure-interactions', options });
+    this.interactionOptions = next;
+    if (this.iframe) {
+      this.iframe.style.pointerEvents = next.click === 'none' && !next.draggable ? 'none' : 'auto';
+    }
   }
 
   /**

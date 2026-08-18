@@ -92,11 +92,12 @@ try {
   const bridge = {
     async roll(request) {
       calls.push(request);
-      return { results: request.results ?? [], total: 17, replay: null };
+      return {
+        results: (request.physical ?? []).map((visual) => visual.result),
+        total: 17,
+        replay: null,
+      };
     },
-    setDie() {},
-    setQuantity() {},
-    setTheme() {},
     getThemes() {
       return [{ id: 'dragon', name: 'Wyrmfire' }];
     },
@@ -179,7 +180,14 @@ try {
   assert.equal(decodedWire.success, true);
 
   const rendererSource = await readFile(join(projectRoot, 'src/main.ts'), 'utf8');
-  assert.match(rendererSource, /applyPlanTransform\(plan, planTime\)/);
+  assert.match(rendererSource, /function updatePlanVisuals/);
+  assert.match(rendererSource, /const scale = planDisplayScale\(plan\)/);
+  assert.match(rendererSource, /applyPlanTransform\(plan, time, scale\.x, scale\.z\)/);
+  assert.match(
+    rendererSource,
+    /physicalTable\.forEachVisual\(\(visual\) => visual\.update\(time, scale\.x, scale\.z\)\)/,
+  );
+  assert.match(rendererSource, /updatePlanVisuals\(plan, planTime\)/);
   assert.match(rendererSource, /impact\.time > planTime/);
   assert.match(rendererSource, /startLatenessMs/);
   assert.match(rendererSource, /Presenting settled result/);
@@ -205,6 +213,7 @@ try {
           'forced full replay and forced seek modes',
           'bridge seek propagation',
           'client timing diagnostics',
+          'shared canonical/generated replay scaling',
           'adaptive Durable Object start buffers',
           'no package or protocol version bump',
         ],

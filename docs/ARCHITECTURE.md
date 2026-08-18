@@ -22,7 +22,7 @@ Roll input
                     supplied Draftroll 3D engine
 ```
 
-The recommended third-party website path is `@draftroll/overlay`. It creates a transparent fixed iframe, sends normalized rolls through `postMessage`, and renders the result panel in a host-side Shadow DOM. The dice layer does not intercept host-page pointer input, creates no idle dice during mount/warmup, and can arm click-anywhere dissolve after a completed throw.
+The recommended third-party website path is `@draftroll/overlay`. It creates a transparent fixed iframe, sends normalized rolls through `postMessage`, and renders the result panel in a host-side Shadow DOM. By default the dice layer does not intercept host-page pointer input; explicit interaction configuration opts the iframe and canvas into pointer handling. It creates no idle dice during mount/warmup and can arm click-anywhere dissolve after a completed throw.
 
 Connected mode adds an optional path without changing the normalized renderer boundary:
 
@@ -138,6 +138,10 @@ The renderer remains responsible for geometry, Cannon-es planning, fixed-face sh
 - backward-compatible numeric and array calls
 - local viewport-aware trajectory planning
 - persistent in-flight physical additions
+- one physical-table registry as the sole owner of live canonical/generated/custom runtime bindings
+- normalized die IDs are logical identities scoped to one roll; live table ownership, planner assignments, launch state, effects, and group membership use physical/canonical/visual indexes instead of die-ID strings, so additive/concurrent rolls may safely reuse IDs such as `die_1`
+- theme geometry profiles change render silhouettes/labels only; physical definitions, colliders, support topology, and authoritative outcomes remain unchanged
+- renderer-owned generated dice share built-in theme surface maps and rounded-box semantics where their support geometry is cube-based (d3), while retaining independent physical outcome mappings
 - shape-symmetry targeting diagnostics without changing normalized results
 
 ## Permission projection flow

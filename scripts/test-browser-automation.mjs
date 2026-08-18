@@ -34,6 +34,16 @@ assert(
   'browser fixture origin is not allowlisted locally',
 );
 
+const overlayRenderer = readFileSync(join(root, 'packages/overlay/src/index.ts'), 'utf8');
+assert(
+  overlayRenderer.includes('physicalModels: cloneOverlayPhysicalModels(options.physicalModels)'),
+  'overlay play serialization drops physicalModels',
+);
+assert(
+  overlayRenderer.includes('clonePhysicalDieDefinition(model.definition)'),
+  'overlay physical models are not defensively cloned',
+);
+
 const server = readFileSync(join(root, 'tests/browser/serve-fixtures.mjs'), 'utf8');
 for (const directive of [
   'frame-src',
@@ -49,6 +59,9 @@ assert(
   server.includes("pathname === '/connect-blocked.html'"),
   'blocked connect fixture is missing',
 );
+
+const browserVite = readFileSync(join(root, 'tests/browser/vite.config.ts'), 'utf8');
+assert(browserVite.includes("'../../cards.html'"), 'cards browser fixture is not included in the test build');
 
 const specs = collectFiles(join(root, 'tests/browser/specs'), '.ts');
 assert(specs.length >= 3, 'browser spec suite is incomplete');
@@ -69,6 +82,12 @@ for (const marker of [
   'HTTP state, D1 history, durable events, and revisions never expose roller-only values',
   'mixed physical and fallback benchmark completes in one synchronized presentation',
   'accessible text fallback works with reduced motion and no WebGL',
+  'host-supplied custom physical model through the shared planner',
+  'authoritative outcomes for generated non-standard physical dice',
+  'additive generated physical roll preserves settled canonical dice',
+  'generated physical dice receive heavy and low-gravity planner presets',
+  'generated physical dice remain draggable after settlement',
+  'cards demo draws through the real overlay',
 ]) {
   assert(combinedSpecs.includes(marker), `browser suite is missing coverage: ${marker}`);
 }
@@ -127,6 +146,13 @@ console.log(
         'mixed physical/fallback performance',
         'HTTP/D1 hidden projection boundaries',
         'reduced-motion and no-WebGL fallback',
+        'host-supplied custom physical model',
+        'generated authoritative physical outcomes',
+        'generated physical replay after resize',
+        'generated additive table preservation',
+        'generated physical planner presets',
+        'generated settled dragging',
+        'stateful card overlay integration',
       ],
     },
     null,

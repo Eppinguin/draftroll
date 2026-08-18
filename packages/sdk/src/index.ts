@@ -1373,7 +1373,6 @@ export class DraftrollRoomSession {
             defaultThemeId: this.options.renderer?.defaultThemeId ?? roomRenderer?.defaultThemeId,
             autoClearMs: this.options.renderer?.autoClearMs ?? roomRenderer?.autoClearMs,
             reducedMotion: this.options.renderer?.reducedMotion ?? roomRenderer?.reducedMotion,
-            forceFallback: this.options.renderer?.forceFallback ?? roomRenderer?.fallbackOnly,
             physicsPreset: this.options.renderer?.physicsPreset ?? roomRenderer?.physicsPreset,
             startTime: event.localStartTimeMs,
             animationSeed: event.animationSeed,
