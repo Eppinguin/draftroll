@@ -409,26 +409,28 @@ export class Draftroll {
    * Most recent roll retained by the SDK log.
    */
   get lastResult(): NormalizedRollResult | null {
-    return this.currentResult;
+    return this.currentResult ? structuredClone(this.currentResult) : null;
   }
 
   /** Current revision of each roll, in creation order. Updating a roll replaces its log entry. */
   get rollLog(): readonly NormalizedRollResult[] {
     return this.logOrder
       .map((rollId) => this.logById.get(rollId))
-      .filter((result): result is NormalizedRollResult => Boolean(result));
+      .filter((result): result is NormalizedRollResult => Boolean(result))
+      .map((result) => structuredClone(result));
   }
 
   /**
    * Returns a retained roll by logical ID.
    */
   getRoll(rollId: string): NormalizedRollResult | null {
-    return this.logById.get(rollId) ?? null;
+    const result = this.logById.get(rollId);
+    return result ? structuredClone(result) : null;
   }
 
   /** Immutable snapshots for revision 0 through the latest known revision. */
   getRollRevisions(rollId: string): readonly NormalizedRollResult[] {
-    return this.revisionsById.get(rollId) ?? [];
+    return (this.revisionsById.get(rollId) ?? []).map((result) => structuredClone(result));
   }
 
   /**
@@ -836,11 +838,12 @@ export class Draftroll {
       }
     }
 
+    const publicResult = structuredClone(identified);
     const response: SdkRollResponse = {
       id: identified.rollId,
-      result: identified,
-      total: identified.total,
-      dice: identified.dice,
+      result: publicResult,
+      total: publicResult.total,
+      dice: publicResult.dice,
       rendering,
       presentation,
       wait: () => presentation ?? Promise.resolve(),
@@ -964,15 +967,16 @@ export class Draftroll {
       throw new DraftrollStateError('Draftroll result identity was not assigned', {
         package: 'sdk',
       });
+    const snapshot = structuredClone(result);
     if (!this.logById.has(rollId)) this.logOrder.push(rollId);
-    this.logById.set(rollId, result);
+    this.logById.set(rollId, snapshot);
     const revisions = this.revisionsById.get(rollId) ?? [];
     const last = revisions.at(-1);
-    if (!last || last.revision !== result.revision || last.updatedAt !== result.updatedAt) {
-      revisions.push(structuredClone(result));
+    if (!last || last.revision !== snapshot.revision || last.updatedAt !== snapshot.updatedAt) {
+      revisions.push(structuredClone(snapshot));
       this.revisionsById.set(rollId, revisions);
     }
-    this.currentResult = result;
+    this.currentResult = snapshot;
   }
 }
 
