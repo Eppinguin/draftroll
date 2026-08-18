@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { pathToFileURL } from 'node:url';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { runTsc } from './lib/load-typescript.mjs';
 
@@ -28,8 +28,13 @@ try {
     throw new Error('Generated polyhedra compilation failed');
   }
   await writeFile(join(outDir, 'package.json'), '{"type":"module"}\n');
+  const physicalOutput = join(outDir, 'physical.js');
+  await writeFile(
+    physicalOutput,
+    (await readFile(physicalOutput, 'utf8')).replace("from './polyhedra';", "from './polyhedra.js';"),
+  );
   const polyhedraModule = await import(pathToFileURL(join(outDir, 'polyhedra.js')).href);
-  const physicalModule = await import(pathToFileURL(join(outDir, 'physical.js')).href);
+  const physicalModule = await import(pathToFileURL(physicalOutput).href);
   const { createReadablePolyhedron } = polyhedraModule;
   const { assertValidPhysicalDieDefinition, clonePhysicalDieDefinition } = physicalModule;
 
