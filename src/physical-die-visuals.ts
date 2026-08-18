@@ -161,14 +161,6 @@ export class PhysicalDieVisualInstance {
     return this.needsPlanning;
   }
 
-  get launchParticipant(): PendingPhysicalLaunchParticipant {
-    return {
-      id: this.spec.id,
-      radius: physicalDieColliderRadius(this.definition),
-      coinLike: this.sides === 2,
-    };
-  }
-
   prepare(): void {
     this.launchState = [];
     this.prepared = true;
@@ -425,49 +417,71 @@ export class PhysicalDieVisualInstance {
 }
 
 export interface PendingPhysicalLaunchParticipant {
-  id: string;
+  visualIndex: number;
   radius: number;
   coinLike: boolean;
 }
 
 export interface PendingPhysicalLaunchAssignment {
-  id: string;
+  visualIndex: number;
   state: PhysicalLaunchState;
 }
 
 export interface PhysicalVisualPlanEntry {
-  id: string;
+  visualIndex: number;
   definition: PhysicalDieDefinition;
   state: number[];
 }
 
 export interface PhysicalVisualPlanAssignment {
-  id: string;
+  visualIndex: number;
   physicalIndex: number;
+}
+
+interface ConfiguredPhysicalVisual {
+  visualIndex: number;
+  visual: PhysicalDieVisualInstance;
 }
 
 function configuredPhysicalDice(
   entries: readonly PhysicalDieVisualInstance[],
-): PhysicalDieVisualInstance[] {
-  return entries.filter((entry) => entry.isPrepared);
+): ConfiguredPhysicalVisual[] {
+  return entries.flatMap((visual, visualIndex) =>
+    visual.isPrepared ? [{ visualIndex, visual }] : [],
+  );
 }
 
 export function getPendingPhysicalLaunchParticipants(
   entries: readonly PhysicalDieVisualInstance[],
 ): PendingPhysicalLaunchParticipant[] {
-  return entries
-    .filter((entry) => entry.isPrepared && entry.requiresPlanning)
-    .map((entry) => entry.launchParticipant);
+  return configuredPhysicalDice(entries).flatMap(({ visualIndex, visual }) =>
+    visual.requiresPlanning
+      ? [
+          {
+            visualIndex,
+            radius: physicalDieColliderRadius(visual.definition),
+            coinLike: visual.sides === 2,
+          },
+        ]
+      : [],
+  );
 }
 
 export function assignPendingPhysicalLaunchStates(
   entries: readonly PhysicalDieVisualInstance[],
   assignments: readonly PendingPhysicalLaunchAssignment[],
 ): void {
-  const entriesById = new Map(entries.map((entry) => [entry.spec.id, entry] as const));
+  const assigned = new Set<number>();
   for (const assignment of assignments) {
-    const entry = entriesById.get(assignment.id);
-    if (entry?.isPrepared && entry.requiresPlanning) entry.assignLaunchState(assignment.state);
+    if (assigned.has(assignment.visualIndex)) {
+      throw new Error(`Physical visual launch assignment is duplicated: ${assignment.visualIndex}`);
+    }
+    assigned.add(assignment.visualIndex);
+    const visual = entries[assignment.visualIndex];
+    if (!visual?.isPrepared || !visual.requiresPlanning) {
+      throw new Error(`Physical visual is not pending at visual index ${assignment.visualIndex}`);
+    }
+    visual.assignLaunchState(assignment.state);
   }
 }
 
@@ -484,10 +498,10 @@ export function hasPendingPhysicalVisuals(entries: readonly PhysicalDieVisualIns
 export function getPhysicalVisualPlanEntries(
   entries: readonly PhysicalDieVisualInstance[],
 ): PhysicalVisualPlanEntry[] {
-  return configuredPhysicalDice(entries).map((entry) => ({
-    id: entry.spec.id,
-    definition: entry.definition,
-    state: entry.plannerState(),
+  return configuredPhysicalDice(entries).map(({ visualIndex, visual }) => ({
+    visualIndex,
+    definition: visual.definition,
+    state: visual.plannerState(),
   }));
 }
 
@@ -509,28 +523,30 @@ export function commitPhysicalVisualPlan(
   ) {
     throw new Error('Physical trajectory buffers do not match the unified plan.');
   }
-  const configured = configuredPhysicalDice(entries);
-  const configuredIds = new Set(configured.map((entry) => entry.spec.id));
-  const assignedIds = new Set(assignments.map((assignment) => assignment.id));
+  const configuredIndexes = new Set(
+    configuredPhysicalDice(entries).map(({ visualIndex }) => visualIndex),
+  );
+  const assignedIndexes = new Set(assignments.map((assignment) => assignment.visualIndex));
   if (
-    configuredIds.size !== assignments.length ||
-    assignedIds.size !== assignments.length ||
-    [...configuredIds].some((id) => !assignedIds.has(id))
+    configuredIndexes.size !== assignments.length ||
+    assignedIndexes.size !== assignments.length ||
+    [...configuredIndexes].some((visualIndex) => !assignedIndexes.has(visualIndex))
   ) {
     throw new Error('Physical visual assignments do not match the configured generic dice.');
   }
-  const entriesById = new Map(configured.map((entry) => [entry.spec.id, entry] as const));
 
   for (const assignment of assignments) {
-    const entry = entriesById.get(assignment.id);
-    if (!entry) {
-      throw new Error(`Physical visual is not configured: ${assignment.id}`);
+    const visual = entries[assignment.visualIndex];
+    if (!visual?.isPrepared) {
+      throw new Error(
+        `Physical visual is not configured at visual index ${assignment.visualIndex}`,
+      );
     }
     const physicalIndex = assignment.physicalIndex;
     if (physicalIndex < 0 || physicalIndex >= physicalCount) {
       throw new Error(`Physical visual index is invalid: ${String(physicalIndex)}`);
     }
-    entry.commitTrajectory(
+    visual.commitTrajectory(
       transforms,
       frameCount,
       step,
