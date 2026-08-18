@@ -45,7 +45,10 @@ try {
     ts.transpileModule(source, { compilerOptions, fileName }).outputText;
   await writeFile(join(tempRoot, 'package.json'), '{"type":"module"}\n');
   await writeFile(join(tempRoot, 'deck.js'), transpile(deckSource, 'deck.ts'));
-  await writeFile(join(tempRoot, 'cards.js'), transpile(cardsSource, 'cards.ts'));
+  await writeFile(
+    join(tempRoot, 'cards.js'),
+    transpile(cardsSource, 'cards.ts').replace("from './deck';", "from './deck.js';"),
+  );
 
   const deckModule = await import(pathToFileURL(join(tempRoot, 'deck.js')).href);
   const cardsModule = await import(pathToFileURL(join(tempRoot, 'cards.js')).href);
