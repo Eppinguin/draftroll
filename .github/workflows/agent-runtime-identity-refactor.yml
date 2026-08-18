@@ -2,9 +2,8 @@
 name: Agent runtime identity refactor
 
 on:
-  push:
+  pull_request:
     branches:
-      - agent/runtime-identity-refactor-validation
       - agent/dicebox-learnings-cards
 
 jobs:
@@ -15,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref_name }}
+          ref: ${{ github.head_ref }}
           fetch-depth: 0
 
       - uses: actions/setup-node@v4
@@ -103,4 +102,4 @@ jobs:
             exit 1
           fi
           git commit -m "separate logical and runtime die identity"
-          git push origin HEAD:${GITHUB_REF_NAME}
+          git push origin HEAD:${{ github.head_ref }}
