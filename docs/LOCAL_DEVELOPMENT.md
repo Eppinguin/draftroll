@@ -4,7 +4,7 @@ This setup runs the optional Draftroll realtime backend locally with Wrangler, a
 
 ## Requirements
 
-- Node.js 22.12 or newer
+- Node.js 22.13 or newer
 - Corepack, or another pnpm installation
 - pnpm 11.17.0, pinned by the root `packageManager` field
 
@@ -31,11 +31,11 @@ Run these commands from the repository root:
 
 ```bash
 pnpm lint
-pnpm format:check
+pnpm fmt:check
 pnpm check
 ```
 
-Use `pnpm lint:fix` for safe Oxlint fixes and `pnpm format` to apply Oxfmt. `pnpm check` also runs TSDoc validation and all TypeScript checks. See `docs/CODE_QUALITY.md` for the complete policy.
+Use `pnpm lint:fix` for safe Oxlint fixes and `pnpm fmt` to apply Oxfmt. `pnpm check` also runs TSDoc validation and all TypeScript checks. See `docs/CODE_QUALITY.md` for the complete policy.
 
 ## Test completed-roll revisions without Wrangler
 
