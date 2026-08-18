@@ -32,13 +32,26 @@ jobs:
           node scripts/agent-refactor-runtime-identity.mjs
           node --input-type=module <<'NODE'
           import { readFile, writeFile } from 'node:fs/promises';
-          const path = 'src/main.ts';
-          let source = await readFile(path, 'utf8');
+
+          const mainPath = 'src/main.ts';
+          let main = await readFile(mainPath, 'utf8');
           const before = `  return getPendingPhysicalLaunchParticipants(physicalTable.visualInstances()).map((entry) => ({\n    ...entry,\n    physicalIndex: physicalTable.physicalIndexForVisual(entry.visualIndex),\n  }));`;
           const after = `  return getPendingPhysicalLaunchParticipants(physicalTable.visualInstances()).map((entry) => ({\n    visualIndex: entry.visualIndex,\n    radius: entry.radius,\n    coinLike: entry.coinLike,\n    physicalIndex: physicalTable.physicalIndexForVisual(entry.visualIndex),\n  }));`;
-          if (!source.includes(before)) throw new Error('Pending visual launch mapping marker missing');
-          source = source.replace(before, after);
-          await writeFile(path, source);
+          if (!main.includes(before)) throw new Error('Pending visual launch mapping marker missing');
+          main = main.replace(before, after);
+          await writeFile(mainPath, main);
+
+          const updateTestPath = 'scripts/test-roll-updates.mjs';
+          let updateTests = await readFile(updateTestPath, 'utf8');
+          const structuredExpectation = `/Duplicate die id 'same-die' in structured roll/`;
+          if (!updateTests.includes(structuredExpectation)) {
+            throw new Error('Structured duplicate-id assertion marker missing');
+          }
+          updateTests = updateTests.replace(
+            structuredExpectation,
+            `/Duplicate die id 'same-die'/`,
+          );
+          await writeFile(updateTestPath, updateTests);
           NODE
           cat > tests/browser/specs/additive-duplicate-id.spec.ts <<'EOF'
           import { expect, test } from '@playwright/test';
