@@ -55,21 +55,81 @@ try {
     createRoomPolicy,
     applyRoomPolicyPatch,
     decodeServerToClientEvent,
+    isNormalizedRollResult,
+    isServerToClientEvent,
     negotiateProtocolVersion,
     parseRuntimeJson,
   } = protocol;
-  const { DiceEngine } = core;
+  const { DiceEngine, evaluateParsedExpression } = core;
 
   const engine = new DiceEngine({ rng: { integer: (minimum) => minimum } });
   const result = engine.roll('1d20+5');
   assert.equal(result.schemaVersion, DRAFTROLL_RESULT_SCHEMA_VERSION);
   assert.equal(decodeNormalizedRollResult(result).success, true);
+  assert.equal(isNormalizedRollResult(result), true);
 
   const legacy = { ...result };
   delete legacy.schemaVersion;
   const migrated = decodeNormalizedRollResult(legacy, { allowLegacyResults: true });
   assert.equal(migrated.success, true);
   assert.equal(migrated.data.schemaVersion, DRAFTROLL_RESULT_SCHEMA_VERSION);
+  assert.equal(Object.hasOwn(legacy, 'schemaVersion'), false);
+
+  const strictLegacy = decodeNormalizedRollResult(legacy, { allowLegacyResults: false });
+  assert.equal(strictLegacy.success, false);
+  assert.ok(
+    strictLegacy.error.issues.some(
+      (entry) =>
+        entry.code === 'invalid_result_schema_version' && entry.path === '$.schemaVersion',
+    ),
+  );
+  assert.equal(isNormalizedRollResult(legacy), false);
+  assert.equal(Object.hasOwn(legacy, 'schemaVersion'), false);
+
+  const parsed = engine.parse('1d20+5');
+  const parsedSnapshot = structuredClone(parsed);
+  const maximumRng = { integer: (_minimum, maximum) => maximum };
+  const advantageResult = evaluateParsedExpression(parsed, maximumRng, undefined, {
+    advantage: 'advantage',
+  });
+  assert.equal(advantageResult.dice.length, 2);
+  assert.deepEqual(parsed, parsedSnapshot);
+  const normalResult = evaluateParsedExpression(parsed, maximumRng);
+  assert.equal(normalResult.dice.length, 1);
+  assert.deepEqual(parsed, parsedSnapshot);
+
+  const legacyEvent = {
+    type: 'roll_start',
+    protocolVersion: 2,
+    roomId: 'table',
+    eventSequence: 1,
+    rollId: 'roll-legacy',
+    sequence: 1,
+    actor: { participantId: 'a', sessionId: 's', name: 'A', roles: [] },
+    visibility: { type: 'public' },
+    hidden: false,
+    summary: {
+      rollId: 'roll-legacy',
+      sequence: 1,
+      revision: 0,
+      actor: { participantId: 'a', sessionId: 's', name: 'A', roles: [] },
+      createdAt: result.createdAt,
+    },
+    result: legacy,
+  };
+  assert.equal(
+    decodeServerToClientEvent(legacyEvent, { allowLegacyResults: true }).success,
+    true,
+  );
+  const strictLegacyEvent = decodeServerToClientEvent(legacyEvent, {
+    allowLegacyResults: false,
+  });
+  assert.equal(strictLegacyEvent.success, false);
+  assert.ok(
+    strictLegacyEvent.error.issues.some((entry) => entry.path === '$.result.schemaVersion'),
+  );
+  assert.equal(isServerToClientEvent(legacyEvent), false);
+  assert.equal(Object.hasOwn(legacy, 'schemaVersion'), false);
 
   const invalidDie = structuredClone(result);
   invalidDie.dice[0].kept = 'yes';
@@ -199,8 +259,10 @@ try {
       {
         ok: true,
         tested: [
-          'normalized-result schema version and legacy migration',
+          'normalized-result schema version, strict guards, and legacy migration',
+          'parsed-expression immutability across advantage evaluation',
           'strict client and server event decoding',
+          'legacy result rejection in strict server events',
           'unknown-field rejection',
           'metadata depth and payload limits',
           'protocol-version negotiation',
