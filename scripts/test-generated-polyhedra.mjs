@@ -261,7 +261,7 @@ try {
       }),
     /must be planar/,
   );
-  const concaveVertices = [...cubeVertices.map((vertex) => [...vertex]), [0, 0, 0]];
+  const concaveVertices = [...cubeVertices.map((vertex) => [...vertex]), [0, 0.2, 0]];
   const concaveFaces = [
     [0, 1, 2, 3],
     [4, 7, 6, 5],
