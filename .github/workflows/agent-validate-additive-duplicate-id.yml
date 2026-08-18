@@ -29,6 +29,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Format changed files
+        run: >-
+          pnpm exec oxfmt --write
+          src/physical-table.ts
+          tests/browser/specs/additive-duplicate-id.spec.ts
+
       - name: Verify formatting
         run: >-
           pnpm exec oxfmt --check
