@@ -37,16 +37,24 @@ try {
   await mkdir(outDir, { recursive: true });
   const polyhedraSource = join(projectRoot, 'packages/renderer/src/polyhedra.ts');
   const physicalSource = join(projectRoot, 'packages/renderer/src/physical.ts');
-  const compile = runTsc([
-    '--strict',
-    '--target', 'ES2022',
-    '--lib', 'ES2023,DOM',
-    '--module', 'ESNext',
-    '--moduleResolution', 'Bundler',
-    '--outDir', outDir,
-    polyhedraSource,
-    physicalSource,
-  ], { cwd: projectRoot });
+  const compile = runTsc(
+    [
+      '--strict',
+      '--target',
+      'ES2022',
+      '--lib',
+      'ES2023,DOM',
+      '--module',
+      'ESNext',
+      '--moduleResolution',
+      'Bundler',
+      '--outDir',
+      outDir,
+      polyhedraSource,
+      physicalSource,
+    ],
+    { cwd: projectRoot },
+  );
   if (compile.status !== 0) {
     process.stderr.write(compile.stdout);
     process.stderr.write(compile.stderr);
@@ -56,7 +64,10 @@ try {
   const physicalOutput = join(outDir, 'physical.js');
   await writeFile(
     physicalOutput,
-    (await readFile(physicalOutput, 'utf8')).replace("from './polyhedra';", "from './polyhedra.js';"),
+    (await readFile(physicalOutput, 'utf8')).replace(
+      "from './polyhedra';",
+      "from './polyhedra.js';",
+    ),
   );
   const polyhedraModule = await import(pathToFileURL(join(outDir, 'polyhedra.js')).href);
   const physicalModule = await import(pathToFileURL(physicalOutput).href);
@@ -69,7 +80,10 @@ try {
     assert.equal(shape.outcomes.length, sides, `d${sides} has one support state per result`);
     assert.equal(shape.exact, true, `d${sides} remains exact`);
     for (const outcome of shape.outcomes) {
-      assert.ok(outcome.labels.length >= 1, `d${sides} outcome ${outcome.value} has a readable label anchor`);
+      assert.ok(
+        outcome.labels.length >= 1,
+        `d${sides} outcome ${outcome.value} has a readable label anchor`,
+      );
       assert.ok(['face', 'edge', 'vertex'].includes(outcome.labelKind));
       for (const anchor of outcome.labels) {
         assert.ok(anchor.faceIndex >= 0 && anchor.faceIndex < shape.faces.length);
@@ -79,8 +93,8 @@ try {
         assert.ok(anchor.up.every(Number.isFinite));
         const orthogonal = Math.abs(
           anchor.normal[0] * anchor.up[0] +
-          anchor.normal[1] * anchor.up[1] +
-          anchor.normal[2] * anchor.up[2],
+            anchor.normal[1] * anchor.up[1] +
+            anchor.normal[2] * anchor.up[2],
         );
         assert.ok(orthogonal < 1e-5, `d${sides} label up direction stays in its printed face`);
       }
@@ -98,7 +112,10 @@ try {
   );
 
   const d3 = createReadablePolyhedron(3);
-  assert.deepEqual(d3.outcomes.map((outcome) => outcome.labels.length), [2, 2, 2]);
+  assert.deepEqual(
+    d3.outcomes.map((outcome) => outcome.labels.length),
+    [2, 2, 2],
+  );
 
   const huge = createReadablePolyhedron(300);
   assert.equal(huge.exact, false);
@@ -169,12 +186,18 @@ try {
 
   for (const sides of [1, 2, 3, 4]) {
     assert.doesNotThrow(
-      () => assertValidPhysicalDieDefinition(definitionFromReadableShape(createReadablePolyhedron(sides), `readable:d${sides}`)),
+      () =>
+        assertValidPhysicalDieDefinition(
+          definitionFromReadableShape(createReadablePolyhedron(sides), `readable:d${sides}`),
+        ),
       `d${sides} readable geometry satisfies the strict physical contract`,
     );
   }
 
-  const invalidReadableDefinition = definitionFromReadableShape(createReadablePolyhedron(4), 'readable:invalid');
+  const invalidReadableDefinition = definitionFromReadableShape(
+    createReadablePolyhedron(4),
+    'readable:invalid',
+  );
   invalidReadableDefinition.readableShape.landingFaces = [999];
   assert.throws(
     () => assertValidPhysicalDieDefinition(invalidReadableDefinition),
@@ -300,24 +323,30 @@ try {
     /at most 4096 vertices/,
   );
 
-  console.log(JSON.stringify({
-    ok: true,
-    tested: [
-      'd1-d3 duplicate supports',
-      'd4 tip labels',
-      'd5 edge labels',
-      'arbitrary exact dN',
-      'high-count representative',
-      'physical definition validation',
-      'physical definition clone isolation',
-      'readable geometry validation',
-      'bounded convex geometry',
-      'closed convex manifold validation',
-      'non-planar face rejection',
-      'concave collider rejection',
-      'degenerate face rejection',
-    ],
-  }, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        ok: true,
+        tested: [
+          'd1-d3 duplicate supports',
+          'd4 tip labels',
+          'd5 edge labels',
+          'arbitrary exact dN',
+          'high-count representative',
+          'physical definition validation',
+          'physical definition clone isolation',
+          'readable geometry validation',
+          'bounded convex geometry',
+          'closed convex manifold validation',
+          'non-planar face rejection',
+          'concave collider rejection',
+          'degenerate face rejection',
+        ],
+      },
+      null,
+      2,
+    ),
+  );
 } finally {
   await rm(tempRoot, { recursive: true, force: true });
 }

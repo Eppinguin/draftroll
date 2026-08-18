@@ -29,7 +29,9 @@ const hand = requireElement('#card-hand', HTMLElement);
 const handTitle = requireElement('#hand-title', HTMLElement);
 const status = requireElement('#card-status', HTMLElement);
 
-const overlayOrigin = new URLSearchParams(window.location.search).get('overlayOrigin')?.replace(/\/+$/, '');
+const overlayOrigin = new URLSearchParams(window.location.search)
+  .get('overlayOrigin')
+  ?.replace(/\/+$/, '');
 const overlaySrc = overlayOrigin ? `${overlayOrigin}/overlay.html` : '/overlay.html';
 
 const draftroll = await Draftroll.createOverlay({
