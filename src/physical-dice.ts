@@ -66,7 +66,11 @@ function subtract(a: PolyhedronVertex, b: PolyhedronVertex): [number, number, nu
 }
 
 function cross(a: PolyhedronVertex, b: PolyhedronVertex): [number, number, number] {
-  return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  return [
+    a[1] * b[2] - a[2] * b[1],
+    a[2] * b[0] - a[0] * b[2],
+    a[0] * b[1] - a[1] * b[0],
+  ];
 }
 
 function dot(a: PolyhedronVertex, b: PolyhedronVertex): number {
@@ -345,10 +349,9 @@ export function createCustomPhysicalDieDefinition(
   // Validate the caller's geometry before normalization so invalid zero/non-finite vectors cannot
   // be silently converted into plausible-looking renderer data.
   assertValidPhysicalDieDefinition(definition);
-  definition.outcomes = definition.outcomes.map((outcome) => ({
-    ...outcome,
-    supportNormals: outcome.supportNormals.map((normal) => normalize(normal)),
-  }));
+  for (const outcome of definition.outcomes) {
+    outcome.supportNormals = outcome.supportNormals.map((normal) => normalize(normal));
+  }
 
   // The shared validator/cloner is the single contract boundary for all physical definitions.
   return clonePhysicalDieDefinition(definition);
