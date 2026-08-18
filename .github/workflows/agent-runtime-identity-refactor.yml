@@ -1,0 +1,104 @@
+name: Agent runtime identity refactor
+
+on:
+  push:
+    branches:
+      - agent/runtime-identity-refactor-validation
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/runtime-identity-refactor-validation
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.14.0
+
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.17.0 --activate
+
+      - name: Apply identity refactor
+        run: |
+          node --check scripts/agent-refactor-runtime-identity.mjs
+          node scripts/agent-refactor-runtime-identity.mjs
+          rm scripts/agent-refactor-runtime-identity.mjs
+          rm .github/workflows/agent-runtime-identity-refactor.yml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Format changed files
+        run: >-
+          pnpm exec oxfmt --write
+          packages/protocol/src/index.ts
+          packages/core/src/evaluator.ts
+          packages/core/src/index.ts
+          packages/renderer/src/index.ts
+          src/physical-table.ts
+          src/physical-die-visuals.ts
+          src/physical-launch.ts
+          src/main.ts
+          scripts/test-visual-fallbacks.mjs
+          scripts/test-roll-updates.mjs
+          tests/browser/specs/additive-duplicate-id.spec.ts
+          docs/ARCHITECTURE.md
+
+      - name: Verify formatting
+        run: >-
+          pnpm exec oxfmt --check
+          packages/protocol/src/index.ts
+          packages/core/src/evaluator.ts
+          packages/core/src/index.ts
+          packages/renderer/src/index.ts
+          src/physical-table.ts
+          src/physical-die-visuals.ts
+          src/physical-launch.ts
+          src/main.ts
+          scripts/test-visual-fallbacks.mjs
+          scripts/test-roll-updates.mjs
+          tests/browser/specs/additive-duplicate-id.spec.ts
+          docs/ARCHITECTURE.md
+
+      - name: Lint and typecheck
+        run: |
+          pnpm lint
+          pnpm exec tsc --noEmit
+          pnpm check:packages
+          pnpm check:docs
+          pnpm test:browser:typecheck
+
+      - name: Core regression
+        run: pnpm test:core
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Build browser fixtures
+        run: pnpm test:browser:build
+
+      - name: Identity browser regression
+        run: pnpm exec playwright test tests/browser/specs/additive-duplicate-id.spec.ts --project=chromium
+
+      - name: Physical overlay browser regression
+        run: pnpm exec playwright test tests/browser/specs/overlay.spec.ts --project=chromium
+
+      - name: Commit validated refactor
+        run: |
+          git status --short
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Refactor produced no changes"
+            exit 1
+          fi
+          git commit -m "separate logical and runtime die identity"
+          git push origin HEAD:agent/runtime-identity-refactor-validation
