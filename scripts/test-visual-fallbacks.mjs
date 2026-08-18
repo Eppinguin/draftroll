@@ -23,7 +23,7 @@ const [
   readFile(new URL('../packages/renderer/src/physical.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/main.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/fallback-visuals.ts', import.meta.url), 'utf8'),
-  readFile(new URL('../src/physical-dice.ts', import.meta.url), 'utf8'),
+  readFile(new URL('../src/physical-dices.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/physical-die-visuals.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/physical-die-mesh.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/physical-launch.ts', import.meta.url), 'utf8'),
@@ -198,7 +198,7 @@ assert.match(physicalVisuals, /visualIndex: number/);
 assert.doesNotMatch(physicalLaunch, /id: string/);
 assert.match(renderer, /currently require relabel targeting/);
 assert.match(engine, /visual\.definition\.targeting !== 'relabel'/);
-assert.match(physicalDice, /input\.targeting \?\? 'relabel'/);
+assert.match(physicalDice, /targeting: 'relabel'/);
 assert.doesNotMatch(engine, /AdditionalPhysical|additionalPhysical/);
 assert.doesNotMatch(engine, /physicalFallbackReplay/);
 assert.doesNotMatch(physicalVisuals, /settledRotation/);
