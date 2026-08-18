@@ -53,8 +53,18 @@ jobs:
           node-version: 22.13.0
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm test:core
-      - run: node scripts/test-state-isolation.mjs
+      - name: Engine and evaluation
+        run: pnpm test:core:engine
+      - name: SDK and realtime lifecycle
+        run: pnpm test:core:sdk-realtime
+      - name: Renderer and physical dice
+        run: pnpm test:core:renderer
+      - name: Room protocol and security
+        run: pnpm test:core:rooms
+      - name: Physics and package entrypoints
+        run: pnpm test:core:physics
+      - name: Public state isolation
+        run: node scripts/test-state-isolation.mjs
 
   release-contract:
     name: Package and release contract
