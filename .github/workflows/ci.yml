@@ -34,6 +34,9 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
+      - name: Print lint diagnostics
+        if: failure()
+        run: pnpm exec oxlint . --format=agent || true
 
   core-tests:
     name: Core regression tests
