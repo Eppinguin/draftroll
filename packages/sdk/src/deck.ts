@@ -71,9 +71,10 @@ export interface DraftrollCardDraw {
 
 type IndexSampler = (upperExclusive: number) => number;
 
-type MutableDraftrollCard = Omit<DraftrollCard, 'metadata'> & {
-  metadata?: Record<string, unknown>;
-};
+type CardReference = Readonly<{
+  faceIndex: number;
+  copyIndex: number;
+}>;
 
 const MAXIMUM_DECK_SIZE = 100_000;
 
@@ -90,19 +91,6 @@ function cloneMetadata(
   } catch (cause) {
     throw new TypeError(`${context} must be structured-cloneable`, { cause });
   }
-}
-
-function cloneCard(card: DraftrollCard): MutableDraftrollCard {
-  return {
-    ...card,
-    metadata: cloneMetadata(card.metadata, `Card '${card.id}' metadata`),
-  };
-}
-
-function snapshotCard(card: DraftrollCard): DraftrollCard {
-  const metadata = cloneMetadata(card.metadata, `Card '${card.id}' metadata`);
-  if (metadata) Object.freeze(metadata);
-  return Object.freeze({ ...card, metadata });
 }
 
 function cloneDefinition(definition: CustomDiceDefinition): CustomDiceDefinition {
@@ -145,15 +133,15 @@ function samplerFromRandom(random?: () => number): IndexSampler {
   };
 }
 
-function shuffle(items: unknown[], sampleIndex: IndexSampler): void {
+function shuffle<T>(items: T[], sampleIndex: IndexSampler): void {
   for (let i = items.length - 1; i > 0; i -= 1) {
     const j = sampleIndex(i + 1);
     [items[i], items[j]] = [items[j], items[i]];
   }
 }
 
-function toDrawPile(cards: readonly DraftrollCard[]): MutableDraftrollCard[] {
-  return cards.map(cloneCard).reverse();
+function toDrawPile(cards: readonly CardReference[]): CardReference[] {
+  return cards.slice().reverse();
 }
 
 /**
@@ -166,10 +154,10 @@ export class DraftrollDeck {
   readonly id: string;
   private readonly definitionState: CustomDiceDefinition;
   private readonly sampleIndex: IndexSampler;
-  private readonly source: MutableDraftrollCard[];
-  private drawPile: MutableDraftrollCard[];
-  private discardPile: MutableDraftrollCard[] = [];
-  private inPlay = new Map<string, MutableDraftrollCard>();
+  private readonly source: readonly CardReference[];
+  private drawPile: CardReference[];
+  private discardPile: CardReference[] = [];
+  private inPlay = new Map<string, CardReference>();
 
   /**
    * Creates an independent deck from system-agnostic card definitions.
@@ -183,6 +171,7 @@ export class DraftrollDeck {
     if (!this.id) throw new Error('A deck ID is required');
     if (!cards.length) throw new Error(`Deck '${this.id}' requires at least one card`);
     this.sampleIndex = samplerFromRandom(options.random);
+
     let totalCopies = 0;
     const normalized = cards.map((card, index) => {
       if (typeof card.result !== 'number' && typeof card.result !== 'string')
@@ -199,32 +188,30 @@ export class DraftrollDeck {
         throw new Error(`Deck '${this.id}' may contain at most ${MAXIMUM_DECK_SIZE} card copies`);
       }
       return {
-        ...card,
+        face: {
+          result: card.result,
+          value: card.value,
+          label: card.label,
+          metadata: cloneMetadata(card.metadata, `Card ${index + 1} metadata`),
+        } satisfies CustomDieFace,
         copies,
-        metadata: cloneMetadata(card.metadata, `Card ${index + 1} metadata`),
       };
     });
+
     this.definitionState = {
       id: this.id,
       renderAs: 'card',
       metadata: cloneMetadata(options.metadata, `Deck '${this.id}' metadata`),
-      faces: normalized.map(({ copies: _copies, ...card }, index) => ({
-        ...card,
-        metadata: cloneMetadata(card.metadata, `Deck '${this.id}' face ${index + 1} metadata`),
-      })),
+      faces: normalized.map(({ face }) => face),
     };
-    this.source = normalized.flatMap((card, faceIndex) =>
-      Array.from({ length: card.copies }, (_, copyIndex) => ({
-        id: `${this.id}:card:${faceIndex}:${copyIndex}`,
-        deckId: this.id,
-        faceIndex,
-        copyIndex,
-        result: card.result,
-        numericValue: card.value ?? (typeof card.result === 'number' ? card.result : 0),
-        label: card.label ?? String(card.result),
-        metadata: cloneMetadata(card.metadata, `Deck '${this.id}' face ${faceIndex + 1} metadata`),
-      })),
-    );
+
+    const source: CardReference[] = [];
+    normalized.forEach(({ copies }, faceIndex) => {
+      for (let copyIndex = 0; copyIndex < copies; copyIndex += 1) {
+        source.push({ faceIndex, copyIndex });
+      }
+    });
+    this.source = source;
     this.drawPile = toDrawPile(this.source);
     if (options.shuffle !== false) this.shuffle();
   }
@@ -255,11 +242,11 @@ export class DraftrollDeck {
     return this.drawPile
       .slice()
       .reverse()
-      .map((card) => snapshotCard(card));
+      .map((reference) => this.snapshotCard(reference));
   }
   /** Returns detached snapshots of the cards currently discarded. */
   get discardedCards(): readonly DraftrollCard[] {
-    return this.discardPile.map(snapshotCard);
+    return this.discardPile.map((reference) => this.snapshotCard(reference));
   }
 
   /** Randomizes the remaining draw pile in place. */
@@ -274,60 +261,46 @@ export class DraftrollDeck {
       throw new Error('Draw count must be a positive safe integer');
     if (count > this.drawPile.length)
       throw new Error(`Deck '${this.id}' has only ${this.drawPile.length} card(s) remaining`);
-    const cards: DraftrollCard[] = [];
+
+    const references: CardReference[] = [];
     for (let i = 0; i < count; i += 1) {
-      const card = this.drawPile.pop()!;
-      this.inPlay.set(card.id, card);
-      cards.push(snapshotCard(card));
+      const reference = this.drawPile.pop()!;
+      this.inPlay.set(this.cardId(reference), reference);
+      references.push(reference);
     }
-    const frozenCards = Object.freeze(cards.slice());
-    const total = frozenCards.reduce((sum, card) => sum + card.numericValue, 0);
-    return Object.freeze({
+
+    const cards = references.map((reference) => this.snapshotCard(reference));
+    const total = references.reduce((sum, reference) => sum + this.numericValue(reference), 0);
+
+    return {
       deckId: this.id,
-      cards: frozenCards,
+      cards,
       total,
-      toDisplayInput: (options: DraftrollCardDisplayOptions = {}): DisplayRollInput => {
-        const dice: ExternalDieResult[] = frozenCards.map((card) => ({
-          id: card.id,
-          type: this.id,
-          customDiceId: this.id,
-          faceIndex: card.faceIndex,
-          result: card.result,
-          numericValue: card.numericValue,
-          kept: true,
-          generatedBy: 'external',
-          metadata: {
-            ...cloneMetadata(card.metadata, `Card '${card.id}' metadata`),
-            deckId: this.id,
-            copyIndex: card.copyIndex,
-          },
-        }));
-        return {
-          mode: 'display',
-          dice,
-          total,
-          name: options.name,
-          expression: options.expression,
-          themeId: options.themeId,
-          annotation: options.annotation,
-          comment: options.comment,
-          customDice: [cloneDefinition(this.definitionState)],
-          metadata: {
-            ...cloneMetadata(options.metadata, `Deck '${this.id}' display metadata`),
-            deckId: this.id,
-            cardDraw: true,
-          },
-        };
-      },
-    });
+      toDisplayInput: (options: DraftrollCardDisplayOptions = {}): DisplayRollInput => ({
+        mode: 'display',
+        dice: references.map((reference) => this.externalResult(reference)),
+        total,
+        name: options.name,
+        expression: options.expression,
+        themeId: options.themeId,
+        annotation: options.annotation,
+        comment: options.comment,
+        customDice: [cloneDefinition(this.definitionState)],
+        metadata: {
+          ...cloneMetadata(options.metadata, `Deck '${this.id}' display metadata`),
+          deckId: this.id,
+          cardDraw: true,
+        },
+      }),
+    };
   }
 
   /** Moves active cards into the discard pile as one atomic operation. */
   discard(cards: DraftrollCard | string | readonly (DraftrollCard | string)[]): this {
     const resolved = this.resolveActiveCards(cards);
-    for (const card of resolved) {
-      this.inPlay.delete(card.id);
-      this.discardPile.push(card);
+    for (const reference of resolved) {
+      this.inPlay.delete(this.cardId(reference));
+      this.discardPile.push(reference);
     }
     return this;
   }
@@ -338,18 +311,19 @@ export class DraftrollDeck {
     options: { shuffle?: boolean } = {},
   ): this {
     const resolved = this.resolveActiveCards(cards);
-    for (const card of resolved) this.inPlay.delete(card.id);
-    if (options.shuffle === false) {
-      this.drawPile.push(...resolved.slice().reverse());
-    } else {
+    for (const reference of resolved) this.inPlay.delete(this.cardId(reference));
+    if (options.shuffle === true) {
       this.drawPile.push(...resolved);
       this.shuffle();
+    } else {
+      this.drawPile.push(...resolved.slice().reverse());
     }
     return this;
   }
 
   /** Moves every discarded card back into the draw pile and shuffles it. */
   reshuffleDiscard(): this {
+    if (this.discardPile.length === 0) return this;
     this.drawPile.push(...this.discardPile.splice(0));
     return this.shuffle();
   }
@@ -362,9 +336,58 @@ export class DraftrollDeck {
     return this;
   }
 
+  private cardId(reference: CardReference): string {
+    return `${this.id}:card:${reference.faceIndex}:${reference.copyIndex}`;
+  }
+
+  private face(reference: CardReference): CustomDieFace {
+    return this.definitionState.faces[reference.faceIndex];
+  }
+
+  private numericValue(reference: CardReference): number {
+    const face = this.face(reference);
+    return face.value ?? (typeof face.result === 'number' ? face.result : 0);
+  }
+
+  private snapshotCard(reference: CardReference): DraftrollCard {
+    const face = this.face(reference);
+    return {
+      id: this.cardId(reference),
+      deckId: this.id,
+      faceIndex: reference.faceIndex,
+      copyIndex: reference.copyIndex,
+      result: face.result,
+      numericValue: this.numericValue(reference),
+      label: face.label ?? String(face.result),
+      metadata: cloneMetadata(
+        face.metadata,
+        `Deck '${this.id}' face ${reference.faceIndex + 1} metadata`,
+      ),
+    };
+  }
+
+  private externalResult(reference: CardReference): ExternalDieResult {
+    const card = this.snapshotCard(reference);
+    return {
+      id: card.id,
+      type: this.id,
+      customDiceId: this.id,
+      faceIndex: card.faceIndex,
+      result: card.result,
+      numericValue: card.numericValue,
+      kept: true,
+      generatedBy: 'external',
+      metadata: {
+        ...cloneMetadata(card.metadata, `Card '${card.id}' metadata`),
+        deckId: this.id,
+        copyIndex: card.copyIndex,
+      },
+    };
+  }
+
   private resolveActiveCards(
     cards: DraftrollCard | string | readonly (DraftrollCard | string)[],
-  ): MutableDraftrollCard[] {
+  ): CardReference[] {
     const items = Array.isArray(cards) ? cards : [cards];
     const ids = items.map((item) => (typeof item === 'string' ? item : item.id));
     const uniqueIds = new Set(ids);
@@ -372,9 +395,9 @@ export class DraftrollDeck {
       throw new Error(`Deck '${this.id}' card operation contains duplicate card IDs`);
     }
     return ids.map((id) => {
-      const card = this.inPlay.get(id);
-      if (!card) throw new Error(`Card '${id}' is not active in deck '${this.id}'`);
-      return card;
+      const reference = this.inPlay.get(id);
+      if (!reference) throw new Error(`Card '${id}' is not active in deck '${this.id}'`);
+      return reference;
     });
   }
 }
