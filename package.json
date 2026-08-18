@@ -44,7 +44,7 @@
     "test:room-protocol": "node scripts/test-room-protocol.mjs",
     "test:visual-fallbacks": "node scripts/test-visual-fallbacks.mjs",
     "test:generated-polyhedra": "node scripts/test-generated-polyhedra.mjs",
-    "test:cards-demo": "node scripts/test-cards-demo.mjs",
+    "test:cards-demo": "node scripts/test-cards-demo.mjs && node scripts/test-deck-atomicity.mjs",
     "test:themes": "node scripts/test-runtime-themes.mjs",
     "test:validation": "node scripts/test-runtime-validation.mjs",
     "test:hardening": "node scripts/test-room-hardening.mjs",
