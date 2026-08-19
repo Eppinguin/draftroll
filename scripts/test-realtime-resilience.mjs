@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import { runTsc } from './lib/load-typescript.mjs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const root = resolve(new URL('..', import.meta.url).pathname);
+const root = fileURLToPath(new URL('..', import.meta.url));
 const temp = await mkdtemp(join(tmpdir(), 'draftroll-realtime-resilience-'));
 const out = join(temp, 'build');
 const config = join(temp, 'tsconfig.json');
@@ -260,10 +260,22 @@ try {
     }),
   );
   await waitFor(() => observedErrors.some((error) => error.code === 'long_range_recovery_corrupt'));
+  await waitFor(() => room.connectionDiagnostics.state === 'failed');
+  const recoveryError = observedErrors.find((error) => error.code === 'long_range_recovery_corrupt');
+  assert.equal(recoveryError?.details?.eventSequence, recoveryBlockedAtEventSequence);
+  assert.equal(recoveryError?.recoverable, false);
+  assert.equal(room.connectionDiagnostics.code, 'long_range_recovery_corrupt');
+  assert.equal(room.connectionDiagnostics.recoverable, false);
+  assert.equal(room.getLastEventSequence(), 5, 'corrupt recovery must not advance the event cursor');
+
+  second.serverSend(makeRollStart({ rollId: 'after-corrupt-7', eventSequence: 7 }));
+  await new Promise((settle) => setTimeout(settle, 20));
+  assert.equal(room.getLastEventSequence(), 5, 'events after the corrupt gap must remain blocked');
+  assert.equal(observed.includes('after-corrupt-7'), false);
   assert.equal(
-    observedErrors.find((error) => error.code === 'long_range_recovery_corrupt')?.details
-      ?.eventSequence,
-    recoveryBlockedAtEventSequence,
+    MockWebSocket.instances.length,
+    2,
+    'corrupt retained recovery must suppress automatic reconnect loops',
   );
 
   const metrics = room.getRequestMetrics();
@@ -278,7 +290,7 @@ try {
   assert.equal(metrics.hiddenProjections, 1);
   assert.ok(recoveryDurationMs >= 0);
   assert.ok(states.some((state) => state.state === 'reconnecting'));
-  assert.equal(room.connectionDiagnostics.state, 'open');
+  assert.ok(states.some((state) => state.state === 'failed'));
   if (room.connectionDiagnostics.roundTripMs !== undefined)
     assert.ok(room.connectionDiagnostics.roundTripMs >= 0);
   room.close();
@@ -293,7 +305,8 @@ try {
           'abnormal disconnect and capped reconnect',
           'resume cursor propagation',
           'truncated replay durable recovery',
-          'corrupt durable replay fails closed with an explicit recovery error',
+          'corrupt durable replay pins the cursor and fails the connection closed',
+          'events beyond a corrupt replay gap are ignored and automatic reconnect is suppressed',
           'event ordering and duplicate suppression',
           'request cancellation and revision-conflict metrics',
           'connection diagnostics, hidden-projection metrics, and observer isolation',
