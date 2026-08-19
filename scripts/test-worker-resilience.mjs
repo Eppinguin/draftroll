@@ -15,6 +15,11 @@ const migrationRequests = readFileSync(
   'utf8',
 );
 
+function sectionIncludes(source, start, end, marker) {
+  const index = source.indexOf(marker, start);
+  return index >= start && index < end;
+}
+
 for (const marker of [
   "this.state.getWebSockets('draftroll-room')",
   'deserializeAttachment(socket)',
@@ -26,7 +31,6 @@ for (const marker of [
 const bulkStart = worker.indexOf('private async handleBulkRollUpdate');
 const bulkEnd = worker.indexOf('private async handleVisibilityUpdate', bulkStart);
 assert.ok(bulkStart >= 0 && bulkEnd > bulkStart, 'bulk update handler is missing');
-const bulk = worker.slice(bulkStart, bulkEnd);
 for (const marker of [
   'Validate and evaluate every mutation before committing any state',
   'assertRevision(previous.result, item.expectedRevision, item.rollId)',
@@ -34,10 +38,13 @@ for (const marker of [
   'for (const internal of internalEvents) this.broadcastRoll(internal)',
   'this.persistEventSafely(acknowledgement, policy)',
 ])
-  assert.ok(bulk.includes(marker), `bulk update atomicity/idempotency is missing ${marker}`);
+  assert.ok(
+    sectionIncludes(worker, bulkStart, bulkEnd, marker),
+    `bulk update atomicity/idempotency is missing ${marker}`,
+  );
 assert.ok(
-  bulk.indexOf('await this.state.storage.put(storageEntries)') <
-    bulk.indexOf('for (const internal of internalEvents) this.broadcastRoll(internal)'),
+  worker.indexOf('await this.state.storage.put(storageEntries)', bulkStart) <
+    worker.indexOf('for (const internal of internalEvents) this.broadcastRoll(internal)', bulkStart),
   'bulk update broadcasts before the atomic Durable Object commit',
 );
 
@@ -68,13 +75,15 @@ assert.ok(
   durableEventsStart >= 0 && durableEventsEnd > durableEventsStart,
   'durable event replay is missing',
 );
-const durableEvents = worker.slice(durableEventsStart, durableEventsEnd);
 for (const marker of [
   'migrateStoredInternalEvent(JSON.parse(row.event_json))',
   "this.logStructured('room.event_storage_invalid'",
   "source: 'd1_replay'",
 ])
-  assert.ok(durableEvents.includes(marker), `D1 replay corruption handling is missing ${marker}`);
+  assert.ok(
+    sectionIncludes(worker, durableEventsStart, durableEventsEnd, marker),
+    `D1 replay corruption handling is missing ${marker}`,
+  );
 
 const eventBufferStart = worker.indexOf('private async getEventBuffer');
 const eventBufferEnd = worker.indexOf('private async recordRequest', eventBufferStart);
@@ -82,14 +91,16 @@ assert.ok(
   eventBufferStart >= 0 && eventBufferEnd > eventBufferStart,
   'event buffer reader is missing',
 );
-const eventBuffer = worker.slice(eventBufferStart, eventBufferEnd);
 for (const marker of [
-  "this.state.storage.get<unknown>('eventBuffer')",
+  "this.state.storage.get('eventBuffer')",
   'Array.isArray(stored)',
   'migrateStoredInternalEvent(event)',
   "source: 'durable_object_buffer'",
 ])
-  assert.ok(eventBuffer.includes(marker), `Durable Object event-buffer hardening is missing ${marker}`);
+  assert.ok(
+    sectionIncludes(worker, eventBufferStart, eventBufferEnd, marker),
+    `Durable Object event-buffer hardening is missing ${marker}`,
+  );
 
 const duplicateStart = worker.indexOf('private async findDuplicateRequest');
 const duplicateEnd = worker.indexOf('private async nextRollSequence', duplicateStart);
@@ -97,15 +108,17 @@ assert.ok(
   duplicateStart >= 0 && duplicateEnd > duplicateStart,
   'duplicate request lookup is missing',
 );
-const duplicate = worker.slice(duplicateStart, duplicateEnd);
 for (const marker of [
   "'idempotency_replay_unavailable'",
   "source: 'idempotency_replay'",
   'migrateStoredInternalEvent(JSON.parse(serialized))',
 ])
-  assert.ok(duplicate.includes(marker), `fail-closed idempotency replay is missing ${marker}`);
+  assert.ok(
+    sectionIncludes(worker, duplicateStart, duplicateEnd, marker),
+    `fail-closed idempotency replay is missing ${marker}`,
+  );
 assert.equal(
-  duplicate.includes('if (!serialized) return null'),
+  sectionIncludes(worker, duplicateStart, duplicateEnd, 'if (!serialized) return null'),
   false,
   'a recorded request must not be re-executed when its retained response is unavailable',
 );
@@ -120,7 +133,6 @@ assert.ok(
   storedMigrationStart >= 0 && storedMigrationEnd > storedMigrationStart,
   'stored event migration boundary is missing',
 );
-const storedMigration = worker.slice(storedMigrationStart, storedMigrationEnd);
 for (const marker of [
   'isRecord(event)',
   "case 'roll_start'",
@@ -129,14 +141,16 @@ for (const marker of [
   'decodeNormalizedRollResult(event.result, { allowLegacyResults: true })',
   'Stored room event has unsupported type',
 ])
-  assert.ok(storedMigration.includes(marker), `stored event migration validation is missing ${marker}`);
+  assert.ok(
+    sectionIncludes(worker, storedMigrationStart, storedMigrationEnd, marker),
+    `stored event migration validation is missing ${marker}`,
+  );
 
 const sendStart = worker.indexOf('function sendEvent');
 const sendEnd = worker.indexOf('interface HibernatableWebSocket', sendStart);
 assert.ok(sendStart >= 0 && sendEnd > sendStart, 'server event sender is missing');
-const send = worker.slice(sendStart, sendEnd);
 assert.ok(
-  send.includes('allowLegacyResults: false'),
+  sectionIncludes(worker, sendStart, sendEnd, 'allowLegacyResults: false'),
   'outbound server events must reject legacy results instead of repairing them on the wire',
 );
 
