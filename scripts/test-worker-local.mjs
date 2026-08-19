@@ -178,7 +178,11 @@ async function waitForPersistedRequest(
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  if (lastError) throw lastError;
+  if (lastError !== undefined) {
+    throw lastError instanceof Error
+      ? lastError
+      : new Error('Last persisted-request query failed', { cause: lastError });
+  }
   throw new Error(
     `Timed out waiting for persisted request '${requestId}' at event ${expectedEventSequence}`,
   );
