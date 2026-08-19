@@ -69,27 +69,33 @@ try {
     assert.ok(exportName in protocol, `public protocol facade is missing '${exportName}'`);
   }
 
+  const objectNonCloneable = { callback: () => {} };
+  const arrayNonCloneable = [{ callback: () => {} }];
   const decoderCases = [
-    ['decodeRollVisibility', protocol.decodeRollVisibility],
-    ['decodeRoomPolicy', protocol.decodeRoomPolicy],
-    ['decodeRoomPolicyPatch', protocol.decodeRoomPolicyPatch],
-    ['decodeParticipantIdentityInput', protocol.decodeParticipantIdentityInput],
-    ['decodeRoomCapabilityTokenPayload', protocol.decodeRoomCapabilityTokenPayload],
-    ['decodeCustomDiceDefinitions', protocol.decodeCustomDiceDefinitions],
-    ['decodeRollInput', protocol.decodeRollInput],
-    ['decodeRollUpdateInput', protocol.decodeRollUpdateInput],
-    ['decodeNormalizedRollResult', protocol.decodeNormalizedRollResult],
-    ['decodeClientToServerEvent', protocol.decodeClientToServerEvent],
-    ['decodeServerToClientEvent', protocol.decodeServerToClientEvent],
+    ['decodeRollVisibility', protocol.decodeRollVisibility, objectNonCloneable],
+    ['decodeRoomPolicy', protocol.decodeRoomPolicy, objectNonCloneable],
+    ['decodeRoomPolicyPatch', protocol.decodeRoomPolicyPatch, objectNonCloneable],
+    ['decodeParticipantIdentityInput', protocol.decodeParticipantIdentityInput, objectNonCloneable],
+    [
+      'decodeRoomCapabilityTokenPayload',
+      protocol.decodeRoomCapabilityTokenPayload,
+      objectNonCloneable,
+    ],
+    ['decodeCustomDiceDefinitions', protocol.decodeCustomDiceDefinitions, arrayNonCloneable],
+    ['decodeRollInput', protocol.decodeRollInput, objectNonCloneable],
+    ['decodeRollUpdateInput', protocol.decodeRollUpdateInput, objectNonCloneable],
+    ['decodeNormalizedRollResult', protocol.decodeNormalizedRollResult, objectNonCloneable],
+    ['decodeClientToServerEvent', protocol.decodeClientToServerEvent, objectNonCloneable],
+    ['decodeServerToClientEvent', protocol.decodeServerToClientEvent, objectNonCloneable],
   ];
 
-  for (const [label, decoder] of decoderCases) {
+  for (const [label, decoder, nonCloneableInput] of decoderCases) {
     assertBoundaryFailure(
       callWithoutThrow(() => decoder(createRevokedProxy())),
       label,
     );
     assertBoundaryFailure(
-      callWithoutThrow(() => decoder({ callback: () => {} })),
+      callWithoutThrow(() => decoder(nonCloneableInput)),
       label,
     );
   }
@@ -139,7 +145,8 @@ try {
         tested: [
           'public runtime exports stay in parity with the canonical protocol entrypoint',
           'all object-facing protocol decoders reject revoked proxies without throwing',
-          'non-cloneable and throwing-getter values return structured boundary failures',
+          'non-cloneable values matching each decoder boundary return structured failures',
+          'throwing getters return structured boundary failures',
           'parse/type-guard helpers remain non-throwing',
           'successful public boundary decodes return detached data',
         ],
