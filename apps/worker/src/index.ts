@@ -2367,7 +2367,7 @@ export class DiceRoomObject {
   }
 
   private async getEventBuffer(): Promise<InternalRoomEvent[]> {
-    const stored = await this.state.storage.get<unknown>('eventBuffer');
+    const stored = await this.state.storage.get('eventBuffer');
     if (stored === undefined) return [];
     if (!Array.isArray(stored)) {
       this.logStructured('room.event_storage_invalid', {
@@ -2783,8 +2783,15 @@ function assertCanMutate(
   const privileged =
     participant.permissions.includes('room:manage') ||
     participant.permissions.includes(anyPermission);
+  const ownPermissionGranted = own && participant.permissions.includes(ownPermission);
+  if (!privileged && !ownPermissionGranted) {
+    const message = own
+      ? `Missing room permission '${ownPermission}' or '${anyPermission}'`
+      : `Missing room permission '${anyPermission}'`;
+    throw new RoomOperationError('permission_denied', message, 403);
+  }
   if (privileged && privilegedAllowed) return;
-  if (own && participant.permissions.includes(ownPermission) && ownAllowed) return;
+  if (ownPermissionGranted && ownAllowed) return;
   throw new RoomOperationError(
     'policy_denied',
     `Room policy does not allow participant '${participant.participantId}' to ${operation} roll '${record.result.rollId}'`,
