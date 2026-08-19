@@ -2004,7 +2004,7 @@ export class DiceRoomObject {
     const events = (query.results ?? []).flatMap((row) => {
       try {
         // Deserializes rows this Durable Object previously serialized itself.
-        const internal: InternalRoomEvent = JSON.parse(row.event_json);
+        const internal = migrateStoredInternalEvent(JSON.parse(row.event_json) as InternalRoomEvent);
         if (internal.type === 'bulk_rolls_updated') return [];
         const projected = projectInternalEvent(internal, participant, true);
         return projected ? [projected] : [];
@@ -2357,7 +2357,8 @@ export class DiceRoomObject {
   }
 
   private async getEventBuffer(): Promise<InternalRoomEvent[]> {
-    return (await this.state.storage.get<InternalRoomEvent[]>('eventBuffer')) ?? [];
+    const events = (await this.state.storage.get<InternalRoomEvent[]>('eventBuffer')) ?? [];
+    return events.map(migrateStoredInternalEvent);
   }
 
   private async recordRequest(
@@ -2440,8 +2441,7 @@ export class DiceRoomObject {
     if (!serialized) return null;
     try {
       // Deserializes storage this Durable Object previously serialized itself.
-      const parsed: InternalRoomEvent = JSON.parse(serialized);
-      return parsed;
+      return migrateStoredInternalEvent(JSON.parse(serialized) as InternalRoomEvent);
     } catch {
       return null;
     }
@@ -2504,6 +2504,15 @@ function roomParticipantFromAttachment(participant: ConnectionAttachment): RoomP
     metadata: participant.metadata,
     connectedAt: participant.connectedAt,
   };
+}
+
+function migrateStoredInternalEvent(event: InternalRoomEvent): InternalRoomEvent {
+  if (!('result' in event)) return event;
+  const decoded = decodeNormalizedRollResult(event.result, { allowLegacyResults: true });
+  if (!decoded.success) {
+    throw new Error(`Stored room event contains an invalid roll result: ${decoded.error.message}`);
+  }
+  return { ...event, result: decoded.data };
 }
 
 function projectInternalEvent(
