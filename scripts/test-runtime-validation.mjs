@@ -196,6 +196,29 @@ try {
     },
     result: structuredClone(legacy),
   });
+  const createPolicyReplayEvent = () => {
+    const policy = createRoomPolicy('open-table');
+    return {
+      type: 'room_policy_updated',
+      protocolVersion: DRAFTROLL_PROTOCOL_VERSION,
+      roomId: 'table',
+      eventSequence: 2,
+      revision: 1,
+      actor: { participantId: 'a', sessionId: 's', name: 'A', roles: [] },
+      policy,
+      previousPolicy: structuredClone(policy),
+    };
+  };
+  const createTokenReplayEvent = () => ({
+    type: 'room_token_revoked',
+    protocolVersion: DRAFTROLL_PROTOCOL_VERSION,
+    roomId: 'table',
+    eventSequence: 3,
+    actor: { participantId: 'a', sessionId: 's', name: 'A', roles: [] },
+    target: { type: 'token', tokenId: 'token-1' },
+    revokedAt: result.createdAt,
+    disconnectedSessions: 0,
+  });
 
   const legacyEvent = createLegacyEvent();
   assert.equal(
@@ -259,7 +282,11 @@ try {
   });
   assert.equal(strictLegacyRoomState.success, false);
   for (const [path] of roomStateRollSlots(legacyRoomState)) {
-    assertIssue(strictLegacyRoomState, 'invalid_result_schema_version', `${path}.result.schemaVersion`);
+    assertIssue(
+      strictLegacyRoomState,
+      'invalid_result_schema_version',
+      `${path}.result.schemaVersion`,
+    );
   }
   assert.equal(isServerToClientEvent(legacyRoomState), false);
   for (const [, event] of roomStateRollSlots(legacyRoomState)) {
@@ -275,7 +302,9 @@ try {
     for (const protocolVersion of [undefined, DRAFTROLL_PROTOCOL_VERSION + 1]) {
       const invalidProtocolState = structuredClone(legacyRoomState);
       const nestedEvent =
-        field.length === 2 ? invalidProtocolState[field[0]][field[1]] : invalidProtocolState[field[0]];
+        field.length === 2
+          ? invalidProtocolState[field[0]][field[1]]
+          : invalidProtocolState[field[0]];
       if (protocolVersion === undefined) delete nestedEvent.protocolVersion;
       else nestedEvent.protocolVersion = protocolVersion;
       const decoded = decodeServerToClientEvent(invalidProtocolState, {
@@ -285,6 +314,24 @@ try {
         decoded,
         protocolVersion === undefined ? 'invalid_protocol_version' : 'unsupported_protocol_version',
         `${path}.protocolVersion`,
+      );
+    }
+  }
+
+  for (const createReplayEvent of [createPolicyReplayEvent, createTokenReplayEvent]) {
+    for (const protocolVersion of [undefined, DRAFTROLL_PROTOCOL_VERSION + 1]) {
+      const invalidProtocolState = structuredClone(legacyRoomState);
+      const replayEvent = createReplayEvent();
+      if (protocolVersion === undefined) delete replayEvent.protocolVersion;
+      else replayEvent.protocolVersion = protocolVersion;
+      invalidProtocolState.recentEvents = [replayEvent];
+      const decoded = decodeServerToClientEvent(invalidProtocolState, {
+        allowLegacyResults: true,
+      });
+      assertIssue(
+        decoded,
+        protocolVersion === undefined ? 'invalid_protocol_version' : 'unsupported_protocol_version',
+        '$.recentEvents.0.protocolVersion',
       );
     }
   }
