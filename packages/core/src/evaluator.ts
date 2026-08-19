@@ -14,6 +14,7 @@ import type {
   RollTreeNode,
   StructuredRollOperation,
 } from '../../protocol/src/index';
+import { DRAFTROLL_RESULT_SCHEMA_VERSION } from '../../protocol/src/version';
 import type {
   AstNode,
   BinaryOperator,
@@ -150,7 +151,7 @@ export function evaluateParsedExpression(
     const modifier = extractSimpleModifier(ast);
     const total = normalizeZero(evaluated.value);
     const result: NormalizedRollResult = {
-      schemaVersion: 1,
+      schemaVersion: DRAFTROLL_RESULT_SCHEMA_VERSION,
       authority: options.authority ?? 'local',
       name: options.name,
       expression: parsed.expression,
@@ -332,7 +333,7 @@ export function evaluateStructuredInput(
       children: treeChildren,
     };
     const result: NormalizedRollResult = {
-      schemaVersion: 1,
+      schemaVersion: DRAFTROLL_RESULT_SCHEMA_VERSION,
       authority: options.authority ?? 'local',
       name: input.name ?? options.name,
       total,
