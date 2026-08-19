@@ -10,6 +10,37 @@ const tempRoot = await mkdtemp(join(tmpdir(), 'draftroll-runtime-validation-'));
 const outDir = join(tempRoot, 'build');
 const configPath = join(tempRoot, 'tsconfig.json');
 
+function callWithoutThrow(callback) {
+  let value;
+  assert.doesNotThrow(() => {
+    value = callback();
+  });
+  return value;
+}
+
+function assertIssue(decoded, code, path) {
+  assert.equal(decoded.success, false);
+  assert.ok(
+    decoded.error.issues.some(
+      (entry) => entry.code === code && (path === undefined || entry.path === path),
+    ),
+  );
+}
+
+function createRevokedProxy() {
+  const { proxy, revoke } = Proxy.revocable({}, {});
+  revoke();
+  return proxy;
+}
+
+function roomStateRollSlots(roomState) {
+  return [
+    ['$.recentEvents.0', roomState.recentEvents[0]],
+    ['$.recentRolls.0', roomState.recentRolls[0]],
+    ['$.recentRoll', roomState.recentRoll],
+  ];
+}
+
 try {
   await writeFile(
     configPath,
@@ -63,27 +94,6 @@ try {
     parseRuntimeJson,
   } = protocol;
   const { DiceEngine, evaluateParsedExpression } = core;
-
-  const callWithoutThrow = (callback) => {
-    let value;
-    assert.doesNotThrow(() => {
-      value = callback();
-    });
-    return value;
-  };
-  const assertIssue = (decoded, code, path) => {
-    assert.equal(decoded.success, false);
-    assert.ok(
-      decoded.error.issues.some(
-        (entry) => entry.code === code && (path === undefined || entry.path === path),
-      ),
-    );
-  };
-  const createRevokedProxy = () => {
-    const { proxy, revoke } = Proxy.revocable({}, {});
-    revoke();
-    return proxy;
-  };
 
   const engine = new DiceEngine({ rng: { integer: (minimum) => minimum } });
   const result = engine.roll('1d20+5');
@@ -260,11 +270,6 @@ try {
     recentRolls: [createLegacyEvent()],
     recentRoll: createLegacyEvent(),
   };
-  const roomStateRollSlots = (roomState) => [
-    ['$.recentEvents.0', roomState.recentEvents[0]],
-    ['$.recentRolls.0', roomState.recentRolls[0]],
-    ['$.recentRoll', roomState.recentRoll],
-  ];
 
   const migratedRoomState = decodeServerToClientEvent(legacyRoomState, {
     allowLegacyResults: true,
