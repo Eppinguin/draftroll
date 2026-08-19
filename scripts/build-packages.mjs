@@ -1,6 +1,6 @@
 import { cp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { runTsc } from './lib/load-typescript.mjs';
-import { dirname, extname, join, resolve } from 'node:path';
+import { dirname, extname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -16,16 +16,20 @@ if (compile.status !== 0) {
 
 const packageNames = new Set(await readdir(packagesRoot));
 
-function rewriteSpecifier(specifier, outputExtension) {
-  const crossPackage = /^\.\.\/\.\.\/([a-z0-9-]+)\/src(?:\/(.+))?$/.exec(specifier);
-  if (crossPackage && packageNames.has(crossPackage[1])) {
-    const [, packageName, sourceModule] = crossPackage;
-    if (sourceModule === undefined || sourceModule === 'index') return `@draftroll/${packageName}`;
+function rewriteSpecifier(specifier, outputExtension, fromPath) {
+  if (!specifier.startsWith('.')) return specifier;
+
+  const resolvedTarget = resolve(dirname(fromPath), specifier);
+  const relativeTarget = relative(packagesRoot, resolvedTarget);
+  const [packageName, sourceDirectory, ...sourceSegments] = relativeTarget.split(sep);
+  if (packageNames.has(packageName) && sourceDirectory === 'src') {
+    const sourceModule = sourceSegments.join('/');
+    if (sourceModule === '' || sourceModule === 'index') return `@draftroll/${packageName}`;
     throw new Error(
       `Release build cannot publish cross-package source import '${specifier}'. Import from the package public entrypoint instead.`,
     );
   }
-  if (!specifier.startsWith('.')) return specifier;
+
   if (extname(specifier)) return specifier;
   return `${specifier}${outputExtension}`;
 }
@@ -37,12 +41,12 @@ async function rewriteFile(path) {
     .replace(
       /(\bfrom\s+|\bimport\s*\(\s*|\bimport\s+)(["'])([^"']+)\2/g,
       (match, prefix, quote, specifier) =>
-        `${prefix}${quote}${rewriteSpecifier(specifier, outputExtension)}${quote}`,
+        `${prefix}${quote}${rewriteSpecifier(specifier, outputExtension, path)}${quote}`,
     )
     .replace(
       /(\bexport\s+\*\s+from\s+)(["'])([^"']+)\2/g,
       (match, prefix, quote, specifier) =>
-        `${prefix}${quote}${rewriteSpecifier(specifier, outputExtension)}${quote}`,
+        `${prefix}${quote}${rewriteSpecifier(specifier, outputExtension, path)}${quote}`,
     );
   await writeFile(path, rewritten);
 }

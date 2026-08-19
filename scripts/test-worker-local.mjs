@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runSmoke } from './smoke-worker.mjs';
 
-const pnpmCommand = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
 const baseUrl = process.env.DRAFTROLL_BASE_URL ?? 'http://127.0.0.1:8787';
 const workerRoot = join(process.cwd(), 'apps', 'worker');
 const wranglerCommand = join(
@@ -12,9 +13,19 @@ const wranglerCommand = join(
   '.bin',
   process.platform === 'win32' ? 'wrangler.cmd' : 'wrangler',
 );
-const localPersistence = '.wrangler/state';
+const localPersistence = await mkdtemp(join(tmpdir(), 'draftroll-worker-state-'));
 
-await runCommand(['worker:setup']);
+await runWrangler([
+  'd1',
+  'migrations',
+  'apply',
+  'DB',
+  '--local',
+  '--persist-to',
+  localPersistence,
+  '--config',
+  'wrangler.jsonc',
+]);
 
 const server = spawn(
   wranglerCommand,
@@ -82,14 +93,19 @@ const stopServer = async () => {
   });
 };
 
-process.on('SIGINT', () => void stopServer().finally(() => process.exit(130)));
-process.on('SIGTERM', () => void stopServer().finally(() => process.exit(143)));
+const cleanup = async () => {
+  await stopServer();
+  await rm(localPersistence, { recursive: true, force: true });
+};
+
+process.on('SIGINT', () => void cleanup().finally(() => process.exit(130)));
+process.on('SIGTERM', () => void cleanup().finally(() => process.exit(143)));
 
 try {
   await waitForHealth(`${baseUrl.replace(/\/$/, '')}/health`, 30_000);
   await runSmoke(baseUrl, { prepareIdempotencyBoundary });
 } finally {
-  await stopServer();
+  await cleanup();
 }
 
 async function prepareIdempotencyBoundary({ roomId, sessionId, publicEvent, secretEvent }) {
@@ -242,21 +258,6 @@ async function runWrangler(args) {
     child.on('exit', (code) => {
       if (code === 0) resolve(stdout);
       else reject(new Error(`wrangler ${args.join(' ')} exited with code ${code}: ${stderr}`));
-    });
-  });
-}
-
-async function runCommand(args) {
-  await new Promise((resolve, reject) => {
-    const child = spawn(pnpmCommand, args, {
-      cwd: process.cwd(),
-      env: process.env,
-      stdio: 'inherit',
-    });
-    child.on('error', reject);
-    child.on('exit', (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`pnpm ${args.join(' ')} exited with code ${code}`));
     });
   });
 }

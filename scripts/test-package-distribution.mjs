@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -32,6 +32,16 @@ function run(command, args, cwd = root) {
     throw new Error(`${command} ${args.join(' ')} failed`);
   }
   return result.stdout.trim();
+}
+
+async function walkFiles(path) {
+  const files = [];
+  for (const entry of await readdir(path, { withFileTypes: true })) {
+    const child = join(path, entry.name);
+    if (entry.isDirectory()) files.push(...(await walkFiles(child)));
+    else files.push(child);
+  }
+  return files;
 }
 
 function rewriteWorkspaceDependencies(manifest, versions) {
@@ -199,15 +209,18 @@ try {
   assert.equal(manifest.exports['./cards'].default, './dist/cards.js');
   assert.equal(manifest.dependencies['@draftroll/core'], '0.1.0');
 
-  const packedCoreEvaluator = await readFile(
-    join(appDir, 'node_modules/@draftroll/core/dist/evaluator.js'),
-    'utf8',
-  );
-  assert.doesNotMatch(
-    packedCoreEvaluator,
-    /\.\.\/\.\.\/protocol\/src\//,
-    'packed core must not retain source-tree imports into protocol',
-  );
+  for (const packageName of packages) {
+    const distRoot = join(appDir, `node_modules/@draftroll/${packageName}/dist`);
+    for (const path of await walkFiles(distRoot)) {
+      if (!path.endsWith('.js') && !path.endsWith('.d.ts')) continue;
+      const source = await readFile(path, 'utf8');
+      assert.doesNotMatch(
+        source,
+        /(?:\.\.\/)+[a-z0-9-]+\/src(?:\/|['"])/,
+        `${packageName} published source-tree import in ${path}`,
+      );
+    }
+  }
 
   console.log('Package distribution smoke test passed.');
 } finally {

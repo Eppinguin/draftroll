@@ -48,6 +48,8 @@ Persisted D1 and Durable Object results are decoded and migrated before use. Ext
 
 Compatibility decoders and assertions may migrate pre-schema results when `allowLegacyResults` is enabled (the default). Type predicates such as `isNormalizedRollResult()` and `isServerToClientEvent()` are intentionally strict: they return `true` only for current-schema values and never migrate their input. This keeps TypeScript narrowing aligned with the declared current-schema types.
 
+All object-facing protocol decoders detach structured-cloneable input before validation. Successful decode results therefore never alias caller-owned objects, and hostile or non-cloneable boundary values fail with structured validation issues instead of escaping exceptions.
+
 ### Runtime themes
 
 Theme manifests use their independent `DRAFTROLL_THEME_SCHEMA_VERSION`. Invalid manifests, unsupported versions, oversized resources, failed integrity checks, and unsafe meshes fall back or fail before renderer installation.

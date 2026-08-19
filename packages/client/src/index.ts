@@ -1339,7 +1339,19 @@ export class DiceRoom {
         nextAfterEventSequence?: number;
         latestEventSequence?: number;
         hasMore?: boolean;
+        recoveryBlockedAtEventSequence?: number;
       };
+      const recoveryBlockedAtEventSequence = isSafeInteger(payload.recoveryBlockedAtEventSequence)
+        ? payload.recoveryBlockedAtEventSequence
+        : undefined;
+      if (recoveryBlockedAtEventSequence !== undefined) {
+        throw new DiceRoomConnectionError(
+          'long_range_recovery_corrupt',
+          `Long-range room recovery is blocked by corrupt retained event ${recoveryBlockedAtEventSequence}`,
+          true,
+          { eventSequence: recoveryBlockedAtEventSequence },
+        );
+      }
       for (const rawEvent of payload.events ?? []) {
         const decoded = decodeServerToClientEvent(rawEvent, {
           rejectUnknownFields: true,

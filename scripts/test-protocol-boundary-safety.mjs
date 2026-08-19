@@ -63,11 +63,7 @@ try {
   }
   await writeFile(join(outDir, 'package.json'), '{"type":"commonjs"}\n');
 
-  const canonical = await import(pathToFileURL(join(outDir, 'protocol/src/index.js')).href);
-  const protocol = await import(pathToFileURL(join(outDir, 'protocol/src/public.js')).href);
-  for (const exportName of Object.keys(canonical)) {
-    assert.ok(exportName in protocol, `public protocol facade is missing '${exportName}'`);
-  }
+  const protocol = await import(pathToFileURL(join(outDir, 'protocol/src/index.js')).href);
 
   const objectNonCloneable = { callback: () => {} };
   const arrayNonCloneable = [{ callback: () => {} }];
@@ -143,7 +139,7 @@ try {
       {
         ok: true,
         tested: [
-          'public runtime exports stay in parity with the canonical protocol entrypoint',
+          'the canonical protocol entrypoint owns runtime boundary safety',
           'all object-facing protocol decoders reject revoked proxies without throwing',
           'non-cloneable values matching each decoder boundary return structured failures',
           'throwing getters return structured boundary failures',

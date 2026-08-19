@@ -223,6 +223,9 @@ export function decodeRollVisibility(
   value: unknown,
   options: DecodeOptions = {},
 ): DecodeResult<RollVisibility> {
+  const cloned = cloneForValidation(value);
+  if (!cloned.success) return cloned;
+  value = cloned.data;
   const context = createContext({ rejectUnknownFields: true, ...options });
   validateRollVisibility(value, '$', context);
   return context.result<RollVisibility>(value, 'Roll visibility is invalid');
@@ -237,6 +240,9 @@ export function decodeRoomPolicy(
   value: unknown,
   options: DecodeOptions = {},
 ): DecodeResult<RoomPolicy> {
+  const cloned = cloneForValidation(value);
+  if (!cloned.success) return cloned;
+  value = cloned.data;
   const context = createContext({ rejectUnknownFields: true, ...options });
   validateRoomPolicy(value, '$', context, false);
   return context.result<RoomPolicy>(value, 'Room policy is invalid');
@@ -251,6 +257,9 @@ export function decodeRoomPolicyPatch(
   value: unknown,
   options: DecodeOptions = {},
 ): DecodeResult<RoomPolicyPatch> {
+  const cloned = cloneForValidation(value);
+  if (!cloned.success) return cloned;
+  value = cloned.data;
   const context = createContext({ rejectUnknownFields: true, ...options });
   validateRoomPolicy(value, '$', context, true);
   return context.result<RoomPolicyPatch>(value, 'Room policy patch is invalid');
@@ -265,6 +274,9 @@ export function decodeParticipantIdentityInput(
   value: unknown,
   options: DecodeOptions = {},
 ): DecodeResult<ParticipantIdentityInput> {
+  const cloned = cloneForValidation(value);
+  if (!cloned.success) return cloned;
+  value = cloned.data;
   const context = createContext({ rejectUnknownFields: true, ...options });
   if (expectRecord(value, '$', context)) {
     unknownFields(value, ['participantId', 'sessionId', 'name', 'metadata'], '$', context);
@@ -285,6 +297,9 @@ export function decodeRoomCapabilityTokenPayload(
   value: unknown,
   options: DecodeOptions = {},
 ): DecodeResult<RoomCapabilityTokenPayload> {
+  const cloned = cloneForValidation(value);
+  if (!cloned.success) return cloned;
+  value = cloned.data;
   const context = createContext({ rejectUnknownFields: true, ...options });
   if (expectRecord(value, '$', context)) {
     unknownFields(
@@ -389,7 +404,7 @@ export function decodeCustomDiceDefinitions(
   value: unknown,
   options: DecodeOptions = {},
 ): DecodeResult<CustomDiceDefinition[]> {
-  const cloned = cloneForValidation(value, Array.isArray);
+  const cloned = cloneForValidation(value);
   if (!cloned.success) return cloned;
   const context = createContext({ rejectUnknownFields: true, ...options });
   validateCustomDice(cloned.data, '$', context);
@@ -405,6 +420,9 @@ export function decodeRollInput(
   value: unknown,
   options: DecodeOptions = {},
 ): DecodeResult<RollInput> {
+  const cloned = cloneForValidation(value);
+  if (!cloned.success) return cloned;
+  value = cloned.data;
   const context = createContext({ rejectUnknownFields: true, ...options });
   validateRollInput(value, '$', context);
   return context.result<RollInput>(value, 'Roll input is invalid');
@@ -419,6 +437,9 @@ export function decodeRollUpdateInput(
   value: unknown,
   options: DecodeOptions = {},
 ): DecodeResult<RollUpdateInput> {
+  const cloned = cloneForValidation(value);
+  if (!cloned.success) return cloned;
+  value = cloned.data;
   const context = createContext({ rejectUnknownFields: true, ...options });
   validateRollUpdate(value, '$', context);
   return context.result<RollUpdateInput>(value, 'Roll update is invalid');
@@ -433,7 +454,7 @@ export function decodeNormalizedRollResult(
   value: unknown,
   options: DecodeOptions = {},
 ): DecodeResult<NormalizedRollResult> {
-  const cloned = cloneForValidation(value, isRecord);
+  const cloned = cloneForValidation(value);
   if (!cloned.success) return cloned;
   const context = createContext({ rejectUnknownFields: true, ...options });
   validateNormalizedResult(cloned.data, '$', context);
@@ -470,6 +491,9 @@ export function decodeClientToServerEvent(
   value: unknown,
   options: DecodeOptions = {},
 ): DecodeResult<ClientToServerEvent> {
+  const cloned = cloneForValidation(value);
+  if (!cloned.success) return cloned;
+  value = cloned.data;
   const context = createContext({ rejectUnknownFields: true, ...options });
   validateClientEvent(value, '$', context);
   return context.result<ClientToServerEvent>(value, 'Client room event is invalid');
@@ -484,7 +508,7 @@ export function decodeServerToClientEvent(
   value: unknown,
   options: DecodeOptions = {},
 ): DecodeResult<ServerToClientEvent> {
-  const cloned = cloneForValidation(value, isRecord);
+  const cloned = cloneForValidation(value);
   if (!cloned.success) return cloned;
   const context = createContext({ rejectUnknownFields: true, ...options });
   validateServerEvent(cloned.data, '$', context);
@@ -3266,9 +3290,9 @@ function byteLength(raw: string | ArrayBuffer | ArrayBufferView): number {
   return raw.byteLength;
 }
 
-function cloneForValidation<T>(value: T, shouldClone: (candidate: T) => boolean): DecodeResult<T> {
+function cloneForValidation<T>(value: T): DecodeResult<T> {
   try {
-    if (!shouldClone(value)) return { success: true, data: value };
+    if (value === null || typeof value !== 'object') return { success: true, data: value };
     return { success: true, data: structuredClone(value) };
   } catch {
     return failure('Value cannot be safely cloned for validation', [

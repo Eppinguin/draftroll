@@ -139,15 +139,25 @@ try {
     makeRollStart({ rollId: 'recovered-3', eventSequence: 3, replayed: true }),
   ];
   const fetchCalls = [];
+  let recoveryBlockedAtEventSequence;
   const fetchImpl = async (url, init) => {
     fetchCalls.push({ url: String(url), headers: init?.headers });
-    return new Response(
-      JSON.stringify({ roomId: 'resilience', afterEventSequence: 1, events: durableEvents }),
-      {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      },
-    );
+    const payload =
+      recoveryBlockedAtEventSequence === undefined
+        ? { roomId: 'resilience', afterEventSequence: 1, events: durableEvents }
+        : {
+            roomId: 'resilience',
+            afterEventSequence: 4,
+            nextAfterEventSequence: 4,
+            latestEventSequence: recoveryBlockedAtEventSequence,
+            hasMore: true,
+            recoveryBlockedAtEventSequence,
+            events: [],
+          };
+    return new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
   };
 
   const room = await client.DiceRoom.connect({
@@ -168,7 +178,9 @@ try {
 
   const states = [];
   const observed = [];
+  const observedErrors = [];
   room.on('connectionState', (state) => states.push(state));
+  room.on('error', ({ error }) => observedErrors.push(error));
   room.on('rollStart', (event) => observed.push(event.rollId));
   room.on('rollStart', () => {
     throw new Error('observer failure');
@@ -238,13 +250,29 @@ try {
     (error) => error.code === 'revision_conflict' && error.currentRevision === 1,
   );
 
+  recoveryBlockedAtEventSequence = 6;
+  second.serverSend(
+    makeRoomState({
+      latestEventSequence: recoveryBlockedAtEventSequence,
+      eventBufferStartSequence: recoveryBlockedAtEventSequence + 1,
+      missedEventsTruncated: true,
+      recentEvents: [],
+    }),
+  );
+  await waitFor(() => observedErrors.some((error) => error.code === 'long_range_recovery_corrupt'));
+  assert.equal(
+    observedErrors.find((error) => error.code === 'long_range_recovery_corrupt')?.details
+      ?.eventSequence,
+    recoveryBlockedAtEventSequence,
+  );
+
   const metrics = room.getRequestMetrics();
   assert.ok(metrics.requestsStarted >= 3);
   assert.ok(metrics.requestsCompleted >= 1);
   assert.equal(metrics.requestsAborted, 1);
   assert.equal(metrics.revisionConflicts, 1);
   assert.equal(metrics.reconnectAttempts, 1);
-  assert.equal(metrics.replayTruncations, 1);
+  assert.equal(metrics.replayTruncations, 2);
   assert.equal(metrics.longRangeRecoveries, 1);
   assert.ok(metrics.replayedEvents >= 2);
   assert.equal(metrics.hiddenProjections, 1);
@@ -265,6 +293,7 @@ try {
           'abnormal disconnect and capped reconnect',
           'resume cursor propagation',
           'truncated replay durable recovery',
+          'corrupt durable replay fails closed with an explicit recovery error',
           'event ordering and duplicate suppression',
           'request cancellation and revision-conflict metrics',
           'connection diagnostics, hidden-projection metrics, and observer isolation',

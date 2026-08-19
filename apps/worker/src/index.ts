@@ -374,6 +374,8 @@ export default {
 export class DiceRoomObject {
   private readonly engine = new DiceEngine();
   private readonly sessions = new Map<WebSocket, ConnectionAttachment>();
+  private eventBufferCache: InternalRoomEvent[] | null = null;
+  private eventBufferRecoverySequenceCache: number | null | undefined;
 
   constructor(
     private readonly state: DurableObjectState,
@@ -1308,6 +1310,7 @@ export class DiceRoomObject {
     };
     for (const { item, record } of prepared) storageEntries[`roll:${item.rollId}`] = record;
     await this.state.storage.put(storageEntries);
+    this.eventBufferCache = eventBuffer;
     this.state.waitUntil(
       this.persistRequestRecord(
         participant.sessionId,
@@ -1906,14 +1909,21 @@ export class DiceRoomObject {
     roomId: string,
     policy: RoomPolicy,
   ): Promise<Record<string, unknown>> {
-    const [eventSequence, eventBuffer, rollIndex, persistenceFailures, policyRevision] =
-      await Promise.all([
-        this.getEventSequence(),
-        this.getEventBuffer(),
-        this.state.storage.get<RollIndexEntry[]>('rollIndex'),
-        this.state.storage.get<PersistenceFailure[]>('persistenceFailures'),
-        this.getPolicyRevision(),
-      ]);
+    const [
+      eventSequence,
+      eventBuffer,
+      eventBufferRecoverySequence,
+      rollIndex,
+      persistenceFailures,
+      policyRevision,
+    ] = await Promise.all([
+      this.getEventSequence(),
+      this.getEventBuffer(),
+      this.getEventBufferRecoverySequence(),
+      this.state.storage.get<RollIndexEntry[]>('rollIndex'),
+      this.state.storage.get<PersistenceFailure[]>('persistenceFailures'),
+      this.getPolicyRevision(),
+    ]);
     const sessions = [...this.sessions.values()];
     return {
       roomId,
@@ -1933,6 +1943,7 @@ export class DiceRoomObject {
       latestEventSequence: eventSequence,
       bufferedEvents: eventBuffer.length,
       eventBufferLimit: policy.limits.maximumBufferedEvents,
+      eventBufferRecoverySequence,
       retainedRolls: rollIndex?.length ?? 0,
       persistenceFailures: persistenceFailures?.length ?? 0,
       latestPersistenceFailure: persistenceFailures?.at(-1) ?? null,
@@ -1948,11 +1959,20 @@ export class DiceRoomObject {
     participant: ConnectionAttachment,
     lastEventSequence: number,
   ): Promise<RoomStateEvent> {
-    const eventBuffer = await this.getEventBuffer();
-    const eventBufferStartSequence =
-      eventBuffer[0]?.eventSequence ?? (await this.getEventSequence()) + 1;
+    const [eventBuffer, eventBufferRecoverySequence, latestEventSequence, latestRollSequence] =
+      await Promise.all([
+        this.getEventBuffer(),
+        this.getEventBufferRecoverySequence(),
+        this.getEventSequence(),
+        this.getRollSequence(),
+      ]);
+    const eventBufferStartSequence = eventBuffer[0]?.eventSequence ?? latestEventSequence + 1;
+    const replayCoverageLost =
+      eventBufferRecoverySequence !== null &&
+      (eventBufferRecoverySequence === 0 || lastEventSequence < eventBufferRecoverySequence);
     const missedEventsTruncated =
-      lastEventSequence > 0 && lastEventSequence < eventBufferStartSequence - 1;
+      replayCoverageLost ||
+      (lastEventSequence > 0 && lastEventSequence < eventBufferStartSequence - 1);
     const recentEvents: RoomReplayEvent[] = eventBuffer
       .filter((event) => event.eventSequence > lastEventSequence)
       .map((event) => projectInternalEvent(event, participant, true))
@@ -1968,9 +1988,9 @@ export class DiceRoomObject {
       type: 'room_state',
       protocolVersion: DRAFTROLL_PROTOCOL_VERSION,
       roomId: participant.roomId,
-      sequence: await this.getRollSequence(),
-      latestRollSequence: await this.getRollSequence(),
-      latestEventSequence: await this.getEventSequence(),
+      sequence: latestRollSequence,
+      latestRollSequence,
+      latestEventSequence,
       eventBufferStartSequence,
       missedEventsTruncated,
       policy,
@@ -2007,32 +2027,41 @@ export class DiceRoomObject {
       .bind(roomId)
       .all<RoomEventRow>();
     const latest = await this.getEventSequence();
-    const events = (query.results ?? []).flatMap((row) => {
+    const events: RoomReplayEvent[] = [];
+    let nextAfterEventSequence = afterEventSequence;
+    let recoveryBlockedAtEventSequence: number | undefined;
+    for (const row of query.results ?? []) {
+      let internal: InternalRoomEvent;
       try {
         // Deserializes rows this Durable Object previously serialized itself.
-        const internal = migrateStoredInternalEvent(JSON.parse(row.event_json));
-        if (internal.type === 'bulk_rolls_updated') return [];
-        const projected = projectInternalEvent(internal, participant, true);
-        return projected ? [projected] : [];
+        internal = migrateStoredInternalEvent(JSON.parse(row.event_json));
       } catch (error) {
+        recoveryBlockedAtEventSequence = row.event_sequence;
         this.logStructured('room.event_storage_invalid', {
           source: 'd1_replay',
           eventSequence: row.event_sequence,
           message: asError(error).message,
         });
-        return [];
+        break;
       }
-    });
+
+      // Advancing over a validated event is safe even when this participant cannot observe its
+      // projection (for example manager-only token revocations or bulk acknowledgements).
+      nextAfterEventSequence = row.event_sequence;
+      if (internal.type === 'bulk_rolls_updated') continue;
+      const projected = projectInternalEvent(internal, participant, true);
+      if (projected) events.push(projected);
+    }
     const earliestSequence = earliest.results?.[0]?.event_sequence ?? latest + 1;
-    const nextAfterEventSequence = query.results?.at(-1)?.event_sequence ?? afterEventSequence;
     return {
       roomId,
       afterEventSequence,
       nextAfterEventSequence,
       earliestEventSequence: earliestSequence,
       latestEventSequence: latest,
-      hasMore: nextAfterEventSequence < latest,
+      hasMore: recoveryBlockedAtEventSequence !== undefined || nextAfterEventSequence < latest,
       truncated: afterEventSequence > 0 && afterEventSequence < earliestSequence - 1,
+      recoveryBlockedAtEventSequence,
       events,
     };
   }
@@ -2364,31 +2393,96 @@ export class DiceRoomObject {
     events.push(event);
     if (events.length > limit) events.splice(0, events.length - limit);
     await this.state.storage.put('eventBuffer', events);
+    this.eventBufferCache = events;
     this.state.waitUntil(this.persistEventSafely(event, policy));
   }
 
+  private async getEventBufferRecoverySequence(): Promise<number | null> {
+    if (this.eventBufferRecoverySequenceCache !== undefined) {
+      return this.eventBufferRecoverySequenceCache;
+    }
+    const stored = await this.state.storage.get('eventBufferRecoverySequence');
+    if (stored === undefined) {
+      this.eventBufferRecoverySequenceCache = null;
+      return null;
+    }
+    if (typeof stored === 'number' && Number.isSafeInteger(stored) && stored >= 0) {
+      this.eventBufferRecoverySequenceCache = stored;
+      return stored;
+    }
+    this.logStructured('room.event_storage_invalid', {
+      source: 'durable_object_buffer_marker',
+      message: 'Stored event-buffer recovery marker is invalid',
+    });
+    this.eventBufferRecoverySequenceCache = 0;
+    await this.state.storage.put('eventBufferRecoverySequence', 0);
+    return 0;
+  }
+
+  private async markEventBufferRecoveryRequired(sequence: number | null): Promise<void> {
+    const candidate = sequence ?? 0;
+    const current = await this.getEventBufferRecoverySequence();
+    const next =
+      current === null
+        ? candidate
+        : current === 0 || candidate === 0
+          ? 0
+          : Math.min(current, candidate);
+    if (current === next) return;
+    this.eventBufferRecoverySequenceCache = next;
+    await this.state.storage.put('eventBufferRecoverySequence', next);
+  }
+
   private async getEventBuffer(): Promise<InternalRoomEvent[]> {
+    if (this.eventBufferCache !== null) return [...this.eventBufferCache];
+
     const stored = await this.state.storage.get('eventBuffer');
-    if (stored === undefined) return [];
+    if (stored === undefined) {
+      this.eventBufferCache = [];
+      return [];
+    }
     if (!Array.isArray(stored)) {
       this.logStructured('room.event_storage_invalid', {
         source: 'durable_object_buffer',
         message: 'Stored event buffer is not an array',
       });
+      await this.markEventBufferRecoveryRequired(null);
+      this.eventBufferCache = [];
       return [];
     }
-    return stored.flatMap((event, index) => {
+
+    const events: InternalRoomEvent[] = [];
+    let recoverySequence: number | null | undefined;
+    for (const [index, event] of stored.entries()) {
+      const eventSequence =
+        isRecord(event) &&
+        typeof event.eventSequence === 'number' &&
+        Number.isSafeInteger(event.eventSequence) &&
+        event.eventSequence >= 0
+          ? event.eventSequence
+          : null;
       try {
-        return [migrateStoredInternalEvent(event)];
+        events.push(migrateStoredInternalEvent(event));
       } catch (error) {
+        recoverySequence =
+          recoverySequence === undefined
+            ? eventSequence
+            : recoverySequence === null || eventSequence === null
+              ? null
+              : Math.min(recoverySequence, eventSequence);
         this.logStructured('room.event_storage_invalid', {
           source: 'durable_object_buffer',
           index,
+          eventSequence: eventSequence ?? undefined,
           message: asError(error).message,
         });
-        return [];
       }
-    });
+    }
+    if (recoverySequence !== undefined) {
+      await this.markEventBufferRecoveryRequired(recoverySequence);
+    }
+    this.eventBufferCache = events;
+    return [...events];
   }
 
   private async recordRequest(

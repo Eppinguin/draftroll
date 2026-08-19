@@ -87,6 +87,7 @@ export async function runSmoke(
   assert.equal(bramSecret.animationSeed, undefined);
   assert.equal(bramSecret.serverStartTimeMs, undefined);
 
+  let corruptRecoverySequence;
   if (options.prepareIdempotencyBoundary) {
     await options.prepareIdempotencyBoundary({
       roomId,
@@ -94,6 +95,20 @@ export async function runSmoke(
       publicEvent: ariaPublic,
       secretEvent: ariaSecret,
     });
+
+    const eventsUrl = authorizedHttpUrl(normalizedBase, roomId, 'events', {
+      participantId: 'aria',
+      sessionId: 'aria-session',
+      name: 'Aria',
+    });
+    eventsUrl.searchParams.set('afterEventSequence', String(ariaSecret.eventSequence - 1));
+    eventsUrl.searchParams.set('limit', '10');
+    const blockedRecovery = await fetchJson(eventsUrl);
+    assert.equal(blockedRecovery.recoveryBlockedAtEventSequence, ariaSecret.eventSequence);
+    assert.equal(blockedRecovery.nextAfterEventSequence, ariaSecret.eventSequence - 1);
+    assert.equal(blockedRecovery.hasMore, true);
+    assert.deepEqual(blockedRecovery.events, []);
+    corruptRecoverySequence = blockedRecovery.recoveryBlockedAtEventSequence;
   }
 
   bram.socket.send(
@@ -286,6 +301,7 @@ export async function runSmoke(
     persistedRevisions: revisions.revisions.length,
     idempotencyReplayRoll,
     corruptReplayCode,
+    corruptRecoverySequence,
   };
   console.log(JSON.stringify(summary, null, 2));
   return summary;
