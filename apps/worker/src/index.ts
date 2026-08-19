@@ -2661,7 +2661,7 @@ function migrateStoredInternalEvent(event: unknown): InternalRoomEvent {
         eventSequence: decoded.eventSequence,
         requestId: decoded.requestId,
         requesterSessionId,
-        updates: decoded.updates.map((update) => ({ ...update })),
+        updates: decoded.updates,
       };
     }
     default:
