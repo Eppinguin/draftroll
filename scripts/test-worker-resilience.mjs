@@ -64,7 +64,10 @@ for (const marker of [
 
 const durableEventsStart = worker.indexOf('private async getDurableEvents');
 const durableEventsEnd = worker.indexOf('private async getHistory', durableEventsStart);
-assert.ok(durableEventsStart >= 0 && durableEventsEnd > durableEventsStart, 'durable event replay is missing');
+assert.ok(
+  durableEventsStart >= 0 && durableEventsEnd > durableEventsStart,
+  'durable event replay is missing',
+);
 const durableEvents = worker.slice(durableEventsStart, durableEventsEnd);
 for (const marker of [
   'migrateStoredInternalEvent(JSON.parse(row.event_json))',
@@ -75,7 +78,10 @@ for (const marker of [
 
 const eventBufferStart = worker.indexOf('private async getEventBuffer');
 const eventBufferEnd = worker.indexOf('private async recordRequest', eventBufferStart);
-assert.ok(eventBufferStart >= 0 && eventBufferEnd > eventBufferStart, 'event buffer reader is missing');
+assert.ok(
+  eventBufferStart >= 0 && eventBufferEnd > eventBufferStart,
+  'event buffer reader is missing',
+);
 const eventBuffer = worker.slice(eventBufferStart, eventBufferEnd);
 for (const marker of [
   "this.state.storage.get<unknown>('eventBuffer')",
@@ -87,7 +93,10 @@ for (const marker of [
 
 const duplicateStart = worker.indexOf('private async findDuplicateRequest');
 const duplicateEnd = worker.indexOf('private async nextRollSequence', duplicateStart);
-assert.ok(duplicateStart >= 0 && duplicateEnd > duplicateStart, 'duplicate request lookup is missing');
+assert.ok(
+  duplicateStart >= 0 && duplicateEnd > duplicateStart,
+  'duplicate request lookup is missing',
+);
 const duplicate = worker.slice(duplicateStart, duplicateEnd);
 for (const marker of [
   "'idempotency_replay_unavailable'",
