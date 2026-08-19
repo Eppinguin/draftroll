@@ -261,12 +261,18 @@ try {
   );
   await waitFor(() => observedErrors.some((error) => error.code === 'long_range_recovery_corrupt'));
   await waitFor(() => room.connectionDiagnostics.state === 'failed');
-  const recoveryError = observedErrors.find((error) => error.code === 'long_range_recovery_corrupt');
+  const recoveryError = observedErrors.find(
+    (error) => error.code === 'long_range_recovery_corrupt',
+  );
   assert.equal(recoveryError?.details?.eventSequence, recoveryBlockedAtEventSequence);
   assert.equal(recoveryError?.recoverable, false);
   assert.equal(room.connectionDiagnostics.code, 'long_range_recovery_corrupt');
   assert.equal(room.connectionDiagnostics.recoverable, false);
-  assert.equal(room.getLastEventSequence(), 5, 'corrupt recovery must not advance the event cursor');
+  assert.equal(
+    room.getLastEventSequence(),
+    5,
+    'corrupt recovery must not advance the event cursor',
+  );
 
   second.serverSend(makeRollStart({ rollId: 'after-corrupt-7', eventSequence: 7 }));
   await new Promise((settle) => setTimeout(settle, 20));

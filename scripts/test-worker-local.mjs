@@ -172,7 +172,10 @@ async function prepareIdempotencyBoundary({
       AND event_sequence = ${Number(correlationEvent.eventSequence)}
     LIMIT 1
   `);
-  assert.ok(storedCorrelation, 'correlation retained response disappeared while preparing the test');
+  assert.ok(
+    storedCorrelation,
+    'correlation retained response disappeared while preparing the test',
+  );
   assert.equal(
     JSON.parse(storedCorrelation.event_json).requestId,
     `${correlationEvent.requestId}-mismatch`,
