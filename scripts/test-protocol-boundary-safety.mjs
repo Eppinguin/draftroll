@@ -63,16 +63,24 @@ try {
   }
   await writeFile(join(outDir, 'package.json'), '{"type":"commonjs"}\n');
 
+  const canonical = await import(pathToFileURL(join(outDir, 'protocol/src/index.js')).href);
   const protocol = await import(pathToFileURL(join(outDir, 'protocol/src/public.js')).href);
+  for (const exportName of Object.keys(canonical)) {
+    assert.ok(exportName in protocol, `public protocol facade is missing '${exportName}'`);
+  }
+
   const decoderCases = [
     ['decodeRollVisibility', protocol.decodeRollVisibility],
     ['decodeRoomPolicy', protocol.decodeRoomPolicy],
     ['decodeRoomPolicyPatch', protocol.decodeRoomPolicyPatch],
     ['decodeParticipantIdentityInput', protocol.decodeParticipantIdentityInput],
     ['decodeRoomCapabilityTokenPayload', protocol.decodeRoomCapabilityTokenPayload],
+    ['decodeCustomDiceDefinitions', protocol.decodeCustomDiceDefinitions],
     ['decodeRollInput', protocol.decodeRollInput],
     ['decodeRollUpdateInput', protocol.decodeRollUpdateInput],
+    ['decodeNormalizedRollResult', protocol.decodeNormalizedRollResult],
     ['decodeClientToServerEvent', protocol.decodeClientToServerEvent],
+    ['decodeServerToClientEvent', protocol.decodeServerToClientEvent],
   ];
 
   for (const [label, decoder] of decoderCases) {
@@ -129,7 +137,8 @@ try {
       {
         ok: true,
         tested: [
-          'public object-facing protocol decoders reject revoked proxies without throwing',
+          'public runtime exports stay in parity with the canonical protocol entrypoint',
+          'all object-facing protocol decoders reject revoked proxies without throwing',
           'non-cloneable and throwing-getter values return structured boundary failures',
           'parse/type-guard helpers remain non-throwing',
           'successful public boundary decodes return detached data',
