@@ -1,3 +1,4 @@
+import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { runSmoke } from './smoke-worker.mjs';
@@ -11,12 +12,34 @@ const wranglerCommand = join(
   '.bin',
   process.platform === 'win32' ? 'wrangler.cmd' : 'wrangler',
 );
+const localPersistence = '.wrangler/state';
 
 await runCommand(['worker:setup']);
 
 const server = spawn(
   wranglerCommand,
-  ['dev', '--config', 'wrangler.jsonc', '--local', '--ip', '127.0.0.1', '--port', '8787'],
+  [
+    'dev',
+    '--config',
+    'wrangler.jsonc',
+    '--local',
+    '--persist-to',
+    localPersistence,
+    '--ip',
+    '127.0.0.1',
+    '--port',
+    '8787',
+    '--var',
+    'DRAFTROLL_ENV:local',
+    '--var',
+    'ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173,http://127.0.0.1:4173',
+    '--var',
+    'ALLOW_ANONYMOUS:true',
+    '--var',
+    'EVENT_BUFFER_LIMIT:10',
+    '--var',
+    'ROOM_POLICY_PRESET:open-table',
+  ],
   {
     cwd: workerRoot,
     detached: process.platform !== 'win32',
@@ -64,9 +87,159 @@ process.on('SIGTERM', () => void stopServer().finally(() => process.exit(143)));
 
 try {
   await waitForHealth(`${baseUrl.replace(/\/$/, '')}/health`, 30_000);
-  await runSmoke(baseUrl);
+  await runSmoke(baseUrl, { prepareIdempotencyBoundary });
 } finally {
   await stopServer();
+}
+
+async function prepareIdempotencyBoundary({ roomId, sessionId, publicEvent, secretEvent }) {
+  const publicRow = await waitForPersistedRequest(
+    roomId,
+    sessionId,
+    publicEvent.requestId,
+    publicEvent.eventSequence,
+  );
+  const secretRow = await waitForPersistedRequest(
+    roomId,
+    sessionId,
+    secretEvent.requestId,
+    secretEvent.eventSequence,
+  );
+
+  assert.equal(Number(publicRow.request_sequence), publicEvent.eventSequence);
+  assert.equal(Number(secretRow.request_sequence), secretEvent.eventSequence);
+
+  // The Durable Object request cache still proves the public request ran. Removing only the D1
+  // request index reproduces a persistence split without removing its retained response event.
+  await executeD1(`
+    DELETE FROM room_requests
+    WHERE room_id = ${sqlString(roomId)}
+      AND session_id = ${sqlString(sessionId)}
+      AND request_id = ${sqlString(publicEvent.requestId)}
+  `);
+  const publicRequestRows = await queryD1(`
+    SELECT event_sequence
+    FROM room_requests
+    WHERE room_id = ${sqlString(roomId)}
+      AND session_id = ${sqlString(sessionId)}
+      AND request_id = ${sqlString(publicEvent.requestId)}
+  `);
+  assert.equal(publicRequestRows.length, 0, 'public D1 request index was not removed');
+
+  // Keep a structurally valid JSON row and normalized result, but corrupt an internal field that
+  // projection dereferences. Strict persisted-event decoding must reject this before projection.
+  const corruptSecret = JSON.parse(secretRow.event_json);
+  corruptSecret.actor = null;
+  await executeD1(`
+    UPDATE room_events
+    SET event_json = ${sqlString(JSON.stringify(corruptSecret))}
+    WHERE room_id = ${sqlString(roomId)}
+      AND event_sequence = ${Number(secretEvent.eventSequence)}
+  `);
+  const [storedSecret] = await queryD1(`
+    SELECT event_json
+    FROM room_events
+    WHERE room_id = ${sqlString(roomId)}
+      AND event_sequence = ${Number(secretEvent.eventSequence)}
+    LIMIT 1
+  `);
+  assert.ok(storedSecret, 'secret retained response disappeared while preparing the test');
+  assert.equal(JSON.parse(storedSecret.event_json).actor, null);
+}
+
+async function waitForPersistedRequest(
+  roomId,
+  sessionId,
+  requestId,
+  expectedEventSequence,
+  timeoutMs = 10_000,
+) {
+  const deadline = Date.now() + timeoutMs;
+  let lastError;
+  while (Date.now() < deadline) {
+    try {
+      const rows = await queryD1(`
+        SELECT
+          r.event_sequence AS request_sequence,
+          e.event_json AS event_json
+        FROM room_requests AS r
+        JOIN room_events AS e
+          ON e.room_id = r.room_id
+         AND e.event_sequence = r.event_sequence
+        WHERE r.room_id = ${sqlString(roomId)}
+          AND r.session_id = ${sqlString(sessionId)}
+          AND r.request_id = ${sqlString(requestId)}
+        LIMIT 1
+      `);
+      const row = rows[0];
+      if (row && Number(row.request_sequence) === expectedEventSequence) return row;
+    } catch (error) {
+      lastError = error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  if (lastError) throw lastError;
+  throw new Error(
+    `Timed out waiting for persisted request '${requestId}' at event ${expectedEventSequence}`,
+  );
+}
+
+async function queryD1(statement) {
+  const stdout = await runWrangler([
+    'd1',
+    'execute',
+    'DB',
+    '--local',
+    '--persist-to',
+    localPersistence,
+    '--config',
+    'wrangler.jsonc',
+    '--command',
+    statement,
+    '--json',
+  ]);
+  const parsed = parseWranglerJson(stdout);
+  const result = Array.isArray(parsed) ? parsed[0] : parsed;
+  return result?.results ?? [];
+}
+
+async function executeD1(statement) {
+  await queryD1(statement);
+}
+
+function sqlString(value) {
+  return `'${String(value).replaceAll("'", "''")}'`;
+}
+
+function parseWranglerJson(stdout) {
+  const firstArray = stdout.indexOf('[');
+  const firstObject = stdout.indexOf('{');
+  const candidates = [firstArray, firstObject].filter((index) => index >= 0);
+  if (candidates.length === 0) throw new Error(`Wrangler returned no JSON: ${stdout}`);
+  return JSON.parse(stdout.slice(Math.min(...candidates)));
+}
+
+async function runWrangler(args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(wranglerCommand, args, {
+      cwd: workerRoot,
+      env: process.env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk;
+    });
+    child.on('error', reject);
+    child.on('exit', (code) => {
+      if (code === 0) resolve(stdout);
+      else reject(new Error(`wrangler ${args.join(' ')} exited with code ${code}: ${stderr}`));
+    });
+  });
 }
 
 async function runCommand(args) {

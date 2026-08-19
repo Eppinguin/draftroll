@@ -164,7 +164,6 @@ interface InternalRoomEventBase {
   actor: RoomActor;
   visibility: RollVisibility;
   result: NormalizedRollResult;
-  audit?: RollAuditDetails;
 }
 
 interface InternalRollStartEvent extends InternalRoomEventBase {
@@ -182,11 +181,13 @@ interface InternalRollUpdatedEvent extends InternalRoomEventBase {
   serverStartTimeMs?: number;
   animationDurationMs?: number;
   startBufferMs?: number;
+  audit?: RollAuditDetails;
 }
 
 interface InternalRollVisibilityUpdatedEvent extends InternalRoomEventBase {
   type: 'roll_visibility_updated';
   previousVisibility: RollVisibility;
+  audit?: RollAuditDetails;
 }
 
 type InternalRoomRollEvent =
@@ -2448,16 +2449,19 @@ export class DiceRoomObject {
       if (buffered) return buffered;
     }
     const roomId = (await this.state.storage.get<string>('roomId')) ?? this.state.id.toString();
-    const requestQuery = await this.env.DB.prepare(`
-      SELECT event_sequence
-      FROM room_requests
-      WHERE room_id = ? AND session_id = ? AND request_id = ?
-      LIMIT 1
-    `)
-      .bind(roomId, sessionId, requestId)
-      .all<RoomRequestRow>();
-    const eventSequence = requestQuery.results?.[0]?.event_sequence;
-    if (eventSequence === undefined) return null;
+    let eventSequence = match?.eventSequence;
+    if (eventSequence === undefined) {
+      const requestQuery = await this.env.DB.prepare(`
+        SELECT event_sequence
+        FROM room_requests
+        WHERE room_id = ? AND session_id = ? AND request_id = ?
+        LIMIT 1
+      `)
+        .bind(roomId, sessionId, requestId)
+        .all<RoomRequestRow>();
+      eventSequence = requestQuery.results?.[0]?.event_sequence;
+      if (eventSequence === undefined) return null;
+    }
     const eventQuery = await this.env.DB.prepare(`
       SELECT event_sequence, event_json, created_at
       FROM room_events
@@ -2551,6 +2555,21 @@ function roomParticipantFromAttachment(participant: ConnectionAttachment): RoomP
   };
 }
 
+const STORED_ROLL_COMMON_FIELDS = [
+  'type',
+  'protocolVersion',
+  'roomId',
+  'eventSequence',
+  'requestId',
+  'requesterSessionId',
+  'clientRollId',
+  'rollId',
+  'sequence',
+  'actor',
+  'visibility',
+  'result',
+] as const;
+
 function migrateStoredInternalEvent(event: unknown): InternalRoomEvent {
   if (!isRecord(event) || typeof event.type !== 'string') {
     throw new Error('Stored room event is not a valid object');
@@ -2558,26 +2577,259 @@ function migrateStoredInternalEvent(event: unknown): InternalRoomEvent {
   switch (event.type) {
     case 'roll_start':
     case 'roll_updated':
-    case 'roll_visibility_updated': {
-      const decoded = decodeNormalizedRollResult(event.result, { allowLegacyResults: true });
-      if (!decoded.success) {
-        throw new Error(
-          `Stored room event contains an invalid roll result: ${decoded.error.message}`,
-        );
-      }
-      // Stored internal events were serialized by this Worker. The discriminant and result are
-      // validated above; the remaining fields stay protected by strict outbound event validation.
-      // oxlint-disable-next-line typescript/no-unsafe-type-assertion
-      return { ...(event as unknown as InternalRoomRollEvent), result: decoded.data };
+    case 'roll_visibility_updated':
+      return migrateStoredRollEvent(event, event.type);
+    case 'room_policy_updated': {
+      assertStoredEventFields(event, [
+        'type',
+        'protocolVersion',
+        'roomId',
+        'eventSequence',
+        'requestId',
+        'revision',
+        'actor',
+        'policy',
+        'previousPolicy',
+      ]);
+      const decoded = decodeStoredServerEvent({ ...event, replayed: true }, 'room_policy_updated');
+      if (decoded.type !== 'room_policy_updated') throw new Error('Stored policy event type mismatch');
+      return {
+        type: 'room_policy_updated',
+        protocolVersion: decoded.protocolVersion,
+        roomId: decoded.roomId,
+        eventSequence: decoded.eventSequence,
+        requestId: decoded.requestId,
+        revision: decoded.revision,
+        actor: decoded.actor,
+        policy: decoded.policy,
+        previousPolicy: decoded.previousPolicy,
+      };
     }
-    case 'room_policy_updated':
-    case 'room_token_revoked':
-    case 'bulk_rolls_updated':
-      // oxlint-disable-next-line typescript/no-unsafe-type-assertion
-      return event as unknown as InternalRoomEvent;
+    case 'room_token_revoked': {
+      assertStoredEventFields(event, [
+        'type',
+        'protocolVersion',
+        'roomId',
+        'eventSequence',
+        'requestId',
+        'actor',
+        'target',
+        'revokedAt',
+        'reason',
+        'disconnectedSessions',
+      ]);
+      const decoded = decodeStoredServerEvent({ ...event, replayed: true }, 'room_token_revoked');
+      if (decoded.type !== 'room_token_revoked') throw new Error('Stored token event type mismatch');
+      return {
+        type: 'room_token_revoked',
+        protocolVersion: decoded.protocolVersion,
+        roomId: decoded.roomId,
+        eventSequence: decoded.eventSequence,
+        requestId: decoded.requestId,
+        actor: decoded.actor,
+        target: decoded.target,
+        revokedAt: decoded.revokedAt,
+        reason: decoded.reason,
+        disconnectedSessions: decoded.disconnectedSessions,
+      };
+    }
+    case 'bulk_rolls_updated': {
+      assertStoredEventFields(event, [
+        'type',
+        'protocolVersion',
+        'roomId',
+        'eventSequence',
+        'requestId',
+        'requesterSessionId',
+        'updates',
+      ]);
+      const requesterSessionId = readStoredIdentifier(
+        event.requesterSessionId,
+        'requesterSessionId',
+        true,
+      );
+      const projected = { ...event, replayed: true };
+      delete projected.requesterSessionId;
+      const decoded = decodeStoredServerEvent(projected, 'bulk_rolls_updated');
+      if (decoded.type !== 'bulk_rolls_updated' || requesterSessionId === undefined) {
+        throw new Error('Stored bulk event is invalid');
+      }
+      return {
+        type: 'bulk_rolls_updated',
+        protocolVersion: decoded.protocolVersion,
+        roomId: decoded.roomId,
+        eventSequence: decoded.eventSequence,
+        requestId: decoded.requestId,
+        requesterSessionId,
+        updates: decoded.updates.map((update) => ({ ...update })),
+      };
+    }
     default:
       throw new Error(`Stored room event has unsupported type '${event.type}'`);
   }
+}
+
+function migrateStoredRollEvent(
+  event: Record<string, unknown>,
+  type: 'roll_start' | 'roll_updated' | 'roll_visibility_updated',
+): InternalRoomRollEvent {
+  const extraFields =
+    type === 'roll_start'
+      ? ['animationSeed', 'serverStartTimeMs', 'animationDurationMs', 'startBufferMs']
+      : type === 'roll_updated'
+        ? [
+            'animate',
+            'animationSeed',
+            'serverStartTimeMs',
+            'animationDurationMs',
+            'startBufferMs',
+            'audit',
+          ]
+        : ['previousVisibility', 'audit'];
+  assertStoredEventFields(event, [...STORED_ROLL_COMMON_FIELDS, ...extraFields]);
+
+  const requesterSessionId = readStoredIdentifier(event.requesterSessionId, 'requesterSessionId');
+  const result = decodeNormalizedRollResult(event.result, { allowLegacyResults: true });
+  if (!result.success) {
+    throw new Error(`Stored room event contains an invalid roll result: ${result.error.message}`);
+  }
+
+  const projected: Record<string, unknown> = {
+    ...event,
+    result: result.data,
+    hidden: false,
+    summary: {
+      rollId: event.rollId,
+      sequence: event.sequence,
+      revision: result.data.revision ?? 0,
+      name: result.data.name,
+      actor: event.actor,
+      createdAt: result.data.createdAt,
+      updatedAt: result.data.updatedAt,
+    },
+  };
+  delete projected.requesterSessionId;
+
+  const decoded = decodeStoredServerEvent(projected, type);
+  if (
+    decoded.type !== 'roll_start' &&
+    decoded.type !== 'roll_updated' &&
+    decoded.type !== 'roll_visibility_updated'
+  ) {
+    throw new Error('Stored roll event type mismatch');
+  }
+  if (decoded.type !== type || decoded.result === null) {
+    throw new Error('Stored roll event does not contain a visible normalized result');
+  }
+  const visibility = requireStoredVisibility(decoded.visibility, 'visibility');
+  if (decoded.result.rollId !== decoded.rollId || decoded.result.sequence !== decoded.sequence) {
+    throw new Error('Stored roll event result identifiers do not match the event');
+  }
+
+  const common = {
+    protocolVersion: decoded.protocolVersion,
+    roomId: decoded.roomId,
+    eventSequence: decoded.eventSequence,
+    requestId: decoded.requestId,
+    requesterSessionId,
+    clientRollId: decoded.clientRollId,
+    rollId: decoded.rollId,
+    sequence: decoded.sequence,
+    actor: decoded.actor,
+    visibility,
+    result: decoded.result,
+  };
+
+  if (decoded.type === 'roll_start') {
+    if (
+      decoded.animationSeed === undefined ||
+      decoded.serverStartTimeMs === undefined ||
+      decoded.animationDurationMs === undefined ||
+      decoded.startBufferMs === undefined
+    ) {
+      throw new Error('Stored roll_start event is missing required animation fields');
+    }
+    return {
+      type: 'roll_start',
+      ...common,
+      animationSeed: decoded.animationSeed,
+      serverStartTimeMs: decoded.serverStartTimeMs,
+      animationDurationMs: decoded.animationDurationMs,
+      startBufferMs: decoded.startBufferMs,
+    };
+  }
+  if (decoded.type === 'roll_updated') {
+    return {
+      type: 'roll_updated',
+      ...common,
+      animate: decoded.animate,
+      animationSeed: decoded.animationSeed,
+      serverStartTimeMs: decoded.serverStartTimeMs,
+      animationDurationMs: decoded.animationDurationMs,
+      startBufferMs: decoded.startBufferMs,
+      audit: decoded.audit,
+    };
+  }
+  return {
+    type: 'roll_visibility_updated',
+    ...common,
+    previousVisibility: requireStoredVisibility(decoded.previousVisibility, 'previousVisibility'),
+    audit: decoded.audit,
+  };
+}
+
+function decodeStoredServerEvent(
+  value: unknown,
+  expectedType: ServerToClientEvent['type'],
+): ServerToClientEvent {
+  const decoded = decodeServerToClientEvent(value, {
+    rejectUnknownFields: true,
+    allowLegacyResults: false,
+  });
+  if (!decoded.success) {
+    throw new Error(`Stored room event is invalid: ${decoded.error.message}`);
+  }
+  if (decoded.data.type !== expectedType) {
+    throw new Error(
+      `Stored room event type '${decoded.data.type}' does not match '${expectedType}'`,
+    );
+  }
+  return decoded.data;
+}
+
+function assertStoredEventFields(
+  event: Record<string, unknown>,
+  allowedFields: readonly string[],
+): void {
+  const unexpected = Object.keys(event).find((field) => !allowedFields.includes(field));
+  if (unexpected !== undefined) {
+    throw new Error(`Stored room event contains unexpected field '${unexpected}'`);
+  }
+}
+
+function readStoredIdentifier(
+  value: unknown,
+  field: string,
+  required = false,
+): string | undefined {
+  if (value === undefined) {
+    if (required) throw new Error(`Stored room event is missing '${field}'`);
+    return undefined;
+  }
+  if (typeof value !== 'string' || !value.trim() || value.length > 500) {
+    throw new Error(`Stored room event has invalid '${field}'`);
+  }
+  return value;
+}
+
+function requireStoredVisibility(
+  value: RoomRollEvent['visibility'],
+  field: string,
+): RollVisibility {
+  if (value.type === 'hidden') {
+    throw new Error(`Stored room event '${field}' cannot be hidden`);
+  }
+  return value;
 }
 
 function projectInternalEvent(
