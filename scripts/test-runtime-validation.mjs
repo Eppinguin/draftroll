@@ -47,6 +47,7 @@ try {
   const protocol = await import(pathToFileURL(join(outDir, 'protocol/src/index.js')).href);
   const core = await import(pathToFileURL(join(outDir, 'core/src/index.js')).href);
   const {
+    DRAFTROLL_PROTOCOL_VERSION,
     DRAFTROLL_RESULT_SCHEMA_VERSION,
     decodeClientToServerEvent,
     decodeNormalizedRollResult,
@@ -86,6 +87,20 @@ try {
   assert.equal(isNormalizedRollResult(legacy), false);
   assert.equal(Object.hasOwn(legacy, 'schemaVersion'), false);
 
+  const invalidLegacy = structuredClone(legacy);
+  invalidLegacy.dice[0].kept = 'yes';
+  const strictInvalidLegacy = decodeNormalizedRollResult(invalidLegacy, {
+    allowLegacyResults: false,
+  });
+  assert.equal(strictInvalidLegacy.success, false);
+  assert.ok(
+    strictInvalidLegacy.error.issues.some(
+      (entry) =>
+        entry.code === 'invalid_result_schema_version' && entry.path === '$.schemaVersion',
+    ),
+  );
+  assert.ok(strictInvalidLegacy.error.issues.some((entry) => entry.path.endsWith('.kept')));
+
   const parsed = engine.parse('1d20+5');
   const parsedSnapshot = structuredClone(parsed);
   const maximumRng = { integer: (_minimum, maximum) => maximum };
@@ -94,13 +109,18 @@ try {
   });
   assert.equal(advantageResult.dice.length, 2);
   assert.deepEqual(parsed, parsedSnapshot);
+  const disadvantageResult = evaluateParsedExpression(parsed, maximumRng, undefined, {
+    advantage: 'disadvantage',
+  });
+  assert.equal(disadvantageResult.dice.length, 2);
+  assert.deepEqual(parsed, parsedSnapshot);
   const normalResult = evaluateParsedExpression(parsed, maximumRng);
   assert.equal(normalResult.dice.length, 1);
   assert.deepEqual(parsed, parsedSnapshot);
 
   const legacyEvent = {
     type: 'roll_start',
-    protocolVersion: 2,
+    protocolVersion: DRAFTROLL_PROTOCOL_VERSION,
     roomId: 'table',
     eventSequence: 1,
     rollId: 'roll-legacy',
@@ -129,6 +149,58 @@ try {
     strictLegacyEvent.error.issues.some((entry) => entry.path === '$.result.schemaVersion'),
   );
   assert.equal(isServerToClientEvent(legacyEvent), false);
+  assert.equal(Object.hasOwn(legacy, 'schemaVersion'), false);
+
+  const legacyRoomState = {
+    type: 'room_state',
+    protocolVersion: DRAFTROLL_PROTOCOL_VERSION,
+    roomId: 'table',
+    sequence: 1,
+    latestRollSequence: 1,
+    latestEventSequence: 1,
+    eventBufferStartSequence: 1,
+    missedEventsTruncated: false,
+    policy: createRoomPolicy('open-table'),
+    policyRevision: 0,
+    participants: [],
+    recentEvents: [legacyEvent],
+    recentRolls: [legacyEvent],
+    recentRoll: legacyEvent,
+  };
+  const migratedRoomState = decodeServerToClientEvent(legacyRoomState, {
+    allowLegacyResults: true,
+  });
+  assert.equal(migratedRoomState.success, true);
+  assert.equal(
+    migratedRoomState.data.recentEvents[0].result.schemaVersion,
+    DRAFTROLL_RESULT_SCHEMA_VERSION,
+  );
+  assert.equal(
+    migratedRoomState.data.recentRolls[0].result.schemaVersion,
+    DRAFTROLL_RESULT_SCHEMA_VERSION,
+  );
+  assert.equal(Object.hasOwn(legacy, 'schemaVersion'), false);
+
+  const strictLegacyRoomState = decodeServerToClientEvent(legacyRoomState, {
+    allowLegacyResults: false,
+  });
+  assert.equal(strictLegacyRoomState.success, false);
+  assert.ok(
+    strictLegacyRoomState.error.issues.some(
+      (entry) => entry.path === '$.recentEvents.0.result.schemaVersion',
+    ),
+  );
+  assert.ok(
+    strictLegacyRoomState.error.issues.some(
+      (entry) => entry.path === '$.recentRolls.0.result.schemaVersion',
+    ),
+  );
+  assert.ok(
+    strictLegacyRoomState.error.issues.some(
+      (entry) => entry.path === '$.recentRoll.result.schemaVersion',
+    ),
+  );
+  assert.equal(isServerToClientEvent(legacyRoomState), false);
   assert.equal(Object.hasOwn(legacy, 'schemaVersion'), false);
 
   const invalidDie = structuredClone(result);
@@ -203,7 +275,7 @@ try {
   const hiddenLeak = decodeServerToClientEvent(
     {
       type: 'roll_start',
-      protocolVersion: 2,
+      protocolVersion: DRAFTROLL_PROTOCOL_VERSION,
       roomId: 'table',
       eventSequence: 1,
       rollId: 'roll-1',
@@ -259,10 +331,10 @@ try {
       {
         ok: true,
         tested: [
-          'normalized-result schema version, strict guards, and legacy migration',
-          'parsed-expression immutability across advantage evaluation',
+          'normalized-result schema version, strict guards, migration, and combined diagnostics',
+          'parsed-expression immutability across advantage and disadvantage evaluation',
           'strict client and server event decoding',
-          'legacy result rejection in strict server events',
+          'legacy result rejection across direct and nested room-state events',
           'unknown-field rejection',
           'metadata depth and payload limits',
           'protocol-version negotiation',
