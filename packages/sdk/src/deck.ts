@@ -347,7 +347,8 @@ export class DraftrollDeck {
   /** Restores every card copy to the draw pile and optionally shuffles it atomically. */
   reset(options: { shuffle?: boolean } = {}): this {
     const restored = toDrawPile(this.source);
-    const nextDrawPile = options.shuffle === false ? restored : shuffled(restored, this.sampleIndex);
+    const nextDrawPile =
+      options.shuffle === false ? restored : shuffled(restored, this.sampleIndex);
     this.inPlay.clear();
     this.discardPile = [];
     this.drawPile = nextDrawPile;

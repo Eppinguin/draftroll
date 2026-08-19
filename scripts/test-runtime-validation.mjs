@@ -118,7 +118,10 @@ try {
     decodeNormalizedRollResult(nonCloneableArray),
   );
   assert.equal(nonCloneableArrayDecode.success, false);
-  assert.equal(callWithoutThrow(() => isNormalizedRollResult(nonCloneableArray)), false);
+  assert.equal(
+    callWithoutThrow(() => isNormalizedRollResult(nonCloneableArray)),
+    false,
+  );
 
   const nonCloneableResult = {
     ...result,
@@ -128,7 +131,10 @@ try {
     decodeNormalizedRollResult(nonCloneableResult),
   );
   assertIssue(nonCloneableResultDecode, 'invalid_value', '$');
-  assert.equal(callWithoutThrow(() => isNormalizedRollResult(nonCloneableResult)), false);
+  assert.equal(
+    callWithoutThrow(() => isNormalizedRollResult(nonCloneableResult)),
+    false,
+  );
 
   const nonCloneableCustomDice = [
     {
@@ -147,7 +153,10 @@ try {
     decodeNormalizedRollResult(revokedNormalizedResult),
   );
   assertIssue(revokedNormalizedDecode, 'invalid_value', '$');
-  assert.equal(callWithoutThrow(() => isNormalizedRollResult(revokedNormalizedResult)), false);
+  assert.equal(
+    callWithoutThrow(() => isNormalizedRollResult(revokedNormalizedResult)),
+    false,
+  );
 
   const revokedCustomDice = createRevokedProxy();
   const revokedCustomDiceDecode = callWithoutThrow(() =>
@@ -160,7 +169,10 @@ try {
     decodeServerToClientEvent(revokedServerEvent),
   );
   assertIssue(revokedServerEventDecode, 'invalid_value', '$');
-  assert.equal(callWithoutThrow(() => isServerToClientEvent(revokedServerEvent)), false);
+  assert.equal(
+    callWithoutThrow(() => isServerToClientEvent(revokedServerEvent)),
+    false,
+  );
 
   const invalidLegacy = structuredClone(legacy);
   invalidLegacy.dice[0].kept = 'yes';
@@ -231,10 +243,7 @@ try {
   });
 
   const legacyEvent = createLegacyEvent();
-  assert.equal(
-    decodeServerToClientEvent(legacyEvent, { allowLegacyResults: true }).success,
-    true,
-  );
+  assert.equal(decodeServerToClientEvent(legacyEvent, { allowLegacyResults: true }).success, true);
   const strictLegacyEvent = decodeServerToClientEvent(legacyEvent, {
     allowLegacyResults: false,
   });
@@ -252,7 +261,10 @@ try {
     decodeServerToClientEvent(nonCloneableEvent),
   );
   assertIssue(nonCloneableEventDecode, 'invalid_value', '$');
-  assert.equal(callWithoutThrow(() => isServerToClientEvent(nonCloneableEvent)), false);
+  assert.equal(
+    callWithoutThrow(() => isServerToClientEvent(nonCloneableEvent)),
+    false,
+  );
 
   const legacyRoomState = {
     type: 'room_state',

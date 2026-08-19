@@ -44,7 +44,10 @@ for (const marker of [
   );
 assert.ok(
   worker.indexOf('await this.state.storage.put(storageEntries)', bulkStart) <
-    worker.indexOf('for (const internal of internalEvents) this.broadcastRoll(internal)', bulkStart),
+    worker.indexOf(
+      'for (const internal of internalEvents) this.broadcastRoll(internal)',
+      bulkStart,
+    ),
   'bulk update broadcasts before the atomic Durable Object commit',
 );
 

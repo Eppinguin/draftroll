@@ -94,11 +94,9 @@ try {
     'reset restores deterministic source order',
   );
 
-  const copiedDeck = new DraftrollDeck(
-    'copies',
-    [{ result: 'A', copies: 2 }, { result: 'B' }],
-    { shuffle: false },
-  );
+  const copiedDeck = new DraftrollDeck('copies', [{ result: 'A', copies: 2 }, { result: 'B' }], {
+    shuffle: false,
+  });
   assert.equal(copiedDeck.size, 3);
   assert.deepEqual(
     copiedDeck.draw(3).cards.map((card) => [card.result, card.copyIndex]),
@@ -110,8 +108,7 @@ try {
   );
 
   assert.throws(
-    () =>
-      new DraftrollDeck('oversized', [{ result: 'x', copies: 100_001 }], { shuffle: false }),
+    () => new DraftrollDeck('oversized', [{ result: 'x', copies: 100_001 }], { shuffle: false }),
     /at most 100000 card copies/,
   );
   assert.throws(
@@ -129,7 +126,11 @@ try {
     { shuffle: false },
   );
   const oversizedDisplayDraw = oversizedDisplayDeck.draw(1_001);
-  assert.equal(oversizedDisplayDraw.cards.length, 1_001, 'large draws remain valid deck operations');
+  assert.equal(
+    oversizedDisplayDraw.cards.length,
+    1_001,
+    'large draws remain valid deck operations',
+  );
   assert.throws(
     () => oversizedDisplayDraw.toDisplayInput(),
     /display input supports at most 1000/,
@@ -137,15 +138,16 @@ try {
   );
   assert.throws(
     () =>
-      new DraftrollDeck(
-        'uncloneable',
-        [{ result: 'x', metadata: { callback() {} } }],
-        { shuffle: false },
-      ),
+      new DraftrollDeck('uncloneable', [{ result: 'x', metadata: { callback() {} } }], {
+        shuffle: false,
+      }),
     /structured-cloneable/,
   );
   assert.throws(() => standardPlayingCards({ jokers: 3 }), /jokers must be 0, 1, or 2/);
-  assert.throws(() => createStandardDeck('invalid-jokers', { jokers: -1 }), /jokers must be 0, 1, or 2/);
+  assert.throws(
+    () => createStandardDeck('invalid-jokers', { jokers: -1 }),
+    /jokers must be 0, 1, or 2/,
+  );
 
   const deterministicDefinitions = [{ result: 'A' }, { result: 'B' }, { result: 'C' }];
   const deterministicA = new DraftrollDeck('deterministic-a', deterministicDefinitions, {
@@ -182,7 +184,11 @@ try {
   emptyDiscardDeck.reshuffleDiscard();
   assert.equal(emptyDiscardSamples, 0, 'reshuffling an empty discard pile is a no-op');
   emptyDiscardDeck.shuffle();
-  assert.equal(emptyDiscardSamples, 2, 'shuffle() randomizes the remaining pile even with no discard');
+  assert.equal(
+    emptyDiscardSamples,
+    2,
+    'shuffle() randomizes the remaining pile even with no discard',
+  );
   assert.deepEqual(
     emptyDiscardDeck.draw(3).cards.map((card) => card.result),
     ['C', 'A', 'B'],
@@ -194,10 +200,7 @@ try {
   assert.equal(discardDraw.cards[1].result, '2♠');
   assert.equal(discardDeck.active, 2);
   assert.equal(discardDeck.discarded, 0);
-  assert.throws(
-    () => discardDeck.discard([discardDraw.cards[0], 'missing-card']),
-    /is not active/,
-  );
+  assert.throws(() => discardDeck.discard([discardDraw.cards[0], 'missing-card']), /is not active/);
   assert.equal(discardDeck.active, 2, 'failed discard leaves every active card untouched');
   assert.equal(discardDeck.discarded, 0, 'failed discard does not partially commit');
   assert.throws(
@@ -209,12 +212,13 @@ try {
   const returnDeck = createStandardDeck('return-atomic', { shuffle: false });
   const returnDraw = returnDeck.draw(2);
   const remainingBeforeReturn = returnDeck.remaining;
-  assert.throws(
-    () => returnDeck.return([returnDraw.cards[0], 'missing-card']),
-    /is not active/,
-  );
+  assert.throws(() => returnDeck.return([returnDraw.cards[0], 'missing-card']), /is not active/);
   assert.equal(returnDeck.active, 2, 'failed return leaves every active card untouched');
-  assert.equal(returnDeck.remaining, remainingBeforeReturn, 'failed return does not partially commit');
+  assert.equal(
+    returnDeck.remaining,
+    remainingBeforeReturn,
+    'failed return does not partially commit',
+  );
 
   const isolatedDeck = new DraftrollDeck(
     'snapshot-isolation',

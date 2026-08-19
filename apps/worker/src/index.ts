@@ -2561,7 +2561,9 @@ function migrateStoredInternalEvent(event: unknown): InternalRoomEvent {
     case 'roll_visibility_updated': {
       const decoded = decodeNormalizedRollResult(event.result, { allowLegacyResults: true });
       if (!decoded.success) {
-        throw new Error(`Stored room event contains an invalid roll result: ${decoded.error.message}`);
+        throw new Error(
+          `Stored room event contains an invalid roll result: ${decoded.error.message}`,
+        );
       }
       // Stored internal events were serialized by this Worker. The discriminant and result are
       // validated above; the remaining fields stay protected by strict outbound event validation.

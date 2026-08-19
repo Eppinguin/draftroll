@@ -66,7 +66,10 @@ try {
   cachedD6.collider.halfExtents[0] = 99;
   cachedD6.outcomes[0].supportNormals[0][0] = 0;
   const freshD6 = createCanonicalPhysicalDieDefinition('d6');
-  assert.ok(freshD6.collider.halfExtents[0] < 1, 'canonical cache is isolated from caller mutation');
+  assert.ok(
+    freshD6.collider.halfExtents[0] < 1,
+    'canonical cache is isolated from caller mutation',
+  );
   assert.equal(
     freshD6.outcomes[0].supportNormals[0][0],
     1,

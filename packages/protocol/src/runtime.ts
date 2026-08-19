@@ -3266,10 +3266,7 @@ function byteLength(raw: string | ArrayBuffer | ArrayBufferView): number {
   return raw.byteLength;
 }
 
-function cloneForValidation<T>(
-  value: T,
-  shouldClone: (candidate: T) => boolean,
-): DecodeResult<T> {
+function cloneForValidation<T>(value: T, shouldClone: (candidate: T) => boolean): DecodeResult<T> {
   try {
     if (!shouldClone(value)) return { success: true, data: value };
     return { success: true, data: structuredClone(value) };
