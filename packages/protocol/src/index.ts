@@ -1106,3 +1106,22 @@ export type ServerToClientEvent =
   | RollErrorEvent;
 
 export * from './runtime';
+export {
+  assertNormalizedRollResult,
+  decodeClientToServerEvent,
+  decodeCustomDiceDefinitions,
+  decodeNormalizedRollResult,
+  decodeParticipantIdentityInput,
+  decodeRollInput,
+  decodeRollUpdateInput,
+  decodeRollVisibility,
+  decodeRoomCapabilityTokenPayload,
+  decodeRoomPolicy,
+  decodeRoomPolicyPatch,
+  decodeServerToClientEvent,
+  isNormalizedRollResult,
+  isRollVisibility,
+  isServerToClientEvent,
+  migrateNormalizedRollResult,
+  parseClientToServerEvent,
+} from './runtime-boundary';

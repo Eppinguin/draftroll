@@ -41,14 +41,17 @@ try {
           target: 'ES2022',
           module: 'CommonJS',
           moduleResolution: 'Node',
-          rootDir: join(projectRoot, 'packages'),
+          rootDir: projectRoot,
           outDir,
           strict: true,
           skipLibCheck: true,
           esModuleInterop: true,
           lib: ['ES2023', 'DOM', 'DOM.Iterable'],
         },
-        include: [join(projectRoot, 'packages/protocol/**/*.ts')],
+        include: [
+          join(projectRoot, 'packages/protocol/**/*.ts'),
+          join(projectRoot, 'apps/worker/src/replay-integrity.ts'),
+        ],
       },
       null,
       2,
@@ -63,7 +66,12 @@ try {
   }
   await writeFile(join(outDir, 'package.json'), '{"type":"commonjs"}\n');
 
-  const protocol = await import(pathToFileURL(join(outDir, 'protocol/src/index.js')).href);
+  const protocol = await import(
+    pathToFileURL(join(outDir, 'packages/protocol/src/index.js')).href,
+  );
+  const replayIntegrity = await import(
+    pathToFileURL(join(outDir, 'apps/worker/src/replay-integrity.js')).href,
+  );
 
   const objectNonCloneable = { callback: () => {} };
   const arrayNonCloneable = [{ callback: () => {} }];
@@ -117,6 +125,126 @@ try {
     false,
   );
 
+  const exoticMetadata = {
+    participantId: 'host',
+    metadata: { when: new Date() },
+  };
+  assertBoundaryFailure(
+    protocol.decodeParticipantIdentityInput(exoticMetadata),
+    'decodeParticipantIdentityInput special structured-clone container',
+  );
+
+  const oversizedVisibility = {
+    type: 'roles',
+    roles: Array(protocol.DEFAULT_RUNTIME_VALIDATION_LIMITS.maximumArrayLength + 1).fill('gm'),
+  };
+  const oversizedDecode = protocol.decodeRollVisibility(oversizedVisibility);
+  assert.equal(oversizedDecode.success, false);
+  assert.ok(
+    oversizedDecode.error.issues.some(
+      (issue) => issue.code === 'limit_exceeded' && issue.path === '$',
+    ),
+  );
+
+  let getterReads = 0;
+  const getterBackedVisibility = { type: 'roles' };
+  Object.defineProperty(getterBackedVisibility, 'roles', {
+    enumerable: true,
+    get() {
+      getterReads += 1;
+      return ['gm'];
+    },
+  });
+  const getterDecode = protocol.decodeRollVisibility(getterBackedVisibility);
+  assert.equal(getterDecode.success, true);
+  assert.equal(getterReads, 1, 'caller-owned accessors must be evaluated at most once');
+
+  const replayEvent = (eventSequence, roomId = 'room') => ({
+    roomId,
+    eventSequence,
+    type: 'roll_start',
+  });
+  const replayRow = (eventSequence, body = replayEvent(eventSequence)) => ({
+    event_sequence: eventSequence,
+    event_json: JSON.stringify(body),
+  });
+  const replayWindow = {
+    roomId: 'room',
+    afterEventSequence: 9,
+    earliestEventSequence: 1,
+  };
+
+  const bufferGap = replayIntegrity.sanitizeEventBuffer(
+    [replayEvent(10), replayEvent(12), replayEvent(13)],
+    'room',
+    13,
+  );
+  assert.deepEqual(bufferGap.events, [replayEvent(10)]);
+  assert.equal(bufferGap.recoverySequence, 11);
+  assert.deepEqual(
+    replayIntegrity.findDurableReplayIssue(
+      [replayRow(10), replayRow(12)],
+      replayWindow,
+    ),
+    { kind: 'gap', eventSequence: 11 },
+  );
+  assert.deepEqual(
+    replayIntegrity.findDurableReplayIssue(
+      [replayRow(10, replayEvent(99))],
+      replayWindow,
+    ),
+    {
+      kind: 'corrupt',
+      eventSequence: 10,
+      reason: 'D1 replay row sequence does not match its serialized event',
+    },
+  );
+  assert.deepEqual(
+    replayIntegrity.findDurableReplayIssue(
+      [replayRow(10, replayEvent(10, 'other'))],
+      replayWindow,
+    ),
+    {
+      kind: 'corrupt',
+      eventSequence: 10,
+      reason: 'D1 replay row room identity does not match its query scope',
+    },
+  );
+  assert.equal(
+    replayIntegrity.findDurableReplayIssue([replayRow(10)], replayWindow),
+    null,
+    'a missing D1 tail may be asynchronous persistence lag',
+  );
+  const stalledReplay = replayIntegrity.stallReplayEnvelope(
+    {
+      afterEventSequence: 9,
+      nextAfterEventSequence: 12,
+      latestEventSequence: 12,
+      events: [replayEvent(10), replayEvent(12)],
+      hasMore: false,
+    },
+    11,
+  );
+  assert.deepEqual(stalledReplay.events, [replayEvent(10)]);
+  assert.equal(stalledReplay.nextAfterEventSequence, 10);
+  assert.equal(stalledReplay.recoveryBlockedAtEventSequence, undefined);
+  assert.equal(stalledReplay.hasMore, true);
+
+  const hardenedReplay = replayIntegrity.hardenReplayEnvelope(
+    {
+      afterEventSequence: 9,
+      nextAfterEventSequence: 12,
+      latestEventSequence: 12,
+      events: [replayEvent(10), replayEvent(12)],
+      hasMore: false,
+    },
+    11,
+  );
+  assert.deepEqual(hardenedReplay.events, [replayEvent(10)]);
+  assert.equal(hardenedReplay.nextAfterEventSequence, 10);
+  assert.equal(hardenedReplay.recoveryBlockedAtEventSequence, 11);
+  assert.equal(hardenedReplay.hasMore, true);
+
   const visibility = { type: 'roles', roles: ['gm'] };
   const decodedVisibility = protocol.decodeRollVisibility(visibility);
   assert.equal(decodedVisibility.success, true);
@@ -143,6 +271,11 @@ try {
           'all object-facing protocol decoders reject revoked proxies without throwing',
           'non-cloneable values matching each decoder boundary return structured failures',
           'throwing getters return structured boundary failures',
+          'special structured-clone containers are rejected instead of flattened',
+          'oversized object graphs fail before structured cloning',
+          'caller-owned accessors are read at most once before detailed validation',
+          'Durable Object replay buffers stop at sequence gaps and room mismatches',
+          'D1 replay gaps stall without advancing while corrupt row identities fail closed',
           'parse/type-guard helpers remain non-throwing',
           'successful public boundary decodes return detached data',
         ],
