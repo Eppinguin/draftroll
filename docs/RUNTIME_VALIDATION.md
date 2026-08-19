@@ -46,6 +46,8 @@ The decoder accepts results created before `schemaVersion` existed and migrates 
 
 Persisted D1 and Durable Object results are decoded and migrated before use. External application results are decoded before presentation, revision, rerolling, or storage.
 
+Compatibility decoders and assertions may migrate pre-schema results when `allowLegacyResults` is enabled (the default). Type predicates such as `isNormalizedRollResult()` and `isServerToClientEvent()` are intentionally strict: they return `true` only for current-schema values and never migrate their input. This keeps TypeScript narrowing aligned with the declared current-schema types.
+
 ### Runtime themes
 
 Theme manifests use their independent `DRAFTROLL_THEME_SCHEMA_VERSION`. Invalid manifests, unsupported versions, oversized resources, failed integrity checks, and unsafe meshes fall back or fail before renderer installation.
