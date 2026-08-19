@@ -1,12 +1,9 @@
 /**
- * Safe public protocol entry point.
+ * Runtime-safe public protocol facade.
  *
- * @remarks
  * Re-exports the protocol contracts while ensuring object-facing decoders detach untrusted input
  * before structural validation. This keeps the internal validator implementation focused while the
  * package boundary remains non-throwing for hostile proxies, throwing getters, and non-cloneable data.
- *
- * @packageDocumentation
  */
 
 import type {
