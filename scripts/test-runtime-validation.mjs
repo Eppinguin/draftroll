@@ -87,6 +87,11 @@ try {
   assert.equal(isNormalizedRollResult(legacy), false);
   assert.equal(Object.hasOwn(legacy, 'schemaVersion'), false);
 
+  const nonCloneableArray = [() => {}];
+  assert.doesNotThrow(() => decodeNormalizedRollResult(nonCloneableArray));
+  assert.equal(decodeNormalizedRollResult(nonCloneableArray).success, false);
+  assert.equal(isNormalizedRollResult(nonCloneableArray), false);
+
   const invalidLegacy = structuredClone(legacy);
   invalidLegacy.dice[0].kept = 'yes';
   const strictInvalidLegacy = decodeNormalizedRollResult(invalidLegacy, {
@@ -118,7 +123,7 @@ try {
   assert.equal(normalResult.dice.length, 1);
   assert.deepEqual(parsed, parsedSnapshot);
 
-  const legacyEvent = {
+  const createLegacyEvent = () => ({
     type: 'roll_start',
     protocolVersion: DRAFTROLL_PROTOCOL_VERSION,
     roomId: 'table',
@@ -135,8 +140,10 @@ try {
       actor: { participantId: 'a', sessionId: 's', name: 'A', roles: [] },
       createdAt: result.createdAt,
     },
-    result: legacy,
-  };
+    result: structuredClone(legacy),
+  });
+
+  const legacyEvent = createLegacyEvent();
   assert.equal(
     decodeServerToClientEvent(legacyEvent, { allowLegacyResults: true }).success,
     true,
@@ -149,7 +156,7 @@ try {
     strictLegacyEvent.error.issues.some((entry) => entry.path === '$.result.schemaVersion'),
   );
   assert.equal(isServerToClientEvent(legacyEvent), false);
-  assert.equal(Object.hasOwn(legacy, 'schemaVersion'), false);
+  assert.equal(Object.hasOwn(legacyEvent.result, 'schemaVersion'), false);
 
   const legacyRoomState = {
     type: 'room_state',
@@ -163,9 +170,9 @@ try {
     policy: createRoomPolicy('open-table'),
     policyRevision: 0,
     participants: [],
-    recentEvents: [legacyEvent],
-    recentRolls: [legacyEvent],
-    recentRoll: legacyEvent,
+    recentEvents: [createLegacyEvent()],
+    recentRolls: [createLegacyEvent()],
+    recentRoll: createLegacyEvent(),
   };
   const migratedRoomState = decodeServerToClientEvent(legacyRoomState, {
     allowLegacyResults: true,
@@ -179,7 +186,13 @@ try {
     migratedRoomState.data.recentRolls[0].result.schemaVersion,
     DRAFTROLL_RESULT_SCHEMA_VERSION,
   );
-  assert.equal(Object.hasOwn(legacy, 'schemaVersion'), false);
+  assert.equal(
+    migratedRoomState.data.recentRoll.result.schemaVersion,
+    DRAFTROLL_RESULT_SCHEMA_VERSION,
+  );
+  assert.equal(Object.hasOwn(legacyRoomState.recentEvents[0].result, 'schemaVersion'), false);
+  assert.equal(Object.hasOwn(legacyRoomState.recentRolls[0].result, 'schemaVersion'), false);
+  assert.equal(Object.hasOwn(legacyRoomState.recentRoll.result, 'schemaVersion'), false);
 
   const strictLegacyRoomState = decodeServerToClientEvent(legacyRoomState, {
     allowLegacyResults: false,
@@ -201,7 +214,9 @@ try {
     ),
   );
   assert.equal(isServerToClientEvent(legacyRoomState), false);
-  assert.equal(Object.hasOwn(legacy, 'schemaVersion'), false);
+  assert.equal(Object.hasOwn(legacyRoomState.recentEvents[0].result, 'schemaVersion'), false);
+  assert.equal(Object.hasOwn(legacyRoomState.recentRolls[0].result, 'schemaVersion'), false);
+  assert.equal(Object.hasOwn(legacyRoomState.recentRoll.result, 'schemaVersion'), false);
 
   const invalidDie = structuredClone(result);
   invalidDie.dice[0].kept = 'yes';
@@ -332,9 +347,10 @@ try {
         ok: true,
         tested: [
           'normalized-result schema version, strict guards, migration, and combined diagnostics',
+          'non-record normalized-result inputs reject without structured-clone failures',
           'parsed-expression immutability across advantage and disadvantage evaluation',
           'strict client and server event decoding',
-          'legacy result rejection across direct and nested room-state events',
+          'legacy result rejection across direct and independent nested room-state events',
           'unknown-field rejection',
           'metadata depth and payload limits',
           'protocol-version negotiation',
