@@ -1,0 +1,59 @@
+name: Apply core boundary hardening
+
+on:
+  push:
+    branches:
+      - fix/core-api-boundaries
+    paths:
+      - .github/workflows/apply-core-boundary-hardening.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/core-api-boundaries
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.1
+
+      - name: Enable pinned pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.17.0 --activate
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply deterministic worker patch
+        run: node scripts/apply-core-boundary-hardening.mjs
+
+      - name: Verify patch scope
+        run: |
+          git diff --check
+          test "$(git diff --name-only)" = "apps/worker/src/index.ts"
+
+      - name: Validate core boundaries
+        run: |
+          pnpm check
+          pnpm test:validation
+          pnpm test:resilience
+          pnpm test:worker-resilience
+          pnpm worker:test:local
+
+      - name: Commit validated worker fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/apply-core-boundary-hardening.yml scripts/apply-core-boundary-hardening.mjs
+          git add apps/worker/src/index.ts
+          git commit -m "Harden worker recovery and idempotency boundaries"
+          git push origin HEAD:fix/core-api-boundaries
