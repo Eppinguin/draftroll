@@ -758,7 +758,12 @@ function validateClientEvent(value: unknown, path: string, context: ValidationCo
 function validateServerEvent(value: unknown, path: string, context: ValidationContext): void {
   if (!expectRecord(value, path, context)) return;
   const type = readString(value.type, `${path}.type`, context, { required: true, maximum: 64 });
-  if (type !== 'roll_error')
+  if (
+    type !== 'roll_error' &&
+    type !== 'roll_start' &&
+    type !== 'roll_updated' &&
+    type !== 'roll_visibility_updated'
+  )
     validateProtocolVersion(value.protocolVersion, `${path}.protocolVersion`, context);
   switch (type) {
     case 'roll_start':
@@ -921,6 +926,7 @@ function validateRoomRollEvent(
   context: ValidationContext,
   type: 'roll_start' | 'roll_updated' | 'roll_visibility_updated',
 ): void {
+  validateProtocolVersion(value.protocolVersion, `${path}.protocolVersion`, context);
   const common = [
     'type',
     'protocolVersion',
@@ -1206,8 +1212,10 @@ function validateReplayEvent(value: unknown, path: string, context: ValidationCo
   ) {
     validateRoomRollEvent(value, path, context, eventType);
   } else if (eventType === 'room_policy_updated') {
+    validateProtocolVersion(value.protocolVersion, `${path}.protocolVersion`, context);
     validateRoomPolicyUpdatedEvent(value, path, context);
   } else if (eventType === 'room_token_revoked') {
+    validateProtocolVersion(value.protocolVersion, `${path}.protocolVersion`, context);
     validateRoomTokenRevokedEvent(value, path, context);
   } else {
     context.add(
