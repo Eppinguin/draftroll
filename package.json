@@ -46,7 +46,7 @@
     "test:generated-polyhedra": "node scripts/test-generated-polyhedra.mjs",
     "test:cards-demo": "node scripts/test-cards-demo.mjs && node scripts/test-deck-atomicity.mjs",
     "test:themes": "node scripts/test-runtime-themes.mjs",
-    "test:validation": "node scripts/test-runtime-validation.mjs",
+    "test:validation": "node scripts/test-runtime-validation.mjs && node scripts/test-protocol-boundary-safety.mjs",
     "test:hardening": "node scripts/test-room-hardening.mjs",
     "test:password": "node scripts/test-room-password.mjs",
     "test:tokens": "node scripts/test-token-security.mjs",
