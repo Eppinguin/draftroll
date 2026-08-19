@@ -56,7 +56,7 @@
     "test:browser": "pnpm test:browser:build && playwright test",
     "test:browser:chromium": "pnpm test:browser:build && playwright test --project=chromium",
     "test:browser:install": "playwright install --with-deps chromium firefox webkit",
-    "test:all": "pnpm test:core && pnpm test:release && pnpm test:browser",
+    "test:all": "pnpm test:core && pnpm worker:test:local && pnpm test:release && pnpm test:browser",
     "test:browser:config": "node scripts/test-browser-automation.mjs",
     "test:performance": "node scripts/test-renderer-performance.mjs",
     "test:browser:performance": "pnpm test:browser:build && playwright test tests/browser/specs/performance.spec.ts --project=chromium",
