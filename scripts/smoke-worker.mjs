@@ -87,6 +87,22 @@ export async function runSmoke(
   assert.equal(bramSecret.animationSeed, undefined);
   assert.equal(bramSecret.serverStartTimeMs, undefined);
 
+  const correlationRollRequest = {
+    type: 'roll_request',
+    requestId: 'correlation-roll',
+    visibility: { type: 'public' },
+    input: {
+      mode: 'evaluate',
+      name: 'Aria',
+      expression: '1d6',
+      metadata: { actionName: 'Correlation boundary' },
+    },
+  };
+  aria.socket.send(JSON.stringify(correlationRollRequest));
+  const ariaCorrelation = await aria.messages.next(
+    (event) => event.type === 'roll_start' && event.requestId === correlationRollRequest.requestId,
+  );
+
   let corruptRecoverySequence;
   if (options.prepareIdempotencyBoundary) {
     await options.prepareIdempotencyBoundary({
@@ -94,6 +110,7 @@ export async function runSmoke(
       sessionId: 'aria-session',
       publicEvent: ariaPublic,
       secretEvent: ariaSecret,
+      correlationEvent: ariaCorrelation,
     });
 
     const eventsUrl = authorizedHttpUrl(normalizedBase, roomId, 'events', {
@@ -214,7 +231,7 @@ export async function runSmoke(
   historyUrl.searchParams.set('limit', '10');
   const history = await poll(async () => {
     const response = await fetchJson(historyUrl);
-    return response.rolls?.length >= 3 ? response : null;
+    return response.rolls?.length >= 4 ? response : null;
   }, 5_000);
   const revealedHistory = history.rolls.find((entry) => entry.rollId === ariaSecret.rollId);
   assert.equal(revealedHistory.hidden, false);
@@ -247,9 +264,10 @@ export async function runSmoke(
 
   let idempotencyReplayRoll;
   let corruptReplayCode;
+  let mismatchedReplayCode;
   if (options.prepareIdempotencyBoundary) {
     // The local integration test runs with a 10-event Durable Object buffer. Enough new events
-    // force both retained responses out of that buffer while their request-cache entries remain.
+    // force all prepared retained responses out of that buffer while request-cache entries remain.
     for (let index = 0; index < 12; index += 1) {
       const requestId = `idempotency-filler-${index}`;
       aria.socket.send(
@@ -275,6 +293,16 @@ export async function runSmoke(
     assert.equal(replayedPublic.replayed, true);
     idempotencyReplayRoll = replayedPublic.rollId;
 
+    aria.socket.send(JSON.stringify(correlationRollRequest));
+    const rejectedMismatch = await aria.messages.next(
+      (event) =>
+        event.requestId === correlationRollRequest.requestId &&
+        (event.type === 'roll_start' || event.type === 'roll_error'),
+    );
+    assert.equal(rejectedMismatch.type, 'roll_error');
+    assert.equal(rejectedMismatch.code, 'idempotency_replay_unavailable');
+    mismatchedReplayCode = rejectedMismatch.code;
+
     aria.socket.send(JSON.stringify(secretRollRequest));
     const rejectedSecret = await aria.messages.next(
       (event) =>
@@ -295,12 +323,14 @@ export async function runSmoke(
     roomId,
     publicRoll: ariaPublic.rollId,
     secretRoll: ariaSecret.rollId,
+    correlationRoll: ariaCorrelation.rollId,
     revealedRevision: ariaReveal.result.revision,
     recoveredFromEventSequence: bramCursor,
     persistedRolls: history.rolls.length,
     persistedRevisions: revisions.revisions.length,
     idempotencyReplayRoll,
     corruptReplayCode,
+    mismatchedReplayCode,
     corruptRecoverySequence,
   };
   console.log(JSON.stringify(summary, null, 2));
