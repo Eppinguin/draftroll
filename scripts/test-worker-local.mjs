@@ -108,7 +108,13 @@ try {
   await cleanup();
 }
 
-async function prepareIdempotencyBoundary({ roomId, sessionId, publicEvent, secretEvent }) {
+async function prepareIdempotencyBoundary({
+  roomId,
+  sessionId,
+  publicEvent,
+  secretEvent,
+  correlationEvent,
+}) {
   const publicRow = await waitForPersistedRequest(
     roomId,
     sessionId,
@@ -121,9 +127,16 @@ async function prepareIdempotencyBoundary({ roomId, sessionId, publicEvent, secr
     secretEvent.requestId,
     secretEvent.eventSequence,
   );
+  const correlationRow = await waitForPersistedRequest(
+    roomId,
+    sessionId,
+    correlationEvent.requestId,
+    correlationEvent.eventSequence,
+  );
 
   assert.equal(Number(publicRow.request_sequence), publicEvent.eventSequence);
   assert.equal(Number(secretRow.request_sequence), secretEvent.eventSequence);
+  assert.equal(Number(correlationRow.request_sequence), correlationEvent.eventSequence);
 
   // The Durable Object request cache still proves the public request ran. Removing only the D1
   // request index reproduces a persistence split without removing its retained response event.
@@ -141,6 +154,29 @@ async function prepareIdempotencyBoundary({ roomId, sessionId, publicEvent, secr
       AND request_id = ${sqlString(publicEvent.requestId)}
   `);
   assert.equal(publicRequestRows.length, 0, 'public D1 request index was not removed');
+
+  // Keep the retained event structurally valid but change the correlation key. A request-cache
+  // mapping must never be sufficient to replay a different retained response.
+  const mismatchedCorrelation = JSON.parse(correlationRow.event_json);
+  mismatchedCorrelation.requestId = `${correlationEvent.requestId}-mismatch`;
+  await executeD1(`
+    UPDATE room_events
+    SET event_json = ${sqlString(JSON.stringify(mismatchedCorrelation))}
+    WHERE room_id = ${sqlString(roomId)}
+      AND event_sequence = ${Number(correlationEvent.eventSequence)}
+  `);
+  const [storedCorrelation] = await queryD1(`
+    SELECT event_json
+    FROM room_events
+    WHERE room_id = ${sqlString(roomId)}
+      AND event_sequence = ${Number(correlationEvent.eventSequence)}
+    LIMIT 1
+  `);
+  assert.ok(storedCorrelation, 'correlation retained response disappeared while preparing the test');
+  assert.equal(
+    JSON.parse(storedCorrelation.event_json).requestId,
+    `${correlationEvent.requestId}-mismatch`,
+  );
 
   // Keep a structurally valid JSON row and normalized result, but corrupt an internal field that
   // projection dereferences. Strict persisted-event decoding must reject this before projection.
