@@ -1,10 +1,12 @@
 /**
  * Runtime-safe public protocol facade.
  *
- * Re-exports runtime values explicitly while ensuring object-facing decoders detach untrusted input
- * before structural validation. Type declarations remain sourced from `index.d.ts`, so this module
- * only owns the JavaScript package boundary and does not shadow star exports.
+ * The canonical contract continues to live in `index.ts`. This module re-exports that complete
+ * surface and only overrides object-facing decoders that need a detached structured-clone boundary
+ * for installed JavaScript consumers.
  */
+
+export * from './index';
 
 import type {
   ClientToServerEvent,
@@ -28,34 +30,6 @@ import {
   decodeRoomCapabilityTokenPayload as decodeRoomCapabilityTokenPayloadInternal,
   decodeRoomPolicy as decodeRoomPolicyInternal,
   decodeRoomPolicyPatch as decodeRoomPolicyPatchInternal,
-} from './runtime';
-
-export {
-  DRAFTROLL_PROTOCOL_VERSION,
-  DRAFTROLL_RESULT_SCHEMA_VERSION,
-  DRAFTROLL_SUPPORTED_PROTOCOL_VERSIONS,
-} from './version';
-export {
-  DEFAULT_ROOM_POLICY,
-  DRAFTROLL_ROOM_POLICY_SCHEMA_VERSION,
-  ROOM_POLICY_PRESETS,
-  applyRoomPolicyPatch,
-  cloneRoomPolicy,
-  createRoomPolicy,
-} from './policy';
-export {
-  DEFAULT_RUNTIME_VALIDATION_LIMITS,
-  DraftrollValidationError,
-  assertNormalizedRollResult,
-  decodeCustomDiceDefinitions,
-  decodeNormalizedRollResult,
-  decodeServerToClientEvent,
-  isNormalizedRollResult,
-  isServerToClientEvent,
-  migrateNormalizedRollResult,
-  negotiateProtocolVersion,
-  parseRuntimeJson,
-  unwrapDecode,
 } from './runtime';
 
 type BoundaryDecoder<T> = (value: unknown, options?: DecodeOptions) => DecodeResult<T>;
