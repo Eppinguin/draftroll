@@ -50,6 +50,7 @@ try {
     DRAFTROLL_PROTOCOL_VERSION,
     DRAFTROLL_RESULT_SCHEMA_VERSION,
     decodeClientToServerEvent,
+    decodeCustomDiceDefinitions,
     decodeNormalizedRollResult,
     decodeRoomPolicy,
     decodeRoomPolicyPatch,
@@ -91,6 +92,37 @@ try {
   assert.doesNotThrow(() => decodeNormalizedRollResult(nonCloneableArray));
   assert.equal(decodeNormalizedRollResult(nonCloneableArray).success, false);
   assert.equal(isNormalizedRollResult(nonCloneableArray), false);
+
+  const nonCloneableResult = {
+    ...result,
+    metadata: { callback: () => {} },
+  };
+  assert.doesNotThrow(() => decodeNormalizedRollResult(nonCloneableResult));
+  const nonCloneableResultDecode = decodeNormalizedRollResult(nonCloneableResult);
+  assert.equal(nonCloneableResultDecode.success, false);
+  assert.ok(
+    nonCloneableResultDecode.error.issues.some(
+      (entry) => entry.code === 'invalid_value' && entry.path === '$',
+    ),
+  );
+  assert.doesNotThrow(() => isNormalizedRollResult(nonCloneableResult));
+  assert.equal(isNormalizedRollResult(nonCloneableResult), false);
+
+  const nonCloneableCustomDice = [
+    {
+      id: 'non-cloneable',
+      faces: [{ result: 1 }],
+      metadata: { callback: () => {} },
+    },
+  ];
+  assert.doesNotThrow(() => decodeCustomDiceDefinitions(nonCloneableCustomDice));
+  const nonCloneableCustomDiceDecode = decodeCustomDiceDefinitions(nonCloneableCustomDice);
+  assert.equal(nonCloneableCustomDiceDecode.success, false);
+  assert.ok(
+    nonCloneableCustomDiceDecode.error.issues.some(
+      (entry) => entry.code === 'invalid_value' && entry.path === '$',
+    ),
+  );
 
   const invalidLegacy = structuredClone(legacy);
   invalidLegacy.dice[0].kept = 'yes';
@@ -157,6 +189,20 @@ try {
   );
   assert.equal(isServerToClientEvent(legacyEvent), false);
   assert.equal(Object.hasOwn(legacyEvent.result, 'schemaVersion'), false);
+
+  const nonCloneableEvent = createLegacyEvent();
+  nonCloneableEvent.result = structuredClone(result);
+  nonCloneableEvent.result.metadata = { callback: () => {} };
+  assert.doesNotThrow(() => decodeServerToClientEvent(nonCloneableEvent));
+  const nonCloneableEventDecode = decodeServerToClientEvent(nonCloneableEvent);
+  assert.equal(nonCloneableEventDecode.success, false);
+  assert.ok(
+    nonCloneableEventDecode.error.issues.some(
+      (entry) => entry.code === 'invalid_value' && entry.path === '$',
+    ),
+  );
+  assert.doesNotThrow(() => isServerToClientEvent(nonCloneableEvent));
+  assert.equal(isServerToClientEvent(nonCloneableEvent), false);
 
   const legacyRoomState = {
     type: 'room_state',
@@ -347,7 +393,8 @@ try {
         ok: true,
         tested: [
           'normalized-result schema version, strict guards, migration, and combined diagnostics',
-          'non-record normalized-result inputs reject without structured-clone failures',
+          'non-record inputs and clone failures reject without escaping decoder exceptions',
+          'clone-safe custom-dice, normalized-result, and server-event boundaries',
           'parsed-expression immutability across advantage and disadvantage evaluation',
           'strict client and server event decoding',
           'legacy result rejection across direct and independent nested room-state events',
