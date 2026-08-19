@@ -237,49 +237,57 @@ try {
     recentRolls: [createLegacyEvent()],
     recentRoll: createLegacyEvent(),
   };
+  const roomStateRollSlots = (roomState) => [
+    ['$.recentEvents.0', roomState.recentEvents[0]],
+    ['$.recentRolls.0', roomState.recentRolls[0]],
+    ['$.recentRoll', roomState.recentRoll],
+  ];
+
   const migratedRoomState = decodeServerToClientEvent(legacyRoomState, {
     allowLegacyResults: true,
   });
   assert.equal(migratedRoomState.success, true);
-  assert.equal(
-    migratedRoomState.data.recentEvents[0].result.schemaVersion,
-    DRAFTROLL_RESULT_SCHEMA_VERSION,
-  );
-  assert.equal(
-    migratedRoomState.data.recentRolls[0].result.schemaVersion,
-    DRAFTROLL_RESULT_SCHEMA_VERSION,
-  );
-  assert.equal(
-    migratedRoomState.data.recentRoll.result.schemaVersion,
-    DRAFTROLL_RESULT_SCHEMA_VERSION,
-  );
-  assert.equal(Object.hasOwn(legacyRoomState.recentEvents[0].result, 'schemaVersion'), false);
-  assert.equal(Object.hasOwn(legacyRoomState.recentRolls[0].result, 'schemaVersion'), false);
-  assert.equal(Object.hasOwn(legacyRoomState.recentRoll.result, 'schemaVersion'), false);
+  for (const [, event] of roomStateRollSlots(migratedRoomState.data)) {
+    assert.equal(event.result.schemaVersion, DRAFTROLL_RESULT_SCHEMA_VERSION);
+  }
+  for (const [, event] of roomStateRollSlots(legacyRoomState)) {
+    assert.equal(Object.hasOwn(event.result, 'schemaVersion'), false);
+  }
 
   const strictLegacyRoomState = decodeServerToClientEvent(legacyRoomState, {
     allowLegacyResults: false,
   });
   assert.equal(strictLegacyRoomState.success, false);
-  assert.ok(
-    strictLegacyRoomState.error.issues.some(
-      (entry) => entry.path === '$.recentEvents.0.result.schemaVersion',
-    ),
-  );
-  assert.ok(
-    strictLegacyRoomState.error.issues.some(
-      (entry) => entry.path === '$.recentRolls.0.result.schemaVersion',
-    ),
-  );
-  assert.ok(
-    strictLegacyRoomState.error.issues.some(
-      (entry) => entry.path === '$.recentRoll.result.schemaVersion',
-    ),
-  );
+  for (const [path] of roomStateRollSlots(legacyRoomState)) {
+    assertIssue(strictLegacyRoomState, 'invalid_result_schema_version', `${path}.result.schemaVersion`);
+  }
   assert.equal(isServerToClientEvent(legacyRoomState), false);
-  assert.equal(Object.hasOwn(legacyRoomState.recentEvents[0].result, 'schemaVersion'), false);
-  assert.equal(Object.hasOwn(legacyRoomState.recentRolls[0].result, 'schemaVersion'), false);
-  assert.equal(Object.hasOwn(legacyRoomState.recentRoll.result, 'schemaVersion'), false);
+  for (const [, event] of roomStateRollSlots(legacyRoomState)) {
+    assert.equal(Object.hasOwn(event.result, 'schemaVersion'), false);
+  }
+
+  for (const [path] of roomStateRollSlots(legacyRoomState)) {
+    const field = path.startsWith('$.recentEvents')
+      ? ['recentEvents', 0]
+      : path.startsWith('$.recentRolls')
+        ? ['recentRolls', 0]
+        : ['recentRoll'];
+    for (const protocolVersion of [undefined, DRAFTROLL_PROTOCOL_VERSION + 1]) {
+      const invalidProtocolState = structuredClone(legacyRoomState);
+      const nestedEvent =
+        field.length === 2 ? invalidProtocolState[field[0]][field[1]] : invalidProtocolState[field[0]];
+      if (protocolVersion === undefined) delete nestedEvent.protocolVersion;
+      else nestedEvent.protocolVersion = protocolVersion;
+      const decoded = decodeServerToClientEvent(invalidProtocolState, {
+        allowLegacyResults: true,
+      });
+      assertIssue(
+        decoded,
+        protocolVersion === undefined ? 'invalid_protocol_version' : 'unsupported_protocol_version',
+        `${path}.protocolVersion`,
+      );
+    }
+  }
 
   const invalidDie = structuredClone(result);
   invalidDie.dice[0].kept = 'yes';
@@ -415,6 +423,7 @@ try {
           'parsed-expression immutability across advantage and disadvantage evaluation',
           'strict client and server event decoding',
           'legacy result rejection across direct and independent nested room-state events',
+          'nested room-state protocol-version enforcement',
           'unknown-field rejection',
           'metadata depth and payload limits',
           'protocol-version negotiation',
