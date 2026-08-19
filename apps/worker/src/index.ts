@@ -1279,7 +1279,7 @@ export class DiceRoomObject {
     eventBuffer.push(...internalEvents, acknowledgement);
     if (eventBuffer.length > eventLimit) eventBuffer.splice(0, eventBuffer.length - eventLimit);
 
-    const requestCache = (await this.state.storage.get<RequestCacheEntry[]>('requestCache')) ?? [];
+    const requestCache = await this.getRequestCache();
     requestCache.push({
       key: `${participant.sessionId}:${event.requestId}`,
       eventSequence: acknowledgement.eventSequence,
@@ -1311,6 +1311,7 @@ export class DiceRoomObject {
     for (const { item, record } of prepared) storageEntries[`roll:${item.rollId}`] = record;
     await this.state.storage.put(storageEntries);
     this.eventBufferCache = eventBuffer;
+    await this.retireEventBufferRecoveryMarker(eventBuffer);
     this.state.waitUntil(
       this.persistRequestRecord(
         participant.sessionId,
@@ -1968,8 +1969,7 @@ export class DiceRoomObject {
       ]);
     const eventBufferStartSequence = eventBuffer[0]?.eventSequence ?? latestEventSequence + 1;
     const replayCoverageLost =
-      eventBufferRecoverySequence !== null &&
-      (eventBufferRecoverySequence === 0 || lastEventSequence < eventBufferRecoverySequence);
+      eventBufferRecoverySequence !== null && lastEventSequence < eventBufferRecoverySequence;
     const missedEventsTruncated =
       replayCoverageLost ||
       (lastEventSequence > 0 && lastEventSequence < eventBufferStartSequence - 1);
@@ -2394,6 +2394,7 @@ export class DiceRoomObject {
     if (events.length > limit) events.splice(0, events.length - limit);
     await this.state.storage.put('eventBuffer', events);
     this.eventBufferCache = events;
+    await this.retireEventBufferRecoveryMarker(events);
     this.state.waitUntil(this.persistEventSafely(event, policy));
   }
 
@@ -2406,31 +2407,43 @@ export class DiceRoomObject {
       this.eventBufferRecoverySequenceCache = null;
       return null;
     }
-    if (typeof stored === 'number' && Number.isSafeInteger(stored) && stored >= 0) {
+    if (typeof stored === 'number' && Number.isSafeInteger(stored) && stored >= 1) {
       this.eventBufferRecoverySequenceCache = stored;
       return stored;
     }
+    const fallback = Math.max(1, await this.getEventSequence());
     this.logStructured('room.event_storage_invalid', {
       source: 'durable_object_buffer_marker',
       message: 'Stored event-buffer recovery marker is invalid',
+      recoveredAsEventSequence: fallback,
     });
-    this.eventBufferRecoverySequenceCache = 0;
-    await this.state.storage.put('eventBufferRecoverySequence', 0);
-    return 0;
+    this.eventBufferRecoverySequenceCache = fallback;
+    await this.state.storage.put('eventBufferRecoverySequence', fallback);
+    return fallback;
   }
 
-  private async markEventBufferRecoveryRequired(sequence: number | null): Promise<void> {
-    const candidate = sequence ?? 0;
+  private async markEventBufferRecoveryRequired(sequence: number): Promise<void> {
+    if (!Number.isSafeInteger(sequence) || sequence < 1) {
+      throw new Error('Event-buffer recovery sequence must be a positive safe integer');
+    }
     const current = await this.getEventBufferRecoverySequence();
-    const next =
-      current === null
-        ? candidate
-        : current === 0 || candidate === 0
-          ? 0
-          : Math.min(current, candidate);
+    const next = current === null ? sequence : Math.min(current, sequence);
     if (current === next) return;
     this.eventBufferRecoverySequenceCache = next;
     await this.state.storage.put('eventBufferRecoverySequence', next);
+  }
+
+  private async retireEventBufferRecoveryMarker(
+    events: readonly InternalRoomEvent[],
+  ): Promise<void> {
+    const recoverySequence = await this.getEventBufferRecoverySequence();
+    if (recoverySequence === null) return;
+    const eventBufferStartSequence = events[0]?.eventSequence;
+    if (eventBufferStartSequence === undefined || eventBufferStartSequence <= recoverySequence) {
+      return;
+    }
+    this.eventBufferRecoverySequenceCache = null;
+    await this.state.storage.delete('eventBufferRecoverySequence');
   }
 
   private async getEventBuffer(): Promise<InternalRoomEvent[]> {
@@ -2438,42 +2451,46 @@ export class DiceRoomObject {
 
     const stored = await this.state.storage.get('eventBuffer');
     if (stored === undefined) {
+      if ((await this.getEventBufferRecoverySequence()) !== null) {
+        this.eventBufferRecoverySequenceCache = null;
+        await this.state.storage.delete('eventBufferRecoverySequence');
+      }
       this.eventBufferCache = [];
       return [];
     }
+
+    const latestEventSequence = await this.getEventSequence();
     if (!Array.isArray(stored)) {
       this.logStructured('room.event_storage_invalid', {
         source: 'durable_object_buffer',
         message: 'Stored event buffer is not an array',
       });
-      await this.markEventBufferRecoveryRequired(null);
+      await this.markEventBufferRecoveryRequired(Math.max(1, latestEventSequence));
       this.eventBufferCache = [];
       return [];
     }
 
     const events: InternalRoomEvent[] = [];
-    let recoverySequence: number | null | undefined;
+    let recoverySequence: number | undefined;
     for (const [index, event] of stored.entries()) {
       const eventSequence =
         isRecord(event) &&
         typeof event.eventSequence === 'number' &&
         Number.isSafeInteger(event.eventSequence) &&
-        event.eventSequence >= 0
+        event.eventSequence >= 1
           ? event.eventSequence
-          : null;
+          : undefined;
       try {
         events.push(migrateStoredInternalEvent(event));
       } catch (error) {
+        const candidate = eventSequence ?? Math.max(1, latestEventSequence);
         recoverySequence =
-          recoverySequence === undefined
-            ? eventSequence
-            : recoverySequence === null || eventSequence === null
-              ? null
-              : Math.min(recoverySequence, eventSequence);
+          recoverySequence === undefined ? candidate : Math.min(recoverySequence, candidate);
         this.logStructured('room.event_storage_invalid', {
           source: 'durable_object_buffer',
           index,
-          eventSequence: eventSequence ?? undefined,
+          eventSequence,
+          recoverySequence: candidate,
           message: asError(error).message,
         });
       }
@@ -2485,12 +2502,45 @@ export class DiceRoomObject {
     return [...events];
   }
 
+  private async getRequestCache(): Promise<RequestCacheEntry[]> {
+    const stored = await this.state.storage.get('requestCache');
+    if (stored === undefined) return [];
+    if (!Array.isArray(stored)) {
+      this.logStructured('room.event_storage_invalid', {
+        source: 'durable_object_request_cache',
+        message: 'Stored request cache is not an array',
+      });
+      return [];
+    }
+
+    const entries: RequestCacheEntry[] = [];
+    for (const [index, entry] of stored.entries()) {
+      if (
+        isRecord(entry) &&
+        typeof entry.key === 'string' &&
+        entry.key.length > 0 &&
+        typeof entry.eventSequence === 'number' &&
+        Number.isSafeInteger(entry.eventSequence) &&
+        entry.eventSequence >= 1
+      ) {
+        entries.push({ key: entry.key, eventSequence: entry.eventSequence });
+        continue;
+      }
+      this.logStructured('room.event_storage_invalid', {
+        source: 'durable_object_request_cache',
+        index,
+        message: 'Stored request-cache entry is invalid',
+      });
+    }
+    return entries;
+  }
+
   private async recordRequest(
     sessionId: string,
     requestId: string,
     eventSequence: number,
   ): Promise<void> {
-    const entries = (await this.state.storage.get<RequestCacheEntry[]>('requestCache')) ?? [];
+    const entries = await this.getRequestCache();
     entries.push({ key: `${sessionId}:${requestId}`, eventSequence });
     if (entries.length > 200) entries.splice(0, entries.length - 200);
     await this.state.storage.put('requestCache', entries);
@@ -2530,19 +2580,59 @@ export class DiceRoomObject {
     }
   }
 
+  private assertIdempotencyReplayMatches(
+    event: InternalRoomEvent,
+    roomId: string,
+    sessionId: string,
+    requestId: string,
+  ): InternalRoomEvent {
+    const requesterSessionId =
+      event.type === 'bulk_rolls_updated'
+        ? event.requesterSessionId
+        : event.type === 'room_policy_updated' || event.type === 'room_token_revoked'
+          ? event.actor.sessionId
+          : (event.requesterSessionId ??
+            (event.type === 'roll_start' ? event.actor.sessionId : undefined));
+    if (
+      event.roomId === roomId &&
+      event.requestId === requestId &&
+      requesterSessionId === sessionId
+    ) {
+      return event;
+    }
+
+    this.logStructured('room.idempotency_replay_mismatch', {
+      eventSequence: event.eventSequence,
+      expectedRoomId: roomId,
+      actualRoomId: event.roomId,
+      expectedRequestId: requestId,
+      actualRequestId: event.requestId,
+      expectedSessionId: sessionId,
+      actualSessionId: requesterSessionId,
+    });
+    throw new RoomOperationError(
+      'idempotency_replay_unavailable',
+      `Request '${requestId}' was already recorded but its retained response does not match the request`,
+      409,
+    );
+  }
+
   private async findDuplicateRequest(
     sessionId: string,
     requestId: string,
   ): Promise<InternalRoomEvent | null> {
-    const entries = (await this.state.storage.get<RequestCacheEntry[]>('requestCache')) ?? [];
+    const entries = await this.getRequestCache();
     const match = entries.toReversed().find((entry) => entry.key === `${sessionId}:${requestId}`);
+    const roomId = (await this.state.storage.get<string>('roomId')) ?? this.state.id.toString();
     if (match) {
       const buffered = (await this.getEventBuffer()).find(
         (event) => event.eventSequence === match.eventSequence,
       );
-      if (buffered) return buffered;
+      if (buffered) {
+        return this.assertIdempotencyReplayMatches(buffered, roomId, sessionId, requestId);
+      }
     }
-    const roomId = (await this.state.storage.get<string>('roomId')) ?? this.state.id.toString();
+
     let eventSequence = match?.eventSequence;
     if (eventSequence === undefined) {
       const requestQuery = await this.env.DB.prepare(`
@@ -2553,8 +2643,22 @@ export class DiceRoomObject {
       `)
         .bind(roomId, sessionId, requestId)
         .all<RoomRequestRow>();
-      eventSequence = requestQuery.results?.[0]?.event_sequence;
-      if (eventSequence === undefined) return null;
+      const persistedSequence = requestQuery.results?.[0]?.event_sequence;
+      if (persistedSequence === undefined) return null;
+      if (!Number.isSafeInteger(persistedSequence) || persistedSequence < 1) {
+        this.logStructured('room.event_storage_invalid', {
+          source: 'idempotency_request_index',
+          requestId,
+          eventSequence: persistedSequence,
+          message: 'Persisted request index contains an invalid event sequence',
+        });
+        throw new RoomOperationError(
+          'idempotency_replay_unavailable',
+          `Request '${requestId}' was already recorded but its retained response index is invalid`,
+          409,
+        );
+      }
+      eventSequence = persistedSequence;
     }
     const eventQuery = await this.env.DB.prepare(`
       SELECT event_sequence, event_json, created_at
@@ -2574,8 +2678,10 @@ export class DiceRoomObject {
     }
     try {
       // Deserializes storage this Durable Object previously serialized itself.
-      return migrateStoredInternalEvent(JSON.parse(serialized));
+      const internal = migrateStoredInternalEvent(JSON.parse(serialized));
+      return this.assertIdempotencyReplayMatches(internal, roomId, sessionId, requestId);
     } catch (error) {
+      if (error instanceof RoomOperationError) throw error;
       this.logStructured('room.event_storage_invalid', {
         source: 'idempotency_replay',
         eventSequence,
