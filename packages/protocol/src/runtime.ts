@@ -432,7 +432,7 @@ export function decodeNormalizedRollResult(
   value: unknown,
   options: DecodeOptions = {},
 ): DecodeResult<NormalizedRollResult> {
-  const cloned = structuredCloneIfObject(value);
+  const cloned = isRecord(value) ? structuredClone(value) : value;
   const context = createContext({ rejectUnknownFields: true, ...options });
   validateNormalizedResult(cloned, '$', context);
   return context.result<NormalizedRollResult>(cloned, 'Normalized roll result is invalid');
