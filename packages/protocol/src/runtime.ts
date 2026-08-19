@@ -389,7 +389,7 @@ export function decodeCustomDiceDefinitions(
   value: unknown,
   options: DecodeOptions = {},
 ): DecodeResult<CustomDiceDefinition[]> {
-  const cloned = cloneForValidation(value, Array.isArray(value));
+  const cloned = cloneForValidation(value, Array.isArray);
   if (!cloned.success) return cloned;
   const context = createContext({ rejectUnknownFields: true, ...options });
   validateCustomDice(cloned.data, '$', context);
@@ -433,7 +433,7 @@ export function decodeNormalizedRollResult(
   value: unknown,
   options: DecodeOptions = {},
 ): DecodeResult<NormalizedRollResult> {
-  const cloned = cloneForValidation(value, isRecord(value));
+  const cloned = cloneForValidation(value, isRecord);
   if (!cloned.success) return cloned;
   const context = createContext({ rejectUnknownFields: true, ...options });
   validateNormalizedResult(cloned.data, '$', context);
@@ -484,7 +484,7 @@ export function decodeServerToClientEvent(
   value: unknown,
   options: DecodeOptions = {},
 ): DecodeResult<ServerToClientEvent> {
-  const cloned = cloneForValidation(value, isRecord(value));
+  const cloned = cloneForValidation(value, isRecord);
   if (!cloned.success) return cloned;
   const context = createContext({ rejectUnknownFields: true, ...options });
   validateServerEvent(cloned.data, '$', context);
@@ -1846,6 +1846,8 @@ function validateNormalizedResult(value: unknown, path: string, context: Validat
   if (!expectRecord(value, path, context)) return;
   if (value.schemaVersion === undefined) {
     if (context.allowLegacyResults) {
+      // Result-bearing decoder boundaries validate detached clones. Nested results are part of
+      // the same decoder-owned clone, so migration here never mutates caller-owned input.
       value.schemaVersion = DRAFTROLL_RESULT_SCHEMA_VERSION;
     } else {
       context.add(
@@ -3256,9 +3258,12 @@ function byteLength(raw: string | ArrayBuffer | ArrayBufferView): number {
   return raw.byteLength;
 }
 
-function cloneForValidation<T>(value: T, shouldClone: boolean): DecodeResult<T> {
-  if (!shouldClone) return { success: true, data: value };
+function cloneForValidation<T>(
+  value: T,
+  shouldClone: (candidate: T) => boolean,
+): DecodeResult<T> {
   try {
+    if (!shouldClone(value)) return { success: true, data: value };
     return { success: true, data: structuredClone(value) };
   } catch {
     return failure('Value cannot be safely cloned for validation', [

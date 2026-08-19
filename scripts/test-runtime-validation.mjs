@@ -64,6 +64,27 @@ try {
   } = protocol;
   const { DiceEngine, evaluateParsedExpression } = core;
 
+  const callWithoutThrow = (callback) => {
+    let value;
+    assert.doesNotThrow(() => {
+      value = callback();
+    });
+    return value;
+  };
+  const assertIssue = (decoded, code, path) => {
+    assert.equal(decoded.success, false);
+    assert.ok(
+      decoded.error.issues.some(
+        (entry) => entry.code === code && (path === undefined || entry.path === path),
+      ),
+    );
+  };
+  const createRevokedProxy = () => {
+    const { proxy, revoke } = Proxy.revocable({}, {});
+    revoke();
+    return proxy;
+  };
+
   const engine = new DiceEngine({ rng: { integer: (minimum) => minimum } });
   const result = engine.roll('1d20+5');
   assert.equal(result.schemaVersion, DRAFTROLL_RESULT_SCHEMA_VERSION);
@@ -78,35 +99,26 @@ try {
   assert.equal(Object.hasOwn(legacy, 'schemaVersion'), false);
 
   const strictLegacy = decodeNormalizedRollResult(legacy, { allowLegacyResults: false });
-  assert.equal(strictLegacy.success, false);
-  assert.ok(
-    strictLegacy.error.issues.some(
-      (entry) =>
-        entry.code === 'invalid_result_schema_version' && entry.path === '$.schemaVersion',
-    ),
-  );
+  assertIssue(strictLegacy, 'invalid_result_schema_version', '$.schemaVersion');
   assert.equal(isNormalizedRollResult(legacy), false);
   assert.equal(Object.hasOwn(legacy, 'schemaVersion'), false);
 
   const nonCloneableArray = [() => {}];
-  assert.doesNotThrow(() => decodeNormalizedRollResult(nonCloneableArray));
-  assert.equal(decodeNormalizedRollResult(nonCloneableArray).success, false);
-  assert.equal(isNormalizedRollResult(nonCloneableArray), false);
+  const nonCloneableArrayDecode = callWithoutThrow(() =>
+    decodeNormalizedRollResult(nonCloneableArray),
+  );
+  assert.equal(nonCloneableArrayDecode.success, false);
+  assert.equal(callWithoutThrow(() => isNormalizedRollResult(nonCloneableArray)), false);
 
   const nonCloneableResult = {
     ...result,
     metadata: { callback: () => {} },
   };
-  assert.doesNotThrow(() => decodeNormalizedRollResult(nonCloneableResult));
-  const nonCloneableResultDecode = decodeNormalizedRollResult(nonCloneableResult);
-  assert.equal(nonCloneableResultDecode.success, false);
-  assert.ok(
-    nonCloneableResultDecode.error.issues.some(
-      (entry) => entry.code === 'invalid_value' && entry.path === '$',
-    ),
+  const nonCloneableResultDecode = callWithoutThrow(() =>
+    decodeNormalizedRollResult(nonCloneableResult),
   );
-  assert.doesNotThrow(() => isNormalizedRollResult(nonCloneableResult));
-  assert.equal(isNormalizedRollResult(nonCloneableResult), false);
+  assertIssue(nonCloneableResultDecode, 'invalid_value', '$');
+  assert.equal(callWithoutThrow(() => isNormalizedRollResult(nonCloneableResult)), false);
 
   const nonCloneableCustomDice = [
     {
@@ -115,27 +127,37 @@ try {
       metadata: { callback: () => {} },
     },
   ];
-  assert.doesNotThrow(() => decodeCustomDiceDefinitions(nonCloneableCustomDice));
-  const nonCloneableCustomDiceDecode = decodeCustomDiceDefinitions(nonCloneableCustomDice);
-  assert.equal(nonCloneableCustomDiceDecode.success, false);
-  assert.ok(
-    nonCloneableCustomDiceDecode.error.issues.some(
-      (entry) => entry.code === 'invalid_value' && entry.path === '$',
-    ),
+  const nonCloneableCustomDiceDecode = callWithoutThrow(() =>
+    decodeCustomDiceDefinitions(nonCloneableCustomDice),
   );
+  assertIssue(nonCloneableCustomDiceDecode, 'invalid_value', '$');
+
+  const revokedNormalizedResult = createRevokedProxy();
+  const revokedNormalizedDecode = callWithoutThrow(() =>
+    decodeNormalizedRollResult(revokedNormalizedResult),
+  );
+  assertIssue(revokedNormalizedDecode, 'invalid_value', '$');
+  assert.equal(callWithoutThrow(() => isNormalizedRollResult(revokedNormalizedResult)), false);
+
+  const revokedCustomDice = createRevokedProxy();
+  const revokedCustomDiceDecode = callWithoutThrow(() =>
+    decodeCustomDiceDefinitions(revokedCustomDice),
+  );
+  assertIssue(revokedCustomDiceDecode, 'invalid_value', '$');
+
+  const revokedServerEvent = createRevokedProxy();
+  const revokedServerEventDecode = callWithoutThrow(() =>
+    decodeServerToClientEvent(revokedServerEvent),
+  );
+  assertIssue(revokedServerEventDecode, 'invalid_value', '$');
+  assert.equal(callWithoutThrow(() => isServerToClientEvent(revokedServerEvent)), false);
 
   const invalidLegacy = structuredClone(legacy);
   invalidLegacy.dice[0].kept = 'yes';
   const strictInvalidLegacy = decodeNormalizedRollResult(invalidLegacy, {
     allowLegacyResults: false,
   });
-  assert.equal(strictInvalidLegacy.success, false);
-  assert.ok(
-    strictInvalidLegacy.error.issues.some(
-      (entry) =>
-        entry.code === 'invalid_result_schema_version' && entry.path === '$.schemaVersion',
-    ),
-  );
+  assertIssue(strictInvalidLegacy, 'invalid_result_schema_version', '$.schemaVersion');
   assert.ok(strictInvalidLegacy.error.issues.some((entry) => entry.path.endsWith('.kept')));
 
   const parsed = engine.parse('1d20+5');
@@ -193,16 +215,11 @@ try {
   const nonCloneableEvent = createLegacyEvent();
   nonCloneableEvent.result = structuredClone(result);
   nonCloneableEvent.result.metadata = { callback: () => {} };
-  assert.doesNotThrow(() => decodeServerToClientEvent(nonCloneableEvent));
-  const nonCloneableEventDecode = decodeServerToClientEvent(nonCloneableEvent);
-  assert.equal(nonCloneableEventDecode.success, false);
-  assert.ok(
-    nonCloneableEventDecode.error.issues.some(
-      (entry) => entry.code === 'invalid_value' && entry.path === '$',
-    ),
+  const nonCloneableEventDecode = callWithoutThrow(() =>
+    decodeServerToClientEvent(nonCloneableEvent),
   );
-  assert.doesNotThrow(() => isServerToClientEvent(nonCloneableEvent));
-  assert.equal(isServerToClientEvent(nonCloneableEvent), false);
+  assertIssue(nonCloneableEventDecode, 'invalid_value', '$');
+  assert.equal(callWithoutThrow(() => isServerToClientEvent(nonCloneableEvent)), false);
 
   const legacyRoomState = {
     type: 'room_state',
@@ -393,7 +410,7 @@ try {
         ok: true,
         tested: [
           'normalized-result schema version, strict guards, migration, and combined diagnostics',
-          'non-record inputs and clone failures reject without escaping decoder exceptions',
+          'non-record inputs, revoked proxies, and clone failures reject without decoder exceptions',
           'clone-safe custom-dice, normalized-result, and server-event boundaries',
           'parsed-expression immutability across advantage and disadvantage evaluation',
           'strict client and server event decoding',
