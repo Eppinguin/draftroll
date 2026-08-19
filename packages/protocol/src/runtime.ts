@@ -389,10 +389,11 @@ export function decodeCustomDiceDefinitions(
   value: unknown,
   options: DecodeOptions = {},
 ): DecodeResult<CustomDiceDefinition[]> {
+  const cloned = cloneForValidation(value, Array.isArray(value));
+  if (!cloned.success) return cloned;
   const context = createContext({ rejectUnknownFields: true, ...options });
-  const candidate = structuredCloneIfObject(value);
-  validateCustomDice(candidate, '$', context);
-  return context.result<CustomDiceDefinition[]>(candidate, 'Invalid custom dice definitions');
+  validateCustomDice(cloned.data, '$', context);
+  return context.result<CustomDiceDefinition[]>(cloned.data, 'Invalid custom dice definitions');
 }
 
 /**
@@ -432,10 +433,11 @@ export function decodeNormalizedRollResult(
   value: unknown,
   options: DecodeOptions = {},
 ): DecodeResult<NormalizedRollResult> {
-  const cloned = isRecord(value) ? structuredClone(value) : value;
+  const cloned = cloneForValidation(value, isRecord(value));
+  if (!cloned.success) return cloned;
   const context = createContext({ rejectUnknownFields: true, ...options });
-  validateNormalizedResult(cloned, '$', context);
-  return context.result<NormalizedRollResult>(cloned, 'Normalized roll result is invalid');
+  validateNormalizedResult(cloned.data, '$', context);
+  return context.result<NormalizedRollResult>(cloned.data, 'Normalized roll result is invalid');
 }
 
 /**
@@ -482,10 +484,11 @@ export function decodeServerToClientEvent(
   value: unknown,
   options: DecodeOptions = {},
 ): DecodeResult<ServerToClientEvent> {
-  const cloned = structuredCloneIfObject(value);
+  const cloned = cloneForValidation(value, isRecord(value));
+  if (!cloned.success) return cloned;
   const context = createContext({ rejectUnknownFields: true, ...options });
-  validateServerEvent(cloned, '$', context);
-  return context.result<ServerToClientEvent>(cloned, 'Server room event is invalid');
+  validateServerEvent(cloned.data, '$', context);
+  return context.result<ServerToClientEvent>(cloned.data, 'Server room event is invalid');
 }
 
 /**
@@ -3253,8 +3256,20 @@ function byteLength(raw: string | ArrayBuffer | ArrayBufferView): number {
   return raw.byteLength;
 }
 
-function structuredCloneIfObject<T>(value: T): T {
-  return value && typeof value === 'object' ? structuredClone(value) : value;
+function cloneForValidation<T>(value: T, shouldClone: boolean): DecodeResult<T> {
+  if (!shouldClone) return { success: true, data: value };
+  try {
+    return { success: true, data: structuredClone(value) };
+  } catch {
+    return failure('Value cannot be safely cloned for validation', [
+      {
+        code: 'invalid_value',
+        path: '$',
+        message: 'Value contains data that cannot cross the runtime boundary',
+        expected: 'structured-cloneable data',
+      },
+    ]);
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
