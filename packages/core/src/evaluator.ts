@@ -14,7 +14,7 @@ import type {
   RollTreeNode,
   StructuredRollOperation,
 } from '../../protocol/src/index';
-import { DRAFTROLL_RESULT_SCHEMA_VERSION } from '../../protocol/src/version';
+import { DRAFTROLL_RESULT_SCHEMA_VERSION } from '../../protocol/src/index';
 import type {
   AstNode,
   BinaryOperator,
