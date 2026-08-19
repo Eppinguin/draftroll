@@ -147,6 +147,7 @@ try {
 
     assert.equal(typeof errors.DraftrollError, 'function');
     assert.equal(typeof protocol.DRAFTROLL_PROTOCOL_VERSION, 'number');
+    assert.equal(typeof protocol.decodeClientToServerEvent, 'function');
     assert.equal(new core.DiceEngine().roll('1d1').total, 1);
     assert.equal(typeof themes.decodeDiceTheme, 'function');
     assert.equal(typeof renderer.DraftrollTextRenderer, 'function');
@@ -165,6 +166,22 @@ try {
     assert.equal(typeof react.createDraftrollReactBindings, 'function');
     assert.equal(typeof vue.useDraftroll, 'function');
     assert.equal(typeof svelte.createDraftrollStore, 'function');
+
+    const { proxy, revoke } = Proxy.revocable({}, {});
+    revoke();
+    let hostileResult;
+    assert.doesNotThrow(() => {
+      hostileResult = protocol.decodeClientToServerEvent(proxy);
+    });
+    assert.equal(hostileResult.success, false);
+    assert.ok(hostileResult.error.issues.some((issue) => issue.code === 'invalid_value'));
+
+    const visibility = { type: 'roles', roles: ['gm'] };
+    const decodedVisibility = protocol.decodeRollVisibility(visibility);
+    assert.equal(decodedVisibility.success, true);
+    assert.notEqual(decodedVisibility.data, visibility);
+    decodedVisibility.data.roles.push('observer');
+    assert.deepEqual(visibility.roles, ['gm']);
   `,
   );
   run('node', ['smoke.mjs'], appDir);
@@ -181,6 +198,17 @@ try {
   assert.equal(manifest.exports['./cards'].types, './dist/cards.d.ts');
   assert.equal(manifest.exports['./cards'].default, './dist/cards.js');
   assert.equal(manifest.dependencies['@draftroll/core'], '0.1.0');
+
+  const packedCoreEvaluator = await readFile(
+    join(appDir, 'node_modules/@draftroll/core/dist/evaluator.js'),
+    'utf8',
+  );
+  assert.doesNotMatch(
+    packedCoreEvaluator,
+    /\.\.\/\.\.\/protocol\/src\//,
+    'packed core must not retain source-tree imports into protocol',
+  );
+
   console.log('Package distribution smoke test passed.');
 } finally {
   await rm(temp, { recursive: true, force: true });
