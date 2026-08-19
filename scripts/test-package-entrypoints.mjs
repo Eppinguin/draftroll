@@ -36,7 +36,7 @@ assert.deepEqual(sdkManifest.exports, {
 });
 
 const serverEntries = [
-  'packages/protocol/src/index.ts',
+  'packages/protocol/src/public.ts',
   'packages/core/src/index.ts',
   'packages/client/src/index.ts',
   'packages/themes/src/index.ts',

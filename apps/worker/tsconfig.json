@@ -11,7 +11,7 @@
     "allowImportingTsExtensions": true,
     "paths": {
       "@draftroll/core": ["../../packages/core/src/index.ts"],
-      "@draftroll/protocol": ["../../packages/protocol/src/index.ts"],
+      "@draftroll/protocol": ["../../packages/protocol/src/public.ts"],
       "@draftroll/server": ["../../packages/server/src/index.ts"]
     }
   },
