@@ -15,16 +15,12 @@ if (compile.status !== 0) {
 }
 
 const packageNames = new Set(await readdir(packagesRoot));
-const rootExportedSourceModules = new Set(['protocol/version']);
 
 function rewriteSpecifier(specifier, outputExtension) {
   const crossPackage = /^\.\.\/\.\.\/([a-z0-9-]+)\/src(?:\/(.+))?$/.exec(specifier);
   if (crossPackage && packageNames.has(crossPackage[1])) {
     const [, packageName, sourceModule] = crossPackage;
     if (sourceModule === undefined || sourceModule === 'index') return `@draftroll/${packageName}`;
-    if (rootExportedSourceModules.has(`${packageName}/${sourceModule}`)) {
-      return `@draftroll/${packageName}`;
-    }
     throw new Error(
       `Release build cannot publish cross-package source import '${specifier}'. Import from the package public entrypoint instead.`,
     );
