@@ -1,17 +1,29 @@
 import { spawn } from 'node:child_process';
+import { join } from 'node:path';
 import { runSmoke } from './smoke-worker.mjs';
 
 const pnpmCommand = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
 const baseUrl = process.env.DRAFTROLL_BASE_URL ?? 'http://127.0.0.1:8787';
+const workerRoot = join(process.cwd(), 'apps', 'worker');
+const wranglerCommand = join(
+  workerRoot,
+  'node_modules',
+  '.bin',
+  process.platform === 'win32' ? 'wrangler.cmd' : 'wrangler',
+);
 
 await runCommand(['worker:setup']);
 
-const server = spawn(pnpmCommand, ['worker:dev'], {
-  cwd: process.cwd(),
-  detached: process.platform !== 'win32',
-  env: process.env,
-  stdio: ['ignore', 'pipe', 'pipe'],
-});
+const server = spawn(
+  wranglerCommand,
+  ['dev', '--config', 'wrangler.jsonc', '--local', '--ip', '127.0.0.1', '--port', '8787'],
+  {
+    cwd: workerRoot,
+    detached: process.platform !== 'win32',
+    env: process.env,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  },
+);
 
 server.stdout.on('data', (chunk) => process.stdout.write(`[wrangler] ${chunk}`));
 server.stderr.on('data', (chunk) => process.stderr.write(`[wrangler] ${chunk}`));
@@ -37,6 +49,14 @@ const stopServer = async () => {
       server.kill('SIGTERM');
     }
   }
+
+  await new Promise((resolve) => {
+    if (server.exitCode !== null) {
+      resolve();
+      return;
+    }
+    server.once('close', resolve);
+  });
 };
 
 process.on('SIGINT', () => void stopServer().finally(() => process.exit(130)));
