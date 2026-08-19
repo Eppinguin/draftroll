@@ -269,6 +269,7 @@ export class DiceRoom {
   private tokenSubmitted = false;
   private reconnectAttempt = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private recoveryFailure: DiceRoomConnectionError | null = null;
   private connectionDiagnostic!: DiceRoomConnectionDiagnostic;
   private readonly metricsState: DiceRoomRequestMetrics = {
     requestsStarted: 0,
@@ -351,6 +352,7 @@ export class DiceRoom {
     if (this.socket?.readyState === WebSocket.OPEN) return;
     if (this.connecting) return raceWithAbort(this.connecting, signal, 'Dice room connection');
     throwIfAborted(signal, 'Dice room connection');
+    this.recoveryFailure = null;
     this.closedIntentionally = false;
     if (this.reconnectTimer !== null) {
       clearTimeout(this.reconnectTimer);
@@ -398,6 +400,7 @@ export class DiceRoom {
    */
   close(code = 1000, reason = 'Client closed room'): void {
     this.closedIntentionally = true;
+    this.recoveryFailure = null;
     if (this.reconnectTimer !== null) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
     this.socket?.close(code, reason);
@@ -894,6 +897,7 @@ export class DiceRoom {
   }
 
   private async handleMessage(raw: unknown): Promise<void> {
+    if (this.recoveryFailure) return;
     if (!(typeof raw === 'string' || raw instanceof ArrayBuffer || ArrayBuffer.isView(raw))) {
       this.emit('error', {
         error: new DiceRoomProtocolError('Received unsupported WebSocket payload type'),
@@ -1140,13 +1144,23 @@ export class DiceRoom {
       !this.closedIntentionally && this.options.reconnect,
       { closeCode: code },
     );
+    const recoveryFailure = this.recoveryFailure;
     if (this.connectionReady) {
       clearTimeout(this.connectionReady.timeout);
-      this.connectionReady.reject(error);
+      this.connectionReady.reject(recoveryFailure ?? error);
       this.connectionReady = null;
     }
     this.emit('close', { code, reason });
-    this.rejectPending(error);
+    this.rejectPending(recoveryFailure ?? error);
+    if (recoveryFailure) {
+      this.transitionConnection('failed', {
+        code: recoveryFailure.code,
+        reason: recoveryFailure.message,
+        recoverable: false,
+        closeCode: code,
+      });
+      return;
+    }
     if (!this.closedIntentionally && this.options.reconnect && !this.options.signal?.aborted) {
       this.reconnectAttempt += 1;
       this.metricsState.reconnectAttempts += 1;
@@ -1181,6 +1195,7 @@ export class DiceRoom {
   }
 
   private send(event: ClientToServerEvent): void {
+    if (this.recoveryFailure) throw this.recoveryFailure;
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN)
       throw new DiceRoomConnectionError(
         DRAFTROLL_ERROR_CODES.roomNotConnected,
@@ -1345,12 +1360,16 @@ export class DiceRoom {
         ? payload.recoveryBlockedAtEventSequence
         : undefined;
       if (recoveryBlockedAtEventSequence !== undefined) {
-        throw new DiceRoomConnectionError(
+        const error = new DiceRoomConnectionError(
           'long_range_recovery_corrupt',
           `Long-range room recovery is blocked by corrupt retained event ${recoveryBlockedAtEventSequence}`,
-          true,
+          false,
           { eventSequence: recoveryBlockedAtEventSequence },
         );
+        this.recoveryFailure = error;
+        this.rejectPending(error);
+        this.socket?.close(1011, 'Long-range room recovery is blocked');
+        throw error;
       }
       for (const rawEvent of payload.events ?? []) {
         const decoded = decodeServerToClientEvent(rawEvent, {
