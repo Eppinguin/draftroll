@@ -63,7 +63,7 @@ try {
   }
   await writeFile(join(outDir, 'package.json'), '{"type":"commonjs"}\n');
 
-  const protocol = await import(pathToFileURL(join(outDir, 'protocol/src/index.js')).href);
+  const protocol = await import(pathToFileURL(join(outDir, 'protocol/src/public.js')).href);
   const decoderCases = [
     ['decodeRollVisibility', protocol.decodeRollVisibility],
     ['decodeRoomPolicy', protocol.decodeRoomPolicy],
@@ -76,11 +76,8 @@ try {
   ];
 
   for (const [label, decoder] of decoderCases) {
-    const revoked = createRevokedProxy();
-    assertBoundaryFailure(callWithoutThrow(() => decoder(revoked)), label);
-
-    const nonCloneable = { callback: () => {} };
-    assertBoundaryFailure(callWithoutThrow(() => decoder(nonCloneable)), label);
+    assertBoundaryFailure(callWithoutThrow(() => decoder(createRevokedProxy())), label);
+    assertBoundaryFailure(callWithoutThrow(() => decoder({ callback: () => {} })), label);
   }
 
   const throwingGetter = {};
@@ -123,10 +120,10 @@ try {
       {
         ok: true,
         tested: [
-          'all object-facing public protocol decoders reject revoked proxies without throwing',
+          'public object-facing protocol decoders reject revoked proxies without throwing',
           'non-cloneable and throwing-getter values return structured boundary failures',
           'parse/type-guard helpers remain non-throwing',
-          'successful boundary decodes return detached data',
+          'successful public boundary decodes return detached data',
         ],
       },
       null,
