@@ -2592,7 +2592,8 @@ function migrateStoredInternalEvent(event: unknown): InternalRoomEvent {
         'previousPolicy',
       ]);
       const decoded = decodeStoredServerEvent({ ...event, replayed: true }, 'room_policy_updated');
-      if (decoded.type !== 'room_policy_updated') throw new Error('Stored policy event type mismatch');
+      if (decoded.type !== 'room_policy_updated')
+        throw new Error('Stored policy event type mismatch');
       return {
         type: 'room_policy_updated',
         protocolVersion: decoded.protocolVersion,
@@ -2619,7 +2620,8 @@ function migrateStoredInternalEvent(event: unknown): InternalRoomEvent {
         'disconnectedSessions',
       ]);
       const decoded = decodeStoredServerEvent({ ...event, replayed: true }, 'room_token_revoked');
-      if (decoded.type !== 'room_token_revoked') throw new Error('Stored token event type mismatch');
+      if (decoded.type !== 'room_token_revoked')
+        throw new Error('Stored token event type mismatch');
       return {
         type: 'room_token_revoked',
         protocolVersion: decoded.protocolVersion,
@@ -2807,11 +2809,7 @@ function assertStoredEventFields(
   }
 }
 
-function readStoredIdentifier(
-  value: unknown,
-  field: string,
-  required = false,
-): string | undefined {
+function readStoredIdentifier(value: unknown, field: string, required = false): string | undefined {
   if (value === undefined) {
     if (required) throw new Error(`Stored room event is missing '${field}'`);
     return undefined;

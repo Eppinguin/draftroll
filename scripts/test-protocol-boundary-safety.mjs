@@ -76,8 +76,14 @@ try {
   ];
 
   for (const [label, decoder] of decoderCases) {
-    assertBoundaryFailure(callWithoutThrow(() => decoder(createRevokedProxy())), label);
-    assertBoundaryFailure(callWithoutThrow(() => decoder({ callback: () => {} })), label);
+    assertBoundaryFailure(
+      callWithoutThrow(() => decoder(createRevokedProxy())),
+      label,
+    );
+    assertBoundaryFailure(
+      callWithoutThrow(() => decoder({ callback: () => {} })),
+      label,
+    );
   }
 
   const throwingGetter = {};
@@ -96,7 +102,10 @@ try {
     callWithoutThrow(() => protocol.parseClientToServerEvent(createRevokedProxy())),
     null,
   );
-  assert.equal(callWithoutThrow(() => protocol.isRollVisibility(createRevokedProxy())), false);
+  assert.equal(
+    callWithoutThrow(() => protocol.isRollVisibility(createRevokedProxy())),
+    false,
+  );
 
   const visibility = { type: 'roles', roles: ['gm'] };
   const decodedVisibility = protocol.decodeRollVisibility(visibility);
