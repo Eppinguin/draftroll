@@ -715,10 +715,15 @@ export class DiceRoomObject {
       return;
     }
 
-    const duplicate =
-      'requestId' in event
-        ? await this.findDuplicateRequest(participant.sessionId, event.requestId)
-        : null;
+    let duplicate: InternalRoomEvent | null = null;
+    if ('requestId' in event) {
+      try {
+        duplicate = await this.findDuplicateRequest(participant.sessionId, event.requestId);
+      } catch (error) {
+        sendEvent(socket, toRollError(error, event.requestId));
+        return;
+      }
+    }
     if (duplicate) {
       const projected =
         duplicate.type === 'bulk_rolls_updated'
@@ -2004,11 +2009,16 @@ export class DiceRoomObject {
     const events = (query.results ?? []).flatMap((row) => {
       try {
         // Deserializes rows this Durable Object previously serialized itself.
-        const internal = migrateStoredInternalEvent(JSON.parse(row.event_json) as InternalRoomEvent);
+        const internal = migrateStoredInternalEvent(JSON.parse(row.event_json));
         if (internal.type === 'bulk_rolls_updated') return [];
         const projected = projectInternalEvent(internal, participant, true);
         return projected ? [projected] : [];
-      } catch {
+      } catch (error) {
+        this.logStructured('room.event_storage_invalid', {
+          source: 'd1_replay',
+          eventSequence: row.event_sequence,
+          message: asError(error).message,
+        });
         return [];
       }
     });
@@ -2357,8 +2367,27 @@ export class DiceRoomObject {
   }
 
   private async getEventBuffer(): Promise<InternalRoomEvent[]> {
-    const events = (await this.state.storage.get<InternalRoomEvent[]>('eventBuffer')) ?? [];
-    return events.map(migrateStoredInternalEvent);
+    const stored = await this.state.storage.get<unknown>('eventBuffer');
+    if (stored === undefined) return [];
+    if (!Array.isArray(stored)) {
+      this.logStructured('room.event_storage_invalid', {
+        source: 'durable_object_buffer',
+        message: 'Stored event buffer is not an array',
+      });
+      return [];
+    }
+    return stored.flatMap((event, index) => {
+      try {
+        return [migrateStoredInternalEvent(event)];
+      } catch (error) {
+        this.logStructured('room.event_storage_invalid', {
+          source: 'durable_object_buffer',
+          index,
+          message: asError(error).message,
+        });
+        return [];
+      }
+    });
   }
 
   private async recordRequest(
@@ -2438,12 +2467,28 @@ export class DiceRoomObject {
       .bind(roomId, eventSequence)
       .all<RoomEventRow>();
     const serialized = eventQuery.results?.[0]?.event_json;
-    if (!serialized) return null;
+    if (!serialized) {
+      throw new RoomOperationError(
+        'idempotency_replay_unavailable',
+        `Request '${requestId}' was already recorded but its retained response is unavailable`,
+        409,
+      );
+    }
     try {
       // Deserializes storage this Durable Object previously serialized itself.
-      return migrateStoredInternalEvent(JSON.parse(serialized) as InternalRoomEvent);
-    } catch {
-      return null;
+      return migrateStoredInternalEvent(JSON.parse(serialized));
+    } catch (error) {
+      this.logStructured('room.event_storage_invalid', {
+        source: 'idempotency_replay',
+        eventSequence,
+        requestId,
+        message: asError(error).message,
+      });
+      throw new RoomOperationError(
+        'idempotency_replay_unavailable',
+        `Request '${requestId}' was already recorded but its retained response is invalid`,
+        409,
+      );
     }
   }
 
@@ -2506,13 +2551,31 @@ function roomParticipantFromAttachment(participant: ConnectionAttachment): RoomP
   };
 }
 
-function migrateStoredInternalEvent(event: InternalRoomEvent): InternalRoomEvent {
-  if (!('result' in event)) return event;
-  const decoded = decodeNormalizedRollResult(event.result, { allowLegacyResults: true });
-  if (!decoded.success) {
-    throw new Error(`Stored room event contains an invalid roll result: ${decoded.error.message}`);
+function migrateStoredInternalEvent(event: unknown): InternalRoomEvent {
+  if (!isRecord(event) || typeof event.type !== 'string') {
+    throw new Error('Stored room event is not a valid object');
   }
-  return { ...event, result: decoded.data };
+  switch (event.type) {
+    case 'roll_start':
+    case 'roll_updated':
+    case 'roll_visibility_updated': {
+      const decoded = decodeNormalizedRollResult(event.result, { allowLegacyResults: true });
+      if (!decoded.success) {
+        throw new Error(`Stored room event contains an invalid roll result: ${decoded.error.message}`);
+      }
+      // Stored internal events were serialized by this Worker. The discriminant and result are
+      // validated above; the remaining fields stay protected by strict outbound event validation.
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+      return { ...(event as unknown as InternalRoomRollEvent), result: decoded.data };
+    }
+    case 'room_policy_updated':
+    case 'room_token_revoked':
+    case 'bulk_rolls_updated':
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+      return event as unknown as InternalRoomEvent;
+    default:
+      throw new Error(`Stored room event has unsupported type '${event.type}'`);
+  }
 }
 
 function projectInternalEvent(
