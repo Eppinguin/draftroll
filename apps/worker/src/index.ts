@@ -3175,7 +3175,7 @@ function parseClientEvent(
 function sendEvent(socket: WebSocket, event: ServerToClientEvent): void {
   const decoded = decodeServerToClientEvent(event, {
     rejectUnknownFields: true,
-    allowLegacyResults: true,
+    allowLegacyResults: false,
   });
   if (!decoded.success) {
     console.error('Draftroll attempted to send an invalid server event', decoded.error.issues);
