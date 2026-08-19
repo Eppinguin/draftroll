@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { runTsc } from './lib/load-typescript.mjs';
 
-const projectRoot = resolve(new URL('..', import.meta.url).pathname);
+const projectRoot = fileURLToPath(new URL('..', import.meta.url));
 const tempRoot = await mkdtemp(join(tmpdir(), 'draftroll-boundary-safety-'));
 const outDir = join(tempRoot, 'build');
 const configPath = join(tempRoot, 'tsconfig.json');
