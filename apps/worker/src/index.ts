@@ -2650,7 +2650,7 @@ function migrateStoredInternalEvent(event: unknown): InternalRoomEvent {
         'requesterSessionId',
         true,
       );
-      const projected = { ...event, replayed: true };
+      const projected: Record<string, unknown> = { ...event, replayed: true };
       delete projected.requesterSessionId;
       const decoded = decodeStoredServerEvent(projected, 'bulk_rolls_updated');
       if (decoded.type !== 'bulk_rolls_updated' || requesterSessionId === undefined) {
