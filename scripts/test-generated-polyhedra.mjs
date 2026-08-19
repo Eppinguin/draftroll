@@ -8,6 +8,31 @@ const projectRoot = resolve(new URL('..', import.meta.url).pathname);
 const tempRoot = await mkdtemp(join(projectRoot, 'node_modules/.generated-polyhedra-'));
 const outDir = join(tempRoot, 'build');
 
+function definitionFromReadableShape(shape, id) {
+  return {
+    id,
+    sides: shape.requestedFacets,
+    geometrySource: 'generated',
+    targeting: 'relabel',
+    radius: 1,
+    collisionScale: 1.02,
+    collider: {
+      kind: 'convex',
+      vertices: shape.vertices,
+      faces: shape.faces,
+    },
+    outcomes: shape.outcomes.map((outcome, index) => ({
+      index,
+      value: outcome.value,
+      result: outcome.value,
+      numericValue: outcome.value,
+      supportNormals: [outcome.settledUp],
+      labelAnchors: outcome.labels,
+    })),
+    readableShape: shape,
+  };
+}
+
 try {
   await mkdir(outDir, { recursive: true });
   const polyhedraSource = join(projectRoot, 'packages/renderer/src/polyhedra.ts');
@@ -142,31 +167,6 @@ try {
     'closed planar convex colliders satisfy the shared contract',
   );
 
-  function definitionFromReadableShape(shape, id) {
-    return {
-      id,
-      sides: shape.requestedFacets,
-      geometrySource: 'generated',
-      targeting: 'relabel',
-      radius: 1,
-      collisionScale: 1.02,
-      collider: {
-        kind: 'convex',
-        vertices: shape.vertices,
-        faces: shape.faces,
-      },
-      outcomes: shape.outcomes.map((outcome, index) => ({
-        index,
-        value: outcome.value,
-        result: outcome.value,
-        numericValue: outcome.value,
-        supportNormals: [outcome.settledUp],
-        labelAnchors: outcome.labels,
-      })),
-      readableShape: shape,
-    };
-  }
-
   for (const sides of [1, 2, 3, 4]) {
     assert.doesNotThrow(
       () => assertValidPhysicalDieDefinition(definitionFromReadableShape(createReadablePolyhedron(sides), `readable:d${sides}`)),
@@ -261,7 +261,8 @@ try {
       }),
     /must be planar/,
   );
-  const concaveVertices = [...cubeVertices.map((vertex) => [...vertex]), [0, 0.2, 0]];
+  const concaveVertices = cubeVertices.map((vertex) => vertex.slice());
+  concaveVertices.push([0, 0.2, 0]);
   const concaveFaces = [
     [0, 1, 2, 3],
     [4, 7, 6, 5],
