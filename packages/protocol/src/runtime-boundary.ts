@@ -219,7 +219,7 @@ function snapshotBoundaryValue(value: unknown, options: DecodeOptions): DecodeRe
     }
 
     const target: object = array ? [] : {};
-    if (Array.isArray(target)) target.length = candidate.length;
+    if (Array.isArray(target) && Array.isArray(candidate)) target.length = candidate.length;
     snapshots.set(candidate, target);
     active.add(candidate);
     const containerFailure = addBoundaryBytes(budget, 2 + (array ? candidate.length : 0));
