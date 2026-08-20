@@ -147,6 +147,16 @@ try {
     'decodeParticipantIdentityInput special structured-clone container',
   );
 
+  class TaggedVisibility {
+    type = 'public';
+  }
+  const taggedClassInstance = new TaggedVisibility();
+  Object.defineProperty(taggedClassInstance, Symbol.toStringTag, { value: 'Object' });
+  assertBoundaryFailure(
+    protocol.decodeRollVisibility(taggedClassInstance),
+    'decodeRollVisibility class instance with spoofed object tag',
+  );
+
   const oversizedVisibility = {
     type: 'roles',
     roles: Array(protocol.DEFAULT_RUNTIME_VALIDATION_LIMITS.maximumArrayLength + 1).fill('gm'),
@@ -185,6 +195,21 @@ try {
   );
   assert.deepEqual(bufferGap.events, [replayEvent(10)]);
   assert.equal(bufferGap.recoverySequence, 11);
+
+  const staleTail = replayIntegrity.sanitizeEventBuffer(
+    [replayEvent(50), replayEvent(51)],
+    'room',
+    100,
+  );
+  assert.deepEqual(staleTail.events, [replayEvent(50), replayEvent(51)]);
+  assert.equal(staleTail.recoverySequence, 52);
+  assert.equal(staleTail.changed, true);
+
+  const emptyStaleBuffer = replayIntegrity.sanitizeEventBuffer([], 'room', 100);
+  assert.deepEqual(emptyStaleBuffer.events, []);
+  assert.equal(emptyStaleBuffer.recoverySequence, 100);
+  assert.equal(emptyStaleBuffer.changed, true);
+
   assert.deepEqual(
     replayIntegrity.findDurableReplayIssue([replayRow(10), replayRow(12)], replayWindow),
     { kind: 'gap', eventSequence: 11 },
@@ -266,10 +291,11 @@ try {
           'all object-facing protocol decoders reject revoked proxies without throwing',
           'non-cloneable values matching each decoder boundary return structured failures',
           'throwing getters return structured boundary failures',
-          'special structured-clone containers are rejected instead of flattened',
+          'special structured-clone containers and class instances are rejected instead of flattened',
+          'spoofed Symbol.toStringTag values cannot bypass the plain-object boundary',
           'oversized object graphs fail before structured cloning',
           'caller-owned accessors are read at most once before detailed validation',
-          'Durable Object replay buffers stop at sequence gaps and room mismatches',
+          'Durable Object replay buffers stop at gaps, room mismatches, and stale tails',
           'D1 replay gaps stall without advancing while corrupt row identities fail closed',
           'parse/type-guard helpers remain non-throwing',
           'successful public boundary decodes return detached data',
