@@ -65,6 +65,8 @@ function failedBuffer(
  *
  * The first invalid slot becomes the recovery marker. Events after that slot are deliberately
  * discarded from the hot buffer so clients can only recover them through the durable replay path.
+ * A persisted hot buffer must also reach the current room head; otherwise callers could mistake a
+ * stale but internally contiguous snapshot for complete replay coverage.
  */
 export function sanitizeEventBuffer(
   stored: unknown,
@@ -125,6 +127,14 @@ export function sanitizeEventBuffer(
 
     prefix.push(event);
     previousSequence = sequence;
+  }
+
+  if (latestEventSequence > 0 && previousSequence !== latestEventSequence) {
+    return failedBuffer(
+      [...stored],
+      previousSequence === undefined ? fallbackRecoverySequence(latestEventSequence) : previousSequence + 1,
+      'Stored event buffer does not reach the room event sequence',
+    );
   }
 
   return { events: [...stored], recoverySequence: null, changed: false };
