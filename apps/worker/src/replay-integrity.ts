@@ -84,8 +84,7 @@ export function sanitizeEventBuffer(
   let previousSequence: number | undefined;
 
   for (const event of stored) {
-    const expectedSequence =
-      previousSequence === undefined ? undefined : previousSequence + 1;
+    const expectedSequence = previousSequence === undefined ? undefined : previousSequence + 1;
     if (!isRecord(event)) {
       return failedBuffer(
         prefix,
@@ -154,8 +153,7 @@ export function findDurableReplayIssue(
   window: DurableReplayWindow,
 ): DurableReplayIssue | null {
   const retentionTruncated =
-    window.afterEventSequence > 0 &&
-    window.afterEventSequence < window.earliestEventSequence - 1;
+    window.afterEventSequence > 0 && window.afterEventSequence < window.earliestEventSequence - 1;
   let expectedSequence =
     window.afterEventSequence === 0 || retentionTruncated
       ? Math.max(1, window.earliestEventSequence)

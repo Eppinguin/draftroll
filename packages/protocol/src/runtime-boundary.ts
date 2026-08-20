@@ -198,7 +198,10 @@ function snapshotBoundaryValue(value: unknown, options: DecodeOptions): DecodeRe
 
     const array = Array.isArray(candidate);
     const containerTag = Object.prototype.toString.call(candidate);
-    if ((array && containerTag !== '[object Array]') || (!array && containerTag !== '[object Object]')) {
+    if (
+      (array && containerTag !== '[object Array]') ||
+      (!array && containerTag !== '[object Object]')
+    ) {
       return boundaryFailure(
         'invalid_value',
         'Protocol object boundaries accept plain objects and arrays only',

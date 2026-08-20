@@ -148,12 +148,7 @@ export class DiceRoomObject extends RoomObject {
       return replayResponse(response, stalled);
     }
 
-    logReplayBoundaryFailure(
-      'd1_replay',
-      roomId,
-      replayIssue.eventSequence,
-      replayIssue.reason,
-    );
+    logReplayBoundaryFailure('d1_replay', roomId, replayIssue.eventSequence, replayIssue.reason);
     const hardened = hardenReplayEnvelope(envelope, replayIssue.eventSequence);
     return replayResponse(response, hardened);
   }
@@ -174,9 +169,7 @@ function roomIdFromSocket(socket: WebSocket): string | null {
     // The Workers runtime provides this hibernation helper; the standard WebSocket type omits it.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion
     const attachment = (socket as HibernatableWebSocket).deserializeAttachment();
-    return isRecord(attachment) && typeof attachment.roomId === 'string'
-      ? attachment.roomId
-      : null;
+    return isRecord(attachment) && typeof attachment.roomId === 'string' ? attachment.roomId : null;
   } catch {
     return null;
   }

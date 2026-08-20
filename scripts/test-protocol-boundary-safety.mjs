@@ -66,11 +66,9 @@ try {
   }
   await writeFile(join(outDir, 'package.json'), '{"type":"commonjs"}\n');
 
-  const protocol = await import(
-    pathToFileURL(join(outDir, 'packages/protocol/src/index.js')).href,
-  );
+  const protocol = await import(pathToFileURL(join(outDir, 'packages/protocol/src/index.js')).href);
   const replayIntegrity = await import(
-    pathToFileURL(join(outDir, 'apps/worker/src/replay-integrity.js')).href,
+    pathToFileURL(join(outDir, 'apps/worker/src/replay-integrity.js')).href
   );
 
   const objectNonCloneable = { callback: () => {} };
@@ -182,17 +180,11 @@ try {
   assert.deepEqual(bufferGap.events, [replayEvent(10)]);
   assert.equal(bufferGap.recoverySequence, 11);
   assert.deepEqual(
-    replayIntegrity.findDurableReplayIssue(
-      [replayRow(10), replayRow(12)],
-      replayWindow,
-    ),
+    replayIntegrity.findDurableReplayIssue([replayRow(10), replayRow(12)], replayWindow),
     { kind: 'gap', eventSequence: 11 },
   );
   assert.deepEqual(
-    replayIntegrity.findDurableReplayIssue(
-      [replayRow(10, replayEvent(99))],
-      replayWindow,
-    ),
+    replayIntegrity.findDurableReplayIssue([replayRow(10, replayEvent(99))], replayWindow),
     {
       kind: 'corrupt',
       eventSequence: 10,
@@ -200,10 +192,7 @@ try {
     },
   );
   assert.deepEqual(
-    replayIntegrity.findDurableReplayIssue(
-      [replayRow(10, replayEvent(10, 'other'))],
-      replayWindow,
-    ),
+    replayIntegrity.findDurableReplayIssue([replayRow(10, replayEvent(10, 'other'))], replayWindow),
     {
       kind: 'corrupt',
       eventSequence: 10,
