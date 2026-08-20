@@ -20,15 +20,14 @@ interface RecoveryTransportState {
   socket: WebSocket | null;
 }
 
-interface CoreDiceRoomTransportMethods {
-  handleMessage(raw: unknown): Promise<void>;
-}
+type CoreHandleMessage = (this: object, raw: unknown) => Promise<void>;
 
 // `handleMessage` is an implementation detail. The facade only gates invocation; decoding and state
 // mutation remain owned by the core implementation.
 // oxlint-disable-next-line typescript/no-unsafe-type-assertion
-const coreHandleMessage = (CoreDiceRoom.prototype as unknown as CoreDiceRoomTransportMethods)
-  .handleMessage;
+const coreHandleMessage = (
+  CoreDiceRoom.prototype as unknown as { handleMessage: CoreHandleMessage }
+).handleMessage;
 
 /**
  * Maintains a validated, recoverable connection to a Draftroll room.
@@ -347,7 +346,7 @@ function inspectRecoveryEnvelope(
 function blockRecoverably(state: RecoveryTransportState): void {
   state.blocked = true;
   const socket = state.socket;
-  if (!socket || socket.readyState >= WebSocket.CLOSING) return;
+  if (!socket || socket.readyState >= 2) return;
   socket.close(1012, 'Long-range room recovery must retry');
 }
 
