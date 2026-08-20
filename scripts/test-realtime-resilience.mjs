@@ -139,21 +139,37 @@ try {
     makeRollStart({ rollId: 'recovered-3', eventSequence: 3, replayed: true }),
   ];
   const fetchCalls = [];
+  let recoveryMode = 'normal';
   let recoveryBlockedAtEventSequence;
   const fetchImpl = async (url, init) => {
+    const requestUrl = new URL(String(url));
+    const afterEventSequence = Number(requestUrl.searchParams.get('afterEventSequence') ?? 0);
     fetchCalls.push({ url: String(url), headers: init?.headers });
     const payload =
-      recoveryBlockedAtEventSequence === undefined
-        ? { roomId: 'resilience', afterEventSequence: 1, events: durableEvents }
-        : {
+      recoveryMode === 'stalled'
+        ? {
             roomId: 'resilience',
-            afterEventSequence: 4,
-            nextAfterEventSequence: 4,
-            latestEventSequence: recoveryBlockedAtEventSequence,
+            afterEventSequence,
+            nextAfterEventSequence: afterEventSequence,
+            latestEventSequence: afterEventSequence + 1,
             hasMore: true,
-            recoveryBlockedAtEventSequence,
             events: [],
-          };
+          }
+        : recoveryBlockedAtEventSequence === undefined
+          ? {
+              roomId: 'resilience',
+              afterEventSequence,
+              events: durableEvents.filter((event) => event.eventSequence > afterEventSequence),
+            }
+          : {
+              roomId: 'resilience',
+              afterEventSequence,
+              nextAfterEventSequence: afterEventSequence,
+              latestEventSequence: recoveryBlockedAtEventSequence,
+              hasMore: true,
+              recoveryBlockedAtEventSequence,
+              events: [],
+            };
     return new Response(JSON.stringify(payload), {
       status: 200,
       headers: { 'content-type': 'application/json' },
@@ -250,13 +266,40 @@ try {
     (error) => error.code === 'revision_conflict' && error.currentRevision === 1,
   );
 
-  recoveryBlockedAtEventSequence = 6;
+  recoveryMode = 'stalled';
+  sequence = 7;
   second.serverSend(
     makeRoomState({
-      latestEventSequence: recoveryBlockedAtEventSequence,
-      eventBufferStartSequence: recoveryBlockedAtEventSequence + 1,
+      latestEventSequence: 7,
+      eventBufferStartSequence: 7,
       missedEventsTruncated: true,
-      recentEvents: [],
+      recentEvents: [makeRollStart({ rollId: 'recent-after-gap-7', eventSequence: 7, replayed: true })],
+    }),
+  );
+  await waitFor(() => observedErrors.some((error) => error.code === 'long_range_recovery_stalled'));
+  await waitFor(() => MockWebSocket.instances.length === 3);
+  assert.equal(
+    room.getLastEventSequence(),
+    5,
+    'transient persistence gaps must keep the cursor pinned before the missing sequence',
+  );
+  assert.equal(
+    observed.includes('recent-after-gap-7'),
+    false,
+    'the hot-buffer tail must not apply after a failed durable-prefix recovery',
+  );
+  const third = MockWebSocket.instances[2];
+  await waitFor(() => third.readyState === MockWebSocket.OPEN);
+  assert.equal(new URL(third.url).searchParams.get('lastEventSequence'), '5');
+
+  recoveryMode = 'normal';
+  recoveryBlockedAtEventSequence = 6;
+  third.serverSend(
+    makeRoomState({
+      latestEventSequence: 7,
+      eventBufferStartSequence: 7,
+      missedEventsTruncated: true,
+      recentEvents: [makeRollStart({ rollId: 'recent-after-corrupt-7', eventSequence: 7, replayed: true })],
     }),
   );
   await waitFor(() => observedErrors.some((error) => error.code === 'long_range_recovery_corrupt'));
@@ -274,13 +317,13 @@ try {
     'corrupt recovery must not advance the event cursor',
   );
 
-  second.serverSend(makeRollStart({ rollId: 'after-corrupt-7', eventSequence: 7 }));
+  third.serverSend(makeRollStart({ rollId: 'after-corrupt-8', eventSequence: 8 }));
   await new Promise((settle) => setTimeout(settle, 20));
   assert.equal(room.getLastEventSequence(), 5, 'events after the corrupt gap must remain blocked');
-  assert.equal(observed.includes('after-corrupt-7'), false);
+  assert.equal(observed.includes('after-corrupt-8'), false);
   assert.equal(
     MockWebSocket.instances.length,
-    2,
+    3,
     'corrupt retained recovery must suppress automatic reconnect loops',
   );
 
@@ -289,8 +332,8 @@ try {
   assert.ok(metrics.requestsCompleted >= 1);
   assert.equal(metrics.requestsAborted, 1);
   assert.equal(metrics.revisionConflicts, 1);
-  assert.equal(metrics.reconnectAttempts, 1);
-  assert.equal(metrics.replayTruncations, 2);
+  assert.equal(metrics.reconnectAttempts, 2);
+  assert.equal(metrics.replayTruncations, 3);
   assert.equal(metrics.longRangeRecoveries, 1);
   assert.ok(metrics.replayedEvents >= 2);
   assert.equal(metrics.hiddenProjections, 1);
@@ -311,6 +354,7 @@ try {
           'abnormal disconnect and capped reconnect',
           'resume cursor propagation',
           'truncated replay durable recovery',
+          'transient durable replay gaps pin the cursor and reconnect without skipping',
           'corrupt durable replay pins the cursor and fails the connection closed',
           'events beyond a corrupt replay gap are ignored and automatic reconnect is suppressed',
           'event ordering and duplicate suppression',
