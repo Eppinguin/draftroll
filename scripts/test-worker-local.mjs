@@ -155,10 +155,10 @@ async function prepareIdempotencyBoundary({
   `);
   assert.equal(publicRequestRows.length, 0, 'public D1 request index was not removed');
 
-  // Keep the retained event structurally valid but change the correlation key. A request-cache
-  // mapping must never be sufficient to replay a different retained response.
+  // Keep the retained event otherwise valid but make its serialized sequence disagree with the
+  // request index and SQL row. Idempotency replay must correlate all three identities before reuse.
   const mismatchedCorrelation = JSON.parse(correlationRow.event_json);
-  mismatchedCorrelation.requestId = `${correlationEvent.requestId}-mismatch`;
+  mismatchedCorrelation.eventSequence = correlationEvent.eventSequence + 1_000;
   await executeD1(`
     UPDATE room_events
     SET event_json = ${sqlString(JSON.stringify(mismatchedCorrelation))}
@@ -177,8 +177,8 @@ async function prepareIdempotencyBoundary({
     'correlation retained response disappeared while preparing the test',
   );
   assert.equal(
-    JSON.parse(storedCorrelation.event_json).requestId,
-    `${correlationEvent.requestId}-mismatch`,
+    JSON.parse(storedCorrelation.event_json).eventSequence,
+    correlationEvent.eventSequence + 1_000,
   );
 
   // Keep a structurally valid JSON row and normalized result, but corrupt an internal field that
