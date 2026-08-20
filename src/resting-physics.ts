@@ -1,8 +1,5 @@
 import * as CANNON from 'cannon-es';
-import {
-  createCanonicalPhysicalDieDefinition,
-  type PhysicalDieDefinition,
-} from './physical-dice';
+import { createCanonicalPhysicalDieDefinition, type PhysicalDieDefinition } from './physical-dice';
 import type { DieKind } from './physics-shapes';
 
 const transformedDirection = new CANNON.Vec3();

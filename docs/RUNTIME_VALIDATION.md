@@ -31,6 +31,8 @@ A room connection negotiates one exact protocol version. Draftroll does not gues
 - Realtime decoders reject unknown top-level event fields. This prevents misspelled commands and silently ignored security-sensitive options.
 - Clients must not send one protocol version and interpret events as another.
 
+Persisted replay data is correlated with its storage identity before it can advance a recovery cursor. Durable Object buffers must be room-matched and contiguous, while D1 replay rows must match both the requested room and their SQL event sequence. Proven malformed rows, duplicate/reordered rows, or identity mismatches fail closed at the first untrustworthy sequence. A missing D1 sequence stalls recovery without advancing the cursor because asynchronous persistence can temporarily create a gap; the client's existing no-progress handling keeps that failure recoverable.
+
 ### Normalized results
 
 Every newly generated result contains:
@@ -45,6 +47,10 @@ Every newly generated result contains:
 The decoder accepts results created before `schemaVersion` existed and migrates them to version `1`. Explicit unsupported versions are rejected. Migration is intentionally limited: Draftroll does not silently reinterpret a result that declares an incompatible version.
 
 Persisted D1 and Durable Object results are decoded and migrated before use. External application results are decoded before presentation, revision, rerolling, or storage.
+
+Compatibility decoders and assertions may migrate pre-schema results when `allowLegacyResults` is enabled (the default). Type predicates such as `isNormalizedRollResult()` and `isServerToClientEvent()` are intentionally strict: they return `true` only for current-schema values and never migrate their input. This keeps TypeScript narrowing aligned with the declared current-schema types.
+
+All object-facing protocol decoders first construct a bounded detached snapshot from plain objects, arrays, and protocol primitives before detailed validation. The snapshot traversal enforces byte, depth, collection, property, and node budgets before the runtime clone, reads caller-owned accessors at most once, and rejects cycles or special object containers. Successful decode results therefore never alias caller-owned objects, while hostile or non-cloneable boundary values fail with structured validation issues instead of escaping exceptions.
 
 ### Runtime themes
 

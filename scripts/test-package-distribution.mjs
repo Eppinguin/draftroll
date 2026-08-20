@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -32,6 +32,16 @@ function run(command, args, cwd = root) {
     throw new Error(`${command} ${args.join(' ')} failed`);
   }
   return result.stdout.trim();
+}
+
+async function walkFiles(path) {
+  const files = [];
+  for (const entry of await readdir(path, { withFileTypes: true })) {
+    const child = join(path, entry.name);
+    if (entry.isDirectory()) files.push(...(await walkFiles(child)));
+    else files.push(child);
+  }
+  return files;
 }
 
 function rewriteWorkspaceDependencies(manifest, versions) {
@@ -147,6 +157,7 @@ try {
 
     assert.equal(typeof errors.DraftrollError, 'function');
     assert.equal(typeof protocol.DRAFTROLL_PROTOCOL_VERSION, 'number');
+    assert.equal(typeof protocol.decodeClientToServerEvent, 'function');
     assert.equal(new core.DiceEngine().roll('1d1').total, 1);
     assert.equal(typeof themes.decodeDiceTheme, 'function');
     assert.equal(typeof renderer.DraftrollTextRenderer, 'function');
@@ -165,6 +176,22 @@ try {
     assert.equal(typeof react.createDraftrollReactBindings, 'function');
     assert.equal(typeof vue.useDraftroll, 'function');
     assert.equal(typeof svelte.createDraftrollStore, 'function');
+
+    const { proxy, revoke } = Proxy.revocable({}, {});
+    revoke();
+    let hostileResult;
+    assert.doesNotThrow(() => {
+      hostileResult = protocol.decodeClientToServerEvent(proxy);
+    });
+    assert.equal(hostileResult.success, false);
+    assert.ok(hostileResult.error.issues.some((issue) => issue.code === 'invalid_value'));
+
+    const visibility = { type: 'roles', roles: ['gm'] };
+    const decodedVisibility = protocol.decodeRollVisibility(visibility);
+    assert.equal(decodedVisibility.success, true);
+    assert.notEqual(decodedVisibility.data, visibility);
+    decodedVisibility.data.roles.push('observer');
+    assert.deepEqual(visibility.roles, ['gm']);
   `,
   );
   run('node', ['smoke.mjs'], appDir);
@@ -181,6 +208,20 @@ try {
   assert.equal(manifest.exports['./cards'].types, './dist/cards.d.ts');
   assert.equal(manifest.exports['./cards'].default, './dist/cards.js');
   assert.equal(manifest.dependencies['@draftroll/core'], '0.1.0');
+
+  for (const packageName of packages) {
+    const distRoot = join(appDir, `node_modules/@draftroll/${packageName}/dist`);
+    for (const path of await walkFiles(distRoot)) {
+      if (!path.endsWith('.js') && !path.endsWith('.d.ts')) continue;
+      const source = await readFile(path, 'utf8');
+      assert.doesNotMatch(
+        source,
+        /(?:\.\.\/)+[a-z0-9-]+\/src(?:\/|['"])/,
+        `${packageName} published source-tree import in ${path}`,
+      );
+    }
+  }
+
   console.log('Package distribution smoke test passed.');
 } finally {
   await rm(temp, { recursive: true, force: true });

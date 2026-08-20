@@ -67,7 +67,7 @@ try {
   const client = await import(pathToFileURL(join(outDir, 'client/src/index.js')).href);
   const sdk = await import(pathToFileURL(join(outDir, 'sdk/src/index.js')).href);
   const { DiceEngine } = core;
-  const { decodeRollInput, decodeCustomDiceDefinitions, createRoomPolicy } = protocol;
+  const { decodeRollInput, decodeCustomDiceDefinitions } = protocol;
   const { DiceRoom } = client;
   const { Draftroll, DraftrollSession, DraftrollRoomSession } = sdk;
 
@@ -201,54 +201,42 @@ try {
       const url = new URL(String(input));
       const cursor = Number(url.searchParams.get('afterEventSequence'));
       recoveryCursors.push(cursor);
-      const next = Math.min(2500, cursor + 1000);
+      const next = Math.min(20, cursor + 8);
       return new Response(
         JSON.stringify({
+          protocolVersion: 2,
+          roomId: 'recovery',
+          afterEventSequence: cursor,
           events: [],
           nextAfterEventSequence: next,
-          latestEventSequence: 2500,
-          hasMore: next < 2500,
+          earliestEventSequence: 1,
+          latestEventSequence: 20,
+          hasMore: next < 20,
+          truncated: false,
         }),
         { status: 200, headers: { 'content-type': 'application/json' } },
       );
     },
   });
   await recoveryRoom.recoverLongRangeEvents(0);
-  assert.deepEqual(recoveryCursors, [0, 1000, 2000]);
+  assert.deepEqual(recoveryCursors, [0, 8, 16]);
   assert.equal(recoveryRoom.getRequestMetrics().longRangeRecoveries, 1);
 
-  // Recovery also paginates against compatible endpoints without new cursor metadata.
-  const legacyRecoveryCursors = [];
-  const legacyRecoveryRoom = new DiceRoom({
-    url: 'ws://example.test/rooms/legacy-recovery',
-    roomId: 'legacy-recovery',
+  const incompleteRecoveryRoom = new DiceRoom({
+    url: 'ws://example.test/rooms/incomplete-recovery',
+    roomId: 'incomplete-recovery',
     reconnect: false,
-    fetchImpl: async (input) => {
-      const url = new URL(String(input));
-      const cursor = Number(url.searchParams.get('afterEventSequence'));
-      legacyRecoveryCursors.push(cursor);
-      const count = cursor < 2000 ? 1000 : 0;
-      const policy = createRoomPolicy('open-table');
-      return new Response(
-        JSON.stringify({
-          events: Array.from({ length: count }, (_, index) => ({
-            type: 'room_policy_updated',
-            protocolVersion: 2,
-            roomId: 'legacy-recovery',
-            eventSequence: cursor + index + 1,
-            revision: cursor + index + 1,
-            actor: { participantId: 'gm', sessionId: 'gm-session', name: 'GM', roles: ['gm'] },
-            policy,
-            previousPolicy: policy,
-            replayed: true,
-          })),
-        }),
-        { status: 200, headers: { 'content-type': 'application/json' } },
-      );
-    },
+    fetchImpl: async () =>
+      new Response(JSON.stringify({ events: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
   });
-  await legacyRecoveryRoom.recoverLongRangeEvents(0);
-  assert.deepEqual(legacyRecoveryCursors, [0, 1000, 2000]);
+  await assert.rejects(
+    incompleteRecoveryRoom.recoverLongRangeEvents(0),
+    (error) => error.code === 'long_range_recovery_corrupt',
+    'recovery requires the current versioned pagination envelope',
+  );
 
   // Renderer failures are observable and also remain awaitable by the caller.
   const rendererFailure = new Error('renderer exploded');

@@ -39,6 +39,7 @@ import {
   type RoomStateEvent,
   type ServerToClientEvent,
 } from '@draftroll/protocol';
+import { sanitizeEventBuffer, scanDurableReplayRows } from './replay-integrity';
 
 interface Env {
   DICE_ROOMS: DurableObjectNamespace<DiceRoomObject>;
@@ -164,7 +165,6 @@ interface InternalRoomEventBase {
   actor: RoomActor;
   visibility: RollVisibility;
   result: NormalizedRollResult;
-  audit?: RollAuditDetails;
 }
 
 interface InternalRollStartEvent extends InternalRoomEventBase {
@@ -182,11 +182,13 @@ interface InternalRollUpdatedEvent extends InternalRoomEventBase {
   serverStartTimeMs?: number;
   animationDurationMs?: number;
   startBufferMs?: number;
+  audit?: RollAuditDetails;
 }
 
 interface InternalRollVisibilityUpdatedEvent extends InternalRoomEventBase {
   type: 'roll_visibility_updated';
   previousVisibility: RollVisibility;
+  audit?: RollAuditDetails;
 }
 
 type InternalRoomRollEvent =
@@ -373,6 +375,8 @@ export default {
 export class DiceRoomObject {
   private readonly engine = new DiceEngine();
   private readonly sessions = new Map<WebSocket, ConnectionAttachment>();
+  private eventBufferCache: InternalRoomEvent[] | null = null;
+  private eventBufferRecoverySequenceCache: number | null | undefined;
 
   constructor(
     private readonly state: DurableObjectState,
@@ -715,10 +719,15 @@ export class DiceRoomObject {
       return;
     }
 
-    const duplicate =
-      'requestId' in event
-        ? await this.findDuplicateRequest(participant.sessionId, event.requestId)
-        : null;
+    let duplicate: InternalRoomEvent | null = null;
+    if ('requestId' in event) {
+      try {
+        duplicate = await this.findDuplicateRequest(participant.sessionId, event.requestId);
+      } catch (error) {
+        sendEvent(socket, toRollError(error, event.requestId));
+        return;
+      }
+    }
     if (duplicate) {
       const projected =
         duplicate.type === 'bulk_rolls_updated'
@@ -1271,7 +1280,7 @@ export class DiceRoomObject {
     eventBuffer.push(...internalEvents, acknowledgement);
     if (eventBuffer.length > eventLimit) eventBuffer.splice(0, eventBuffer.length - eventLimit);
 
-    const requestCache = (await this.state.storage.get<RequestCacheEntry[]>('requestCache')) ?? [];
+    const requestCache = await this.getRequestCache();
     requestCache.push({
       key: `${participant.sessionId}:${event.requestId}`,
       eventSequence: acknowledgement.eventSequence,
@@ -1302,6 +1311,8 @@ export class DiceRoomObject {
     };
     for (const { item, record } of prepared) storageEntries[`roll:${item.rollId}`] = record;
     await this.state.storage.put(storageEntries);
+    this.eventBufferCache = eventBuffer;
+    await this.retireEventBufferRecoveryMarker(eventBuffer);
     this.state.waitUntil(
       this.persistRequestRecord(
         participant.sessionId,
@@ -1900,14 +1911,21 @@ export class DiceRoomObject {
     roomId: string,
     policy: RoomPolicy,
   ): Promise<Record<string, unknown>> {
-    const [eventSequence, eventBuffer, rollIndex, persistenceFailures, policyRevision] =
-      await Promise.all([
-        this.getEventSequence(),
-        this.getEventBuffer(),
-        this.state.storage.get<RollIndexEntry[]>('rollIndex'),
-        this.state.storage.get<PersistenceFailure[]>('persistenceFailures'),
-        this.getPolicyRevision(),
-      ]);
+    const [
+      eventSequence,
+      eventBuffer,
+      eventBufferRecoverySequence,
+      rollIndex,
+      persistenceFailures,
+      policyRevision,
+    ] = await Promise.all([
+      this.getEventSequence(),
+      this.getEventBuffer(),
+      this.getEventBufferRecoverySequence(),
+      this.state.storage.get<RollIndexEntry[]>('rollIndex'),
+      this.state.storage.get<PersistenceFailure[]>('persistenceFailures'),
+      this.getPolicyRevision(),
+    ]);
     const sessions = [...this.sessions.values()];
     return {
       roomId,
@@ -1927,6 +1945,7 @@ export class DiceRoomObject {
       latestEventSequence: eventSequence,
       bufferedEvents: eventBuffer.length,
       eventBufferLimit: policy.limits.maximumBufferedEvents,
+      eventBufferRecoverySequence,
       retainedRolls: rollIndex?.length ?? 0,
       persistenceFailures: persistenceFailures?.length ?? 0,
       latestPersistenceFailure: persistenceFailures?.at(-1) ?? null,
@@ -1942,11 +1961,19 @@ export class DiceRoomObject {
     participant: ConnectionAttachment,
     lastEventSequence: number,
   ): Promise<RoomStateEvent> {
-    const eventBuffer = await this.getEventBuffer();
-    const eventBufferStartSequence =
-      eventBuffer[0]?.eventSequence ?? (await this.getEventSequence()) + 1;
+    const [eventBuffer, eventBufferRecoverySequence, latestEventSequence, latestRollSequence] =
+      await Promise.all([
+        this.getEventBuffer(),
+        this.getEventBufferRecoverySequence(),
+        this.getEventSequence(),
+        this.getRollSequence(),
+      ]);
+    const eventBufferStartSequence = eventBuffer[0]?.eventSequence ?? latestEventSequence + 1;
+    const replayCoverageLost =
+      eventBufferRecoverySequence !== null && lastEventSequence < eventBufferRecoverySequence;
     const missedEventsTruncated =
-      lastEventSequence > 0 && lastEventSequence < eventBufferStartSequence - 1;
+      replayCoverageLost ||
+      (lastEventSequence > 0 && lastEventSequence < eventBufferStartSequence - 1);
     const recentEvents: RoomReplayEvent[] = eventBuffer
       .filter((event) => event.eventSequence > lastEventSequence)
       .map((event) => projectInternalEvent(event, participant, true))
@@ -1962,9 +1989,9 @@ export class DiceRoomObject {
       type: 'room_state',
       protocolVersion: DRAFTROLL_PROTOCOL_VERSION,
       roomId: participant.roomId,
-      sequence: await this.getRollSequence(),
-      latestRollSequence: await this.getRollSequence(),
-      latestEventSequence: await this.getEventSequence(),
+      sequence: latestRollSequence,
+      latestRollSequence,
+      latestEventSequence,
       eventBufferStartSequence,
       missedEventsTruncated,
       policy,
@@ -2000,28 +2027,68 @@ export class DiceRoomObject {
     `)
       .bind(roomId)
       .all<RoomEventRow>();
-    const latest = await this.getEventSequence();
-    const events = (query.results ?? []).flatMap((row) => {
-      try {
-        // Deserializes rows this Durable Object previously serialized itself.
-        const internal: InternalRoomEvent = JSON.parse(row.event_json);
-        if (internal.type === 'bulk_rolls_updated') return [];
-        const projected = projectInternalEvent(internal, participant, true);
-        return projected ? [projected] : [];
-      } catch {
-        return [];
-      }
+    const latestEventSequence = await this.getEventSequence();
+    const earliestSequence = earliest.results?.[0]?.event_sequence ?? latestEventSequence + 1;
+    const rows = query.results ?? [];
+    const replayScan = scanDurableReplayRows(rows, {
+      roomId,
+      afterEventSequence,
+      earliestEventSequence: earliestSequence,
+      latestEventSequence,
     });
-    const earliestSequence = earliest.results?.[0]?.event_sequence ?? latest + 1;
-    const nextAfterEventSequence = query.results?.at(-1)?.event_sequence ?? afterEventSequence;
+    const replayIssue = replayScan.issue;
+    if (replayIssue?.kind === 'gap') {
+      this.logStructured('room.replay_persistence_stalled', {
+        source: 'd1_replay',
+        roomId,
+        eventSequence: replayIssue.eventSequence,
+      });
+    } else if (replayIssue?.kind === 'corrupt') {
+      this.logStructured('room.event_storage_invalid', {
+        source: 'd1_replay',
+        eventSequence: replayIssue.eventSequence,
+        message: replayIssue.reason,
+      });
+    }
+
+    const events: RoomReplayEvent[] = [];
+    let nextAfterEventSequence = afterEventSequence;
+    let recoveryBlockedAtEventSequence =
+      replayIssue?.kind === 'corrupt' ? replayIssue.eventSequence : undefined;
+    for (const row of replayScan.rows) {
+      let internal: InternalRoomEvent;
+      try {
+        internal = migrateStoredInternalEvent(row.event);
+      } catch (error) {
+        recoveryBlockedAtEventSequence = row.eventSequence;
+        this.logStructured('room.event_storage_invalid', {
+          source: 'd1_replay',
+          eventSequence: row.eventSequence,
+          message: asError(error).message,
+        });
+        break;
+      }
+
+      // Advancing over a validated event is safe even when this participant cannot observe its
+      // projection (for example manager-only token revocations or bulk acknowledgements).
+      nextAfterEventSequence = row.eventSequence;
+      if (internal.type === 'bulk_rolls_updated') continue;
+      const projected = projectInternalEvent(internal, participant, true);
+      if (projected) events.push(projected);
+    }
     return {
+      protocolVersion: DRAFTROLL_PROTOCOL_VERSION,
       roomId,
       afterEventSequence,
       nextAfterEventSequence,
       earliestEventSequence: earliestSequence,
-      latestEventSequence: latest,
-      hasMore: nextAfterEventSequence < latest,
-      truncated: afterEventSequence > 0 && afterEventSequence < earliestSequence - 1,
+      latestEventSequence,
+      hasMore:
+        replayIssue !== null ||
+        recoveryBlockedAtEventSequence !== undefined ||
+        nextAfterEventSequence < latestEventSequence,
+      truncated: afterEventSequence < earliestSequence - 1,
+      recoveryBlockedAtEventSequence,
       events,
     };
   }
@@ -2353,11 +2420,169 @@ export class DiceRoomObject {
     events.push(event);
     if (events.length > limit) events.splice(0, events.length - limit);
     await this.state.storage.put('eventBuffer', events);
+    this.eventBufferCache = events;
+    await this.retireEventBufferRecoveryMarker(events);
     this.state.waitUntil(this.persistEventSafely(event, policy));
   }
 
+  private async getEventBufferRecoverySequence(): Promise<number | null> {
+    if (this.eventBufferRecoverySequenceCache !== undefined) {
+      return this.eventBufferRecoverySequenceCache;
+    }
+    const stored = await this.state.storage.get('eventBufferRecoverySequence');
+    if (stored === undefined) {
+      this.eventBufferRecoverySequenceCache = null;
+      return null;
+    }
+    if (typeof stored === 'number' && Number.isSafeInteger(stored) && stored >= 1) {
+      this.eventBufferRecoverySequenceCache = stored;
+      return stored;
+    }
+    const fallback = Math.max(1, await this.getEventSequence());
+    this.logStructured('room.event_storage_invalid', {
+      source: 'durable_object_buffer_marker',
+      message: 'Stored event-buffer recovery marker is invalid',
+      recoveredAsEventSequence: fallback,
+    });
+    this.eventBufferRecoverySequenceCache = fallback;
+    await this.state.storage.put('eventBufferRecoverySequence', fallback);
+    return fallback;
+  }
+
+  private async markEventBufferRecoveryRequired(sequence: number): Promise<void> {
+    if (!Number.isSafeInteger(sequence) || sequence < 1) {
+      throw new Error('Event-buffer recovery sequence must be a positive safe integer');
+    }
+    const current = await this.getEventBufferRecoverySequence();
+    const next = current === null ? sequence : Math.min(current, sequence);
+    if (current === next) return;
+    this.eventBufferRecoverySequenceCache = next;
+    await this.state.storage.put('eventBufferRecoverySequence', next);
+  }
+
+  private async retireEventBufferRecoveryMarker(
+    events: readonly InternalRoomEvent[],
+  ): Promise<void> {
+    const recoverySequence = await this.getEventBufferRecoverySequence();
+    if (recoverySequence === null) return;
+    const eventBufferStartSequence = events[0]?.eventSequence;
+    const eventBufferEndSequence = events.at(-1)?.eventSequence;
+    if (
+      eventBufferStartSequence === undefined ||
+      eventBufferEndSequence === undefined ||
+      eventBufferStartSequence > recoverySequence ||
+      eventBufferEndSequence < recoverySequence
+    ) {
+      return;
+    }
+    this.eventBufferRecoverySequenceCache = null;
+    await this.state.storage.delete('eventBufferRecoverySequence');
+  }
+
   private async getEventBuffer(): Promise<InternalRoomEvent[]> {
-    return (await this.state.storage.get<InternalRoomEvent[]>('eventBuffer')) ?? [];
+    if (this.eventBufferCache !== null) return [...this.eventBufferCache];
+
+    const stored = await this.state.storage.get('eventBuffer');
+    const latestEventSequence = await this.getEventSequence();
+    if (stored === undefined) {
+      if (latestEventSequence > 0) {
+        const recoverySequence = Math.max(1, latestEventSequence);
+        await this.markEventBufferRecoveryRequired(recoverySequence);
+        this.logStructured('room.event_storage_invalid', {
+          source: 'durable_object_buffer',
+          recoverySequence,
+          message: 'Stored event buffer is missing while the room has retained event history',
+        });
+      } else if ((await this.getEventBufferRecoverySequence()) !== null) {
+        this.eventBufferRecoverySequenceCache = null;
+        await this.state.storage.delete('eventBufferRecoverySequence');
+      }
+      this.eventBufferCache = [];
+      return [];
+    }
+
+    const roomId = (await this.state.storage.get<string>('roomId')) ?? this.state.id.toString();
+    const sanitized = sanitizeEventBuffer(stored, roomId, latestEventSequence);
+    if (sanitized.changed && sanitized.recoverySequence !== null) {
+      await this.markEventBufferRecoveryRequired(sanitized.recoverySequence);
+      this.logStructured('room.event_storage_invalid', {
+        source: 'durable_object_buffer',
+        recoverySequence: sanitized.recoverySequence,
+        message: sanitized.reason ?? 'Stored event buffer failed replay-integrity checks',
+      });
+      // Once continuity is uncertain, quarantine the hot buffer completely. New events rebuild a
+      // contiguous tail while the recovery marker forces clients onto the durable replay path.
+      await this.state.storage.put('eventBuffer', []);
+      this.eventBufferCache = [];
+      return [];
+    }
+
+    const events: InternalRoomEvent[] = [];
+    for (const [index, event] of sanitized.events.entries()) {
+      const eventSequence =
+        isRecord(event) &&
+        typeof event.eventSequence === 'number' &&
+        Number.isSafeInteger(event.eventSequence) &&
+        event.eventSequence >= 1
+          ? event.eventSequence
+          : undefined;
+      try {
+        events.push(migrateStoredInternalEvent(event));
+      } catch (error) {
+        const previousEventSequence = events.at(-1)?.eventSequence;
+        const recoverySequence =
+          eventSequence ??
+          (previousEventSequence === undefined
+            ? Math.max(1, latestEventSequence)
+            : previousEventSequence + 1);
+        await this.markEventBufferRecoveryRequired(recoverySequence);
+        this.logStructured('room.event_storage_invalid', {
+          source: 'durable_object_buffer',
+          index,
+          eventSequence,
+          recoverySequence,
+          message: asError(error).message,
+        });
+        await this.state.storage.put('eventBuffer', []);
+        this.eventBufferCache = [];
+        return [];
+      }
+    }
+    this.eventBufferCache = events;
+    return [...events];
+  }
+
+  private async getRequestCache(): Promise<RequestCacheEntry[]> {
+    const stored = await this.state.storage.get('requestCache');
+    if (stored === undefined) return [];
+    if (!Array.isArray(stored)) {
+      this.logStructured('room.event_storage_invalid', {
+        source: 'durable_object_request_cache',
+        message: 'Stored request cache is not an array',
+      });
+      return [];
+    }
+
+    const entries: RequestCacheEntry[] = [];
+    for (const [index, entry] of stored.entries()) {
+      if (
+        isRecord(entry) &&
+        typeof entry.key === 'string' &&
+        entry.key.length > 0 &&
+        typeof entry.eventSequence === 'number' &&
+        Number.isSafeInteger(entry.eventSequence) &&
+        entry.eventSequence >= 1
+      ) {
+        entries.push({ key: entry.key, eventSequence: entry.eventSequence });
+        continue;
+      }
+      this.logStructured('room.event_storage_invalid', {
+        source: 'durable_object_request_cache',
+        index,
+        message: 'Stored request-cache entry is invalid',
+      });
+    }
+    return entries;
   }
 
   private async recordRequest(
@@ -2365,7 +2590,7 @@ export class DiceRoomObject {
     requestId: string,
     eventSequence: number,
   ): Promise<void> {
-    const entries = (await this.state.storage.get<RequestCacheEntry[]>('requestCache')) ?? [];
+    const entries = await this.getRequestCache();
     entries.push({ key: `${sessionId}:${requestId}`, eventSequence });
     if (entries.length > 200) entries.splice(0, entries.length - 200);
     await this.state.storage.put('requestCache', entries);
@@ -2405,29 +2630,95 @@ export class DiceRoomObject {
     }
   }
 
+  private assertIdempotencyReplayMatches(
+    event: InternalRoomEvent,
+    roomId: string,
+    sessionId: string,
+    requestId: string,
+    expectedEventSequence: number,
+  ): InternalRoomEvent {
+    const requesterSessionId =
+      event.type === 'bulk_rolls_updated'
+        ? event.requesterSessionId
+        : event.type === 'room_policy_updated' || event.type === 'room_token_revoked'
+          ? event.actor.sessionId
+          : (event.requesterSessionId ??
+            (event.type === 'roll_start' ? event.actor.sessionId : undefined));
+    if (
+      event.roomId === roomId &&
+      event.eventSequence === expectedEventSequence &&
+      event.requestId === requestId &&
+      requesterSessionId === sessionId
+    ) {
+      return event;
+    }
+
+    this.logStructured('room.idempotency_replay_mismatch', {
+      expectedEventSequence,
+      actualEventSequence: event.eventSequence,
+      expectedRoomId: roomId,
+      actualRoomId: event.roomId,
+      expectedRequestId: requestId,
+      actualRequestId: event.requestId,
+      expectedSessionId: sessionId,
+      actualSessionId: requesterSessionId,
+    });
+    throw new RoomOperationError(
+      'idempotency_replay_unavailable',
+      `Request '${requestId}' was already recorded but its retained response does not match the request`,
+      409,
+    );
+  }
+
   private async findDuplicateRequest(
     sessionId: string,
     requestId: string,
   ): Promise<InternalRoomEvent | null> {
-    const entries = (await this.state.storage.get<RequestCacheEntry[]>('requestCache')) ?? [];
+    const entries = await this.getRequestCache();
     const match = entries.toReversed().find((entry) => entry.key === `${sessionId}:${requestId}`);
+    const roomId = (await this.state.storage.get<string>('roomId')) ?? this.state.id.toString();
     if (match) {
       const buffered = (await this.getEventBuffer()).find(
         (event) => event.eventSequence === match.eventSequence,
       );
-      if (buffered) return buffered;
+      if (buffered) {
+        return this.assertIdempotencyReplayMatches(
+          buffered,
+          roomId,
+          sessionId,
+          requestId,
+          match.eventSequence,
+        );
+      }
     }
-    const roomId = (await this.state.storage.get<string>('roomId')) ?? this.state.id.toString();
-    const requestQuery = await this.env.DB.prepare(`
-      SELECT event_sequence
-      FROM room_requests
-      WHERE room_id = ? AND session_id = ? AND request_id = ?
-      LIMIT 1
-    `)
-      .bind(roomId, sessionId, requestId)
-      .all<RoomRequestRow>();
-    const eventSequence = requestQuery.results?.[0]?.event_sequence;
-    if (eventSequence === undefined) return null;
+
+    let eventSequence = match?.eventSequence;
+    if (eventSequence === undefined) {
+      const requestQuery = await this.env.DB.prepare(`
+        SELECT event_sequence
+        FROM room_requests
+        WHERE room_id = ? AND session_id = ? AND request_id = ?
+        LIMIT 1
+      `)
+        .bind(roomId, sessionId, requestId)
+        .all<RoomRequestRow>();
+      const persistedSequence = requestQuery.results?.[0]?.event_sequence;
+      if (persistedSequence === undefined) return null;
+      if (!Number.isSafeInteger(persistedSequence) || persistedSequence < 1) {
+        this.logStructured('room.event_storage_invalid', {
+          source: 'idempotency_request_index',
+          requestId,
+          eventSequence: persistedSequence,
+          message: 'Persisted request index contains an invalid event sequence',
+        });
+        throw new RoomOperationError(
+          'idempotency_replay_unavailable',
+          `Request '${requestId}' was already recorded but its retained response index is invalid`,
+          409,
+        );
+      }
+      eventSequence = persistedSequence;
+    }
     const eventQuery = await this.env.DB.prepare(`
       SELECT event_sequence, event_json, created_at
       FROM room_events
@@ -2437,13 +2728,36 @@ export class DiceRoomObject {
       .bind(roomId, eventSequence)
       .all<RoomEventRow>();
     const serialized = eventQuery.results?.[0]?.event_json;
-    if (!serialized) return null;
+    if (!serialized) {
+      throw new RoomOperationError(
+        'idempotency_replay_unavailable',
+        `Request '${requestId}' was already recorded but its retained response is unavailable`,
+        409,
+      );
+    }
     try {
       // Deserializes storage this Durable Object previously serialized itself.
-      const parsed: InternalRoomEvent = JSON.parse(serialized);
-      return parsed;
-    } catch {
-      return null;
+      const internal = migrateStoredInternalEvent(JSON.parse(serialized));
+      return this.assertIdempotencyReplayMatches(
+        internal,
+        roomId,
+        sessionId,
+        requestId,
+        eventSequence,
+      );
+    } catch (error) {
+      if (error instanceof RoomOperationError) throw error;
+      this.logStructured('room.event_storage_invalid', {
+        source: 'idempotency_replay',
+        eventSequence,
+        requestId,
+        message: asError(error).message,
+      });
+      throw new RoomOperationError(
+        'idempotency_replay_unavailable',
+        `Request '${requestId}' was already recorded but its retained response is invalid`,
+        409,
+      );
     }
   }
 
@@ -2504,6 +2818,281 @@ function roomParticipantFromAttachment(participant: ConnectionAttachment): RoomP
     metadata: participant.metadata,
     connectedAt: participant.connectedAt,
   };
+}
+
+const STORED_ROLL_COMMON_FIELDS = [
+  'type',
+  'protocolVersion',
+  'roomId',
+  'eventSequence',
+  'requestId',
+  'requesterSessionId',
+  'clientRollId',
+  'rollId',
+  'sequence',
+  'actor',
+  'visibility',
+  'result',
+] as const;
+
+function migrateStoredInternalEvent(event: unknown): InternalRoomEvent {
+  if (!isRecord(event) || typeof event.type !== 'string') {
+    throw new Error('Stored room event is not a valid object');
+  }
+  switch (event.type) {
+    case 'roll_start':
+    case 'roll_updated':
+    case 'roll_visibility_updated':
+      return migrateStoredRollEvent(event, event.type);
+    case 'room_policy_updated': {
+      assertStoredEventFields(event, [
+        'type',
+        'protocolVersion',
+        'roomId',
+        'eventSequence',
+        'requestId',
+        'revision',
+        'actor',
+        'policy',
+        'previousPolicy',
+      ]);
+      const decoded = decodeStoredServerEvent({ ...event, replayed: true }, 'room_policy_updated');
+      if (decoded.type !== 'room_policy_updated')
+        throw new Error('Stored policy event type mismatch');
+      return {
+        type: 'room_policy_updated',
+        protocolVersion: decoded.protocolVersion,
+        roomId: decoded.roomId,
+        eventSequence: decoded.eventSequence,
+        requestId: decoded.requestId,
+        revision: decoded.revision,
+        actor: decoded.actor,
+        policy: decoded.policy,
+        previousPolicy: decoded.previousPolicy,
+      };
+    }
+    case 'room_token_revoked': {
+      assertStoredEventFields(event, [
+        'type',
+        'protocolVersion',
+        'roomId',
+        'eventSequence',
+        'requestId',
+        'actor',
+        'target',
+        'revokedAt',
+        'reason',
+        'disconnectedSessions',
+      ]);
+      const decoded = decodeStoredServerEvent({ ...event, replayed: true }, 'room_token_revoked');
+      if (decoded.type !== 'room_token_revoked')
+        throw new Error('Stored token event type mismatch');
+      return {
+        type: 'room_token_revoked',
+        protocolVersion: decoded.protocolVersion,
+        roomId: decoded.roomId,
+        eventSequence: decoded.eventSequence,
+        requestId: decoded.requestId,
+        actor: decoded.actor,
+        target: decoded.target,
+        revokedAt: decoded.revokedAt,
+        reason: decoded.reason,
+        disconnectedSessions: decoded.disconnectedSessions,
+      };
+    }
+    case 'bulk_rolls_updated': {
+      assertStoredEventFields(event, [
+        'type',
+        'protocolVersion',
+        'roomId',
+        'eventSequence',
+        'requestId',
+        'requesterSessionId',
+        'updates',
+      ]);
+      const requesterSessionId = readStoredIdentifier(
+        event.requesterSessionId,
+        'requesterSessionId',
+        true,
+      );
+      const projected: Record<string, unknown> = { ...event, replayed: true };
+      delete projected.requesterSessionId;
+      const decoded = decodeStoredServerEvent(projected, 'bulk_rolls_updated');
+      if (decoded.type !== 'bulk_rolls_updated' || requesterSessionId === undefined) {
+        throw new Error('Stored bulk event is invalid');
+      }
+      return {
+        type: 'bulk_rolls_updated',
+        protocolVersion: decoded.protocolVersion,
+        roomId: decoded.roomId,
+        eventSequence: decoded.eventSequence,
+        requestId: decoded.requestId,
+        requesterSessionId,
+        updates: decoded.updates,
+      };
+    }
+    default:
+      throw new Error(`Stored room event has unsupported type '${event.type}'`);
+  }
+}
+
+function migrateStoredRollEvent(
+  event: Record<string, unknown>,
+  type: 'roll_start' | 'roll_updated' | 'roll_visibility_updated',
+): InternalRoomRollEvent {
+  const extraFields =
+    type === 'roll_start'
+      ? ['animationSeed', 'serverStartTimeMs', 'animationDurationMs', 'startBufferMs']
+      : type === 'roll_updated'
+        ? [
+            'animate',
+            'animationSeed',
+            'serverStartTimeMs',
+            'animationDurationMs',
+            'startBufferMs',
+            'audit',
+          ]
+        : ['previousVisibility', 'audit'];
+  assertStoredEventFields(event, [...STORED_ROLL_COMMON_FIELDS, ...extraFields]);
+
+  const requesterSessionId = readStoredIdentifier(event.requesterSessionId, 'requesterSessionId');
+  const result = decodeNormalizedRollResult(event.result, { allowLegacyResults: true });
+  if (!result.success) {
+    throw new Error(`Stored room event contains an invalid roll result: ${result.error.message}`);
+  }
+
+  const projected: Record<string, unknown> = {
+    ...event,
+    result: result.data,
+    hidden: false,
+    summary: {
+      rollId: event.rollId,
+      sequence: event.sequence,
+      revision: result.data.revision ?? 0,
+      name: result.data.name,
+      actor: event.actor,
+      createdAt: result.data.createdAt,
+      updatedAt: result.data.updatedAt,
+    },
+  };
+  delete projected.requesterSessionId;
+
+  const decoded = decodeStoredServerEvent(projected, type);
+  if (
+    decoded.type !== 'roll_start' &&
+    decoded.type !== 'roll_updated' &&
+    decoded.type !== 'roll_visibility_updated'
+  ) {
+    throw new Error('Stored roll event type mismatch');
+  }
+  if (decoded.type !== type || decoded.result === null) {
+    throw new Error('Stored roll event does not contain a visible normalized result');
+  }
+  const visibility = requireStoredVisibility(decoded.visibility, 'visibility');
+  if (decoded.result.rollId !== decoded.rollId || decoded.result.sequence !== decoded.sequence) {
+    throw new Error('Stored roll event result identifiers do not match the event');
+  }
+
+  const common = {
+    protocolVersion: decoded.protocolVersion,
+    roomId: decoded.roomId,
+    eventSequence: decoded.eventSequence,
+    requestId: decoded.requestId,
+    requesterSessionId,
+    clientRollId: decoded.clientRollId,
+    rollId: decoded.rollId,
+    sequence: decoded.sequence,
+    actor: decoded.actor,
+    visibility,
+    result: decoded.result,
+  };
+
+  if (decoded.type === 'roll_start') {
+    if (
+      decoded.animationSeed === undefined ||
+      decoded.serverStartTimeMs === undefined ||
+      decoded.animationDurationMs === undefined ||
+      decoded.startBufferMs === undefined
+    ) {
+      throw new Error('Stored roll_start event is missing required animation fields');
+    }
+    return {
+      type: 'roll_start',
+      ...common,
+      animationSeed: decoded.animationSeed,
+      serverStartTimeMs: decoded.serverStartTimeMs,
+      animationDurationMs: decoded.animationDurationMs,
+      startBufferMs: decoded.startBufferMs,
+    };
+  }
+  if (decoded.type === 'roll_updated') {
+    return {
+      type: 'roll_updated',
+      ...common,
+      animate: decoded.animate,
+      animationSeed: decoded.animationSeed,
+      serverStartTimeMs: decoded.serverStartTimeMs,
+      animationDurationMs: decoded.animationDurationMs,
+      startBufferMs: decoded.startBufferMs,
+      audit: decoded.audit,
+    };
+  }
+  return {
+    type: 'roll_visibility_updated',
+    ...common,
+    previousVisibility: requireStoredVisibility(decoded.previousVisibility, 'previousVisibility'),
+    audit: decoded.audit,
+  };
+}
+
+function decodeStoredServerEvent(
+  value: unknown,
+  expectedType: ServerToClientEvent['type'],
+): ServerToClientEvent {
+  const decoded = decodeServerToClientEvent(value, {
+    rejectUnknownFields: true,
+    allowLegacyResults: false,
+  });
+  if (!decoded.success) {
+    throw new Error(`Stored room event is invalid: ${decoded.error.message}`);
+  }
+  if (decoded.data.type !== expectedType) {
+    throw new Error(
+      `Stored room event type '${decoded.data.type}' does not match '${expectedType}'`,
+    );
+  }
+  return decoded.data;
+}
+
+function assertStoredEventFields(
+  event: Record<string, unknown>,
+  allowedFields: readonly string[],
+): void {
+  const unexpected = Object.keys(event).find((field) => !allowedFields.includes(field));
+  if (unexpected !== undefined) {
+    throw new Error(`Stored room event contains unexpected field '${unexpected}'`);
+  }
+}
+
+function readStoredIdentifier(value: unknown, field: string, required = false): string | undefined {
+  if (value === undefined) {
+    if (required) throw new Error(`Stored room event is missing '${field}'`);
+    return undefined;
+  }
+  if (typeof value !== 'string' || !value.trim() || value.length > 500) {
+    throw new Error(`Stored room event has invalid '${field}'`);
+  }
+  return value;
+}
+
+function requireStoredVisibility(
+  value: RoomRollEvent['visibility'],
+  field: string,
+): RollVisibility {
+  if (value.type === 'hidden') {
+    throw new Error(`Stored room event '${field}' cannot be hidden`);
+  }
+  return value;
 }
 
 function projectInternalEvent(
@@ -2711,8 +3300,15 @@ function assertCanMutate(
   const privileged =
     participant.permissions.includes('room:manage') ||
     participant.permissions.includes(anyPermission);
+  const ownPermissionGranted = own && participant.permissions.includes(ownPermission);
+  if (!privileged && !ownPermissionGranted) {
+    const message = own
+      ? `Missing room permission '${ownPermission}' or '${anyPermission}'`
+      : `Missing room permission '${anyPermission}'`;
+    throw new RoomOperationError('permission_denied', message, 403);
+  }
   if (privileged && privilegedAllowed) return;
-  if (own && participant.permissions.includes(ownPermission) && ownAllowed) return;
+  if (ownPermissionGranted && ownAllowed) return;
   throw new RoomOperationError(
     'policy_denied',
     `Room policy does not allow participant '${participant.participantId}' to ${operation} roll '${record.result.rollId}'`,
@@ -3175,7 +3771,7 @@ function parseClientEvent(
 function sendEvent(socket: WebSocket, event: ServerToClientEvent): void {
   const decoded = decodeServerToClientEvent(event, {
     rejectUnknownFields: true,
-    allowLegacyResults: true,
+    allowLegacyResults: false,
   });
   if (!decoded.success) {
     console.error('Draftroll attempted to send an invalid server event', decoded.error.issues);

@@ -1,18 +1,19 @@
-import type {
-  AdvantageMode,
-  ComparisonOperator,
-  CriticalType,
-  CustomDiceDefinition,
-  EvaluateRollInput,
-  NormalizedDieResult,
-  NormalizedRollResult,
-  PlannedDie,
-  RollAuthority,
-  RollOperation,
-  RollOperationType,
-  RollSelector,
-  RollTreeNode,
-  StructuredRollOperation,
+import {
+  DRAFTROLL_RESULT_SCHEMA_VERSION,
+  type AdvantageMode,
+  type ComparisonOperator,
+  type CriticalType,
+  type CustomDiceDefinition,
+  type EvaluateRollInput,
+  type NormalizedDieResult,
+  type NormalizedRollResult,
+  type PlannedDie,
+  type RollAuthority,
+  type RollOperation,
+  type RollOperationType,
+  type RollSelector,
+  type RollTreeNode,
+  type StructuredRollOperation,
 } from '../../protocol/src/index';
 import type {
   AstNode,
@@ -138,18 +139,19 @@ export function evaluateParsedExpression(
 
   try {
     const advantage = options.advantage ?? 'none';
-    if (advantage !== 'none') applyAdvantage(parsed.ast, advantage);
+    const ast = advantage === 'none' ? parsed.ast : structuredClone(parsed.ast);
+    if (advantage !== 'none') applyAdvantage(ast, advantage);
 
-    initialDice = countInitialDice(parsed.ast);
+    initialDice = countInitialDice(ast);
     if (initialDice > limits.maxInitialDice) {
       throw new DiceLimitError(`Initial dice count exceeds ${limits.maxInitialDice}`);
     }
 
-    const evaluated = evaluateNode(parsed.ast, rng, limits, state, options.themeId);
-    const modifier = extractSimpleModifier(parsed.ast);
+    const evaluated = evaluateNode(ast, rng, limits, state, options.themeId);
+    const modifier = extractSimpleModifier(ast);
     const total = normalizeZero(evaluated.value);
     const result: NormalizedRollResult = {
-      schemaVersion: 1,
+      schemaVersion: DRAFTROLL_RESULT_SCHEMA_VERSION,
       authority: options.authority ?? 'local',
       name: options.name,
       expression: parsed.expression,
@@ -331,7 +333,7 @@ export function evaluateStructuredInput(
       children: treeChildren,
     };
     const result: NormalizedRollResult = {
-      schemaVersion: 1,
+      schemaVersion: DRAFTROLL_RESULT_SCHEMA_VERSION,
       authority: options.authority ?? 'local',
       name: input.name ?? options.name,
       total,

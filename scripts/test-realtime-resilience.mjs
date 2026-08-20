@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import { runTsc } from './lib/load-typescript.mjs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const root = resolve(new URL('..', import.meta.url).pathname);
+const root = fileURLToPath(new URL('..', import.meta.url));
 const temp = await mkdtemp(join(tmpdir(), 'draftroll-realtime-resilience-'));
 const out = join(temp, 'build');
 const config = join(temp, 'tsconfig.json');
@@ -139,15 +139,58 @@ try {
     makeRollStart({ rollId: 'recovered-3', eventSequence: 3, replayed: true }),
   ];
   const fetchCalls = [];
+  let recoveryMode = 'normal';
+  let recoveryBlockedAtEventSequence;
+  let releaseBlockedRecovery;
+  const blockedRecoveryGate = new Promise((resolve) => {
+    releaseBlockedRecovery = resolve;
+  });
   const fetchImpl = async (url, init) => {
+    const requestUrl = new URL(String(url));
+    const afterEventSequence = Number(requestUrl.searchParams.get('afterEventSequence') ?? 0);
     fetchCalls.push({ url: String(url), headers: init?.headers });
-    return new Response(
-      JSON.stringify({ roomId: 'resilience', afterEventSequence: 1, events: durableEvents }),
-      {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      },
-    );
+    const payload =
+      recoveryMode === 'stalled'
+        ? {
+            protocolVersion: 2,
+            roomId: 'resilience',
+            afterEventSequence,
+            nextAfterEventSequence: afterEventSequence,
+            earliestEventSequence: 1,
+            latestEventSequence: afterEventSequence + 1,
+            hasMore: true,
+            truncated: false,
+            events: [],
+          }
+        : recoveryBlockedAtEventSequence === undefined
+          ? {
+              protocolVersion: 2,
+              roomId: 'resilience',
+              afterEventSequence,
+              nextAfterEventSequence: 3,
+              earliestEventSequence: 1,
+              latestEventSequence: 3,
+              hasMore: false,
+              truncated: false,
+              events: durableEvents.filter((event) => event.eventSequence > afterEventSequence),
+            }
+          : {
+              protocolVersion: 2,
+              roomId: 'resilience',
+              afterEventSequence,
+              nextAfterEventSequence: afterEventSequence,
+              earliestEventSequence: 1,
+              latestEventSequence: recoveryBlockedAtEventSequence,
+              hasMore: true,
+              truncated: false,
+              recoveryBlockedAtEventSequence,
+              events: [],
+            };
+    if (recoveryBlockedAtEventSequence !== undefined) await blockedRecoveryGate;
+    return new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
   };
 
   const room = await client.DiceRoom.connect({
@@ -168,7 +211,9 @@ try {
 
   const states = [];
   const observed = [];
+  const observedErrors = [];
   room.on('connectionState', (state) => states.push(state));
+  room.on('error', ({ error }) => observedErrors.push(error));
   room.on('rollStart', (event) => observed.push(event.rollId));
   room.on('rollStart', () => {
     throw new Error('observer failure');
@@ -238,19 +283,92 @@ try {
     (error) => error.code === 'revision_conflict' && error.currentRevision === 1,
   );
 
+  recoveryMode = 'stalled';
+  sequence = 7;
+  second.serverSend(
+    makeRoomState({
+      latestEventSequence: 7,
+      eventBufferStartSequence: 7,
+      missedEventsTruncated: true,
+      recentEvents: [
+        makeRollStart({ rollId: 'recent-after-gap-7', eventSequence: 7, replayed: true }),
+      ],
+    }),
+  );
+  await waitFor(() => observedErrors.some((error) => error.code === 'long_range_recovery_stalled'));
+  await waitFor(() => MockWebSocket.instances.length === 3);
+  assert.equal(
+    room.getLastEventSequence(),
+    5,
+    'transient persistence gaps must keep the cursor pinned before the missing sequence',
+  );
+  assert.equal(
+    observed.includes('recent-after-gap-7'),
+    false,
+    'the hot-buffer tail must not apply after a failed durable-prefix recovery',
+  );
+  const third = MockWebSocket.instances[2];
+  await waitFor(() => third.readyState === MockWebSocket.OPEN);
+  assert.equal(new URL(third.url).searchParams.get('lastEventSequence'), '5');
+
+  recoveryMode = 'normal';
+  recoveryBlockedAtEventSequence = 6;
+  third.serverSend(
+    makeRoomState({
+      latestEventSequence: 7,
+      eventBufferStartSequence: 7,
+      missedEventsTruncated: true,
+      recentEvents: [
+        makeRollStart({ rollId: 'recent-after-corrupt-7', eventSequence: 7, replayed: true }),
+      ],
+    }),
+  );
+  await waitFor(() => fetchCalls.length >= 3);
+  third.serverSend(makeRollStart({ rollId: 'queued-after-corrupt-8', eventSequence: 8 }));
+  releaseBlockedRecovery();
+  await waitFor(() => observedErrors.some((error) => error.code === 'long_range_recovery_corrupt'));
+  await waitFor(() => room.connectionDiagnostics.state === 'failed');
+  const recoveryError = observedErrors.find(
+    (error) => error.code === 'long_range_recovery_corrupt',
+  );
+  assert.equal(recoveryError?.details?.eventSequence, recoveryBlockedAtEventSequence);
+  assert.equal(recoveryError?.recoverable, false);
+  assert.equal(room.connectionDiagnostics.code, 'long_range_recovery_corrupt');
+  assert.equal(room.connectionDiagnostics.recoverable, false);
+  assert.equal(
+    room.getLastEventSequence(),
+    5,
+    'corrupt recovery must not advance the event cursor',
+  );
+
+  third.serverSend(makeRollStart({ rollId: 'after-corrupt-8', eventSequence: 8 }));
+  await new Promise((settle) => setTimeout(settle, 20));
+  assert.equal(room.getLastEventSequence(), 5, 'events after the corrupt gap must remain blocked');
+  assert.equal(observed.includes('after-corrupt-8'), false);
+  assert.equal(
+    observed.includes('queued-after-corrupt-8'),
+    false,
+    'events queued while recovery is pending must be invalidated when recovery fails',
+  );
+  assert.equal(
+    MockWebSocket.instances.length,
+    3,
+    'corrupt retained recovery must suppress automatic reconnect loops',
+  );
+
   const metrics = room.getRequestMetrics();
   assert.ok(metrics.requestsStarted >= 3);
   assert.ok(metrics.requestsCompleted >= 1);
   assert.equal(metrics.requestsAborted, 1);
   assert.equal(metrics.revisionConflicts, 1);
-  assert.equal(metrics.reconnectAttempts, 1);
-  assert.equal(metrics.replayTruncations, 1);
+  assert.equal(metrics.reconnectAttempts, 2);
+  assert.equal(metrics.replayTruncations, 3);
   assert.equal(metrics.longRangeRecoveries, 1);
   assert.ok(metrics.replayedEvents >= 2);
   assert.equal(metrics.hiddenProjections, 1);
   assert.ok(recoveryDurationMs >= 0);
   assert.ok(states.some((state) => state.state === 'reconnecting'));
-  assert.equal(room.connectionDiagnostics.state, 'open');
+  assert.ok(states.some((state) => state.state === 'failed'));
   if (room.connectionDiagnostics.roundTripMs !== undefined)
     assert.ok(room.connectionDiagnostics.roundTripMs >= 0);
   room.close();
@@ -265,6 +383,9 @@ try {
           'abnormal disconnect and capped reconnect',
           'resume cursor propagation',
           'truncated replay durable recovery',
+          'transient durable replay gaps pin the cursor and reconnect without skipping',
+          'corrupt durable replay pins the cursor and fails the connection closed',
+          'events beyond a corrupt replay gap are ignored and automatic reconnect is suppressed',
           'event ordering and duplicate suppression',
           'request cancellation and revision-conflict metrics',
           'connection diagnostics, hidden-projection metrics, and observer isolation',

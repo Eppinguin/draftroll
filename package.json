@@ -46,7 +46,7 @@
     "test:generated-polyhedra": "node scripts/test-generated-polyhedra.mjs",
     "test:cards-demo": "node scripts/test-cards-demo.mjs && node scripts/test-deck-atomicity.mjs",
     "test:themes": "node scripts/test-runtime-themes.mjs",
-    "test:validation": "node scripts/test-runtime-validation.mjs",
+    "test:validation": "node scripts/test-runtime-validation.mjs && node scripts/test-protocol-boundary-safety.mjs",
     "test:hardening": "node scripts/test-room-hardening.mjs",
     "test:password": "node scripts/test-room-password.mjs",
     "test:tokens": "node scripts/test-token-security.mjs",
@@ -56,7 +56,7 @@
     "test:browser": "pnpm test:browser:build && playwright test",
     "test:browser:chromium": "pnpm test:browser:build && playwright test --project=chromium",
     "test:browser:install": "playwright install --with-deps chromium firefox webkit",
-    "test:all": "pnpm test:core && pnpm test:release && pnpm test:browser",
+    "test:all": "pnpm test:core && pnpm worker:test:local && pnpm test:release && pnpm test:browser",
     "test:browser:config": "node scripts/test-browser-automation.mjs",
     "test:performance": "node scripts/test-renderer-performance.mjs",
     "test:browser:performance": "pnpm test:browser:build && playwright test tests/browser/specs/performance.spec.ts --project=chromium",
@@ -106,7 +106,7 @@
     "vite": "^7.0.4"
   },
   "engines": {
-    "node": ">=22.12.0"
+    "node": ">=22.13.0"
   },
   "packageManager": "pnpm@11.17.0"
 }

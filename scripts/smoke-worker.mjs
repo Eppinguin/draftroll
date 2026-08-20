@@ -3,7 +3,10 @@ import { pathToFileURL } from 'node:url';
 
 const DEFAULT_BASE_URL = 'http://127.0.0.1:8787';
 
-export async function runSmoke(baseUrl = process.env.DRAFTROLL_BASE_URL ?? DEFAULT_BASE_URL) {
+export async function runSmoke(
+  baseUrl = process.env.DRAFTROLL_BASE_URL ?? DEFAULT_BASE_URL,
+  options = {},
+) {
   const normalizedBase = baseUrl.replace(/\/$/, '');
   const roomId = `local-smoke-${Date.now()}`;
 
@@ -27,20 +30,19 @@ export async function runSmoke(baseUrl = process.env.DRAFTROLL_BASE_URL ?? DEFAU
   assert.equal(ariaState.roomId, roomId);
   assert.equal(bramState.participants.length, 2);
 
-  aria.socket.send(
-    JSON.stringify({
-      type: 'roll_request',
-      requestId: 'public-mixed-roll',
-      clientRollId: 'attack-42',
-      visibility: { type: 'public' },
-      input: {
-        mode: 'evaluate',
-        name: 'Mara Voss',
-        expression: '1d20+1d8+2d6+5 [Mixed physical smoke test]',
-        metadata: { actionName: 'Mixed attack' },
-      },
-    }),
-  );
+  const publicRollRequest = {
+    type: 'roll_request',
+    requestId: 'public-mixed-roll',
+    clientRollId: 'attack-42',
+    visibility: { type: 'public' },
+    input: {
+      mode: 'evaluate',
+      name: 'Mara Voss',
+      expression: '1d20+1d8+2d6+5 [Mixed physical smoke test]',
+      metadata: { actionName: 'Mixed attack' },
+    },
+  };
+  aria.socket.send(JSON.stringify(publicRollRequest));
 
   const ariaPublic = await aria.messages.next(
     (event) => event.type === 'roll_start' && event.clientRollId === 'attack-42',
@@ -60,19 +62,18 @@ export async function runSmoke(baseUrl = process.env.DRAFTROLL_BASE_URL ?? DEFAU
     ['d20', 'd8', 'd6', 'd6'],
   );
 
-  aria.socket.send(
-    JSON.stringify({
-      type: 'roll_request',
-      requestId: 'secret-roll',
-      visibility: { type: 'roller' },
-      input: {
-        mode: 'evaluate',
-        name: 'Aria',
-        expression: '1d20+5',
-        metadata: { actionName: 'Secret check' },
-      },
-    }),
-  );
+  const secretRollRequest = {
+    type: 'roll_request',
+    requestId: 'secret-roll',
+    visibility: { type: 'roller' },
+    input: {
+      mode: 'evaluate',
+      name: 'Aria',
+      expression: '1d20+5',
+      metadata: { actionName: 'Secret check' },
+    },
+  };
+  aria.socket.send(JSON.stringify(secretRollRequest));
   const ariaSecret = await aria.messages.next(
     (event) => event.type === 'roll_start' && event.requestId === 'secret-roll',
   );
@@ -85,6 +86,47 @@ export async function runSmoke(baseUrl = process.env.DRAFTROLL_BASE_URL ?? DEFAU
   assert.equal(bramSecret.result, null);
   assert.equal(bramSecret.animationSeed, undefined);
   assert.equal(bramSecret.serverStartTimeMs, undefined);
+
+  const correlationRollRequest = {
+    type: 'roll_request',
+    requestId: 'correlation-roll',
+    visibility: { type: 'public' },
+    input: {
+      mode: 'evaluate',
+      name: 'Aria',
+      expression: '1d6',
+      metadata: { actionName: 'Correlation boundary' },
+    },
+  };
+  aria.socket.send(JSON.stringify(correlationRollRequest));
+  const ariaCorrelation = await aria.messages.next(
+    (event) => event.type === 'roll_start' && event.requestId === correlationRollRequest.requestId,
+  );
+
+  let corruptRecoverySequence;
+  if (options.prepareIdempotencyBoundary) {
+    await options.prepareIdempotencyBoundary({
+      roomId,
+      sessionId: 'aria-session',
+      publicEvent: ariaPublic,
+      secretEvent: ariaSecret,
+      correlationEvent: ariaCorrelation,
+    });
+
+    const eventsUrl = authorizedHttpUrl(normalizedBase, roomId, 'events', {
+      participantId: 'aria',
+      sessionId: 'aria-session',
+      name: 'Aria',
+    });
+    eventsUrl.searchParams.set('afterEventSequence', String(ariaSecret.eventSequence - 1));
+    eventsUrl.searchParams.set('limit', '10');
+    const blockedRecovery = await fetchJson(eventsUrl);
+    assert.equal(blockedRecovery.recoveryBlockedAtEventSequence, ariaSecret.eventSequence);
+    assert.equal(blockedRecovery.nextAfterEventSequence, ariaSecret.eventSequence - 1);
+    assert.equal(blockedRecovery.hasMore, true);
+    assert.deepEqual(blockedRecovery.events, []);
+    corruptRecoverySequence = blockedRecovery.recoveryBlockedAtEventSequence;
+  }
 
   bram.socket.send(
     JSON.stringify({
@@ -189,7 +231,7 @@ export async function runSmoke(baseUrl = process.env.DRAFTROLL_BASE_URL ?? DEFAU
   historyUrl.searchParams.set('limit', '10');
   const history = await poll(async () => {
     const response = await fetchJson(historyUrl);
-    return response.rolls?.length >= 3 ? response : null;
+    return response.rolls?.length >= 4 ? response : null;
   }, 5_000);
   const revealedHistory = history.rolls.find((entry) => entry.rollId === ariaSecret.rollId);
   assert.equal(revealedHistory.hidden, false);
@@ -220,6 +262,58 @@ export async function runSmoke(baseUrl = process.env.DRAFTROLL_BASE_URL ?? DEFAU
   );
   assert.equal(revisions.revisions[2].hidden, false);
 
+  let idempotencyReplayRoll;
+  let corruptReplayCode;
+  let mismatchedReplayCode;
+  if (options.prepareIdempotencyBoundary) {
+    // The local integration test runs with a 10-event Durable Object buffer. Enough new events
+    // force all prepared retained responses out of that buffer while request-cache entries remain.
+    for (let index = 0; index < 12; index += 1) {
+      const requestId = `idempotency-filler-${index}`;
+      aria.socket.send(
+        JSON.stringify({
+          type: 'roll_request',
+          requestId,
+          input: { mode: 'evaluate', name: 'Aria', expression: '1d4' },
+        }),
+      );
+      await aria.messages.next(
+        (event) => event.type === 'roll_start' && event.requestId === requestId,
+      );
+    }
+
+    aria.socket.send(JSON.stringify(publicRollRequest));
+    const replayedPublic = await aria.messages.next(
+      (event) =>
+        event.requestId === publicRollRequest.requestId &&
+        (event.type === 'roll_start' || event.type === 'roll_error'),
+    );
+    assert.equal(replayedPublic.type, 'roll_start');
+    assert.equal(replayedPublic.rollId, ariaPublic.rollId);
+    assert.equal(replayedPublic.replayed, true);
+    idempotencyReplayRoll = replayedPublic.rollId;
+
+    aria.socket.send(JSON.stringify(correlationRollRequest));
+    const rejectedMismatch = await aria.messages.next(
+      (event) =>
+        event.requestId === correlationRollRequest.requestId &&
+        (event.type === 'roll_start' || event.type === 'roll_error'),
+    );
+    assert.equal(rejectedMismatch.type, 'roll_error');
+    assert.equal(rejectedMismatch.code, 'idempotency_replay_unavailable');
+    mismatchedReplayCode = rejectedMismatch.code;
+
+    aria.socket.send(JSON.stringify(secretRollRequest));
+    const rejectedSecret = await aria.messages.next(
+      (event) =>
+        event.requestId === secretRollRequest.requestId &&
+        (event.type === 'roll_start' || event.type === 'roll_error'),
+    );
+    assert.equal(rejectedSecret.type, 'roll_error');
+    assert.equal(rejectedSecret.code, 'idempotency_replay_unavailable');
+    corruptReplayCode = rejectedSecret.code;
+  }
+
   aria.socket.close(1000, 'Smoke complete');
   bramReconnected.socket.close(1000, 'Smoke complete');
 
@@ -229,10 +323,15 @@ export async function runSmoke(baseUrl = process.env.DRAFTROLL_BASE_URL ?? DEFAU
     roomId,
     publicRoll: ariaPublic.rollId,
     secretRoll: ariaSecret.rollId,
+    correlationRoll: ariaCorrelation.rollId,
     revealedRevision: ariaReveal.result.revision,
     recoveredFromEventSequence: bramCursor,
     persistedRolls: history.rolls.length,
     persistedRevisions: revisions.revisions.length,
+    idempotencyReplayRoll,
+    corruptReplayCode,
+    mismatchedReplayCode,
+    corruptRecoverySequence,
   };
   console.log(JSON.stringify(summary, null, 2));
   return summary;

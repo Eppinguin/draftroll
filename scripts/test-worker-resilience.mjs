@@ -62,6 +62,24 @@ for (const marker of [
 ])
   assert.ok(worker.includes(marker), `durable recovery/diagnostics are missing ${marker}`);
 
+const durableEventsStart = worker.indexOf('private async getDurableEvents');
+const durableEventsEnd = worker.indexOf('private async getHistory', durableEventsStart);
+assert.ok(
+  durableEventsStart >= 0 && durableEventsEnd > durableEventsStart,
+  'durable replay handler is missing',
+);
+const durableEvents = worker.slice(durableEventsStart, durableEventsEnd);
+assert.match(
+  durableEvents,
+  /scanDurableReplayRows\(rows,\s*\{[\s\S]*?latestEventSequence[,\s]/,
+  'durable replay validation must receive the authoritative room event head',
+);
+assert.doesNotMatch(
+  durableEvents,
+  /JSON\.parse\(row\.event_json\)/,
+  'durable replay must consume the event parsed by its integrity scan',
+);
+
 for (const marker of [
   'maximumInboundMessageBytes',
   'unsupported_protocol_version',
