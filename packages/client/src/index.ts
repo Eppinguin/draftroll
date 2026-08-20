@@ -1,7 +1,17 @@
-export * from './implementation';
+/**
+ * Realtime room client for synchronized Draftroll sessions.
+ *
+ * @remarks
+ * Exposes the client implementation through a transport boundary that keeps durable recovery
+ * bounded and prevents an affected socket from advancing past an unresolved replay gap.
+ *
+ * @packageDocumentation
+ */
 
 import { parseRuntimeJson } from '../../protocol/src/index';
 import { DiceRoom as CoreDiceRoom, type DiceRoomOptions } from './implementation';
+
+export * from './implementation';
 
 const LONG_RANGE_RECOVERY_MAXIMUM_RESPONSE_BYTES = 8 * 1024 * 1024;
 const LONG_RANGE_RECOVERY_DEFAULT_PAGE_LIMIT = 1_000;
@@ -109,8 +119,17 @@ function createRecoveryFetch(
     let url = initialUrl;
     let pageLimit = readPageLimit(url.searchParams.get('limit'));
     while (true) {
-      const response = await fetchImpl(url, init);
-      if (!response.ok) return response;
+      let response: Response;
+      try {
+        response = await fetchImpl(url, init);
+      } catch (error) {
+        blockRecoverably(state);
+        throw error;
+      }
+      if (!response.ok) {
+        blockRecoverably(state);
+        return response;
+      }
 
       let raw: Uint8Array;
       try {
