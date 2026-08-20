@@ -11,7 +11,27 @@
 import { parseRuntimeJson } from '../../protocol/src/index';
 import { DiceRoom as CoreDiceRoom, type DiceRoomOptions } from './implementation';
 
-export * from './implementation';
+export * from './diagnostics';
+export {
+  DiceRoomConnectionError,
+  DiceRoomPasswordError,
+  DiceRoomPasswordRequiredError,
+  DiceRoomProtocolError,
+  DiceRoomRequestError,
+  DiceRoomTokenError,
+  DiceRoomTokenRequiredError,
+  synchronizeRoomEvent,
+  type DiceRoomEvents,
+  type DiceRoomOptions,
+  type DiceRoomRequestMetrics,
+  type SynchronizedRollStart,
+  type SynchronizedRollUpdate,
+  type SynchronizedVisibilityUpdate,
+  type SynchronizedRoomPolicyUpdate,
+  type SynchronizedRoomTokenRevocation,
+  type SynchronizedRoomRollEvent,
+  type SynchronizedRoomEvent,
+} from './implementation';
 
 const LONG_RANGE_RECOVERY_MAXIMUM_RESPONSE_BYTES = 8 * 1024 * 1024;
 const LONG_RANGE_RECOVERY_DEFAULT_PAGE_LIMIT = 1_000;
@@ -30,15 +50,6 @@ interface RecoveryTransportState {
   socket: WebSocket | null;
 }
 
-type CoreHandleMessage = (this: object, raw: unknown) => Promise<void>;
-
-// `handleMessage` is an implementation detail. The facade only gates invocation; decoding and state
-// mutation remain owned by the core implementation.
-// oxlint-disable-next-line typescript/no-unsafe-type-assertion
-const coreHandleMessage = (
-  CoreDiceRoom.prototype as unknown as { handleMessage: CoreHandleMessage }
-).handleMessage;
-
 /**
  * Maintains a validated, recoverable connection to a Draftroll room.
  *
@@ -49,12 +60,9 @@ const coreHandleMessage = (
  * @public
  */
 export class DiceRoom extends DiceRoomBase {
-  private readonly recoveryTransportState: RecoveryTransportState;
-
   private constructor(options: DiceRoomOptions) {
     const state = createRecoveryTransportState();
     super(withRecoveryTransportBoundary(options, state));
-    this.recoveryTransportState = state;
   }
 
   /** Creates and opens a validated realtime room connection. */
@@ -62,11 +70,6 @@ export class DiceRoom extends DiceRoomBase {
     const room = new DiceRoom(options);
     await room.connect(options.signal);
     return room;
-  }
-
-  private handleMessage(raw: unknown): Promise<void> {
-    if (this.recoveryTransportState.blocked) return Promise.resolve();
-    return coreHandleMessage.call(this, raw);
   }
 }
 
@@ -103,6 +106,23 @@ function createRecoveryWebSocket(
         },
         { once: true },
       );
+    }
+
+    override addEventListener(
+      type: string,
+      listener: EventListenerOrEventListenerObject | null,
+      options?: boolean | AddEventListenerOptions,
+    ): void {
+      if (type !== 'message' || listener === null) {
+        super.addEventListener(type, listener, options);
+        return;
+      }
+      const guardedListener: EventListener = (event) => {
+        if (state.blocked) return;
+        if (typeof listener === 'function') listener.call(this, event);
+        else listener.handleEvent(event);
+      };
+      super.addEventListener(type, guardedListener, options);
     }
   }
   return RecoveryWebSocket;
@@ -191,32 +211,41 @@ interface RecoveryInspection {
   stalled: boolean;
 }
 
+function corruptRecoveryInspection(
+  eventSequence: number,
+  reason: string,
+  latestEventSequence?: number,
+): RecoveryInspection {
+  return {
+    latestEventSequence,
+    corruptAtEventSequence: eventSequence,
+    reason,
+    stalled: false,
+  };
+}
+
 function inspectRecoveryEnvelope(
   value: unknown,
   requestUrlValue: URL,
   pageLimit: number,
 ): RecoveryInspection {
   const requestedAfter = readRequestedCursor(requestUrlValue);
-  const corrupt = (
-    eventSequence: number,
-    reason: string,
-    latestEventSequence?: number,
-  ): RecoveryInspection => ({
-    latestEventSequence,
-    corruptAtEventSequence: eventSequence,
-    reason,
-    stalled: false,
-  });
 
   if (!isRecord(value)) {
-    return corrupt(nextSequence(requestedAfter), 'Durable recovery response is not an object');
+    return corruptRecoveryInspection(
+      nextSequence(requestedAfter),
+      'Durable recovery response is not an object',
+    );
   }
   const envelope = value;
 
   if (envelope.roomId !== undefined) {
     const expectedRoomId = roomIdFromRecoveryUrl(requestUrlValue);
     if (typeof envelope.roomId !== 'string' || envelope.roomId !== expectedRoomId) {
-      return corrupt(nextSequence(requestedAfter), 'Durable recovery room identity does not match');
+      return corruptRecoveryInspection(
+        nextSequence(requestedAfter),
+        'Durable recovery room identity does not match',
+      );
     }
   }
   if (
@@ -224,13 +253,16 @@ function inspectRecoveryEnvelope(
     (!isNonNegativeSafeInteger(envelope.afterEventSequence) ||
       envelope.afterEventSequence !== requestedAfter)
   ) {
-    return corrupt(
+    return corruptRecoveryInspection(
       nextSequence(requestedAfter),
       'Durable recovery cursor does not match the request',
     );
   }
   if (envelope.hasMore !== undefined && typeof envelope.hasMore !== 'boolean') {
-    return corrupt(nextSequence(requestedAfter), 'Durable recovery hasMore flag is invalid');
+    return corruptRecoveryInspection(
+      nextSequence(requestedAfter),
+      'Durable recovery hasMore flag is invalid',
+    );
   }
 
   const latestEventSequence =
@@ -240,10 +272,13 @@ function inspectRecoveryEnvelope(
         ? envelope.latestEventSequence
         : null;
   if (latestEventSequence === null) {
-    return corrupt(nextSequence(requestedAfter), 'Durable recovery room head is invalid');
+    return corruptRecoveryInspection(
+      nextSequence(requestedAfter),
+      'Durable recovery room head is invalid',
+    );
   }
   if (latestEventSequence !== undefined && requestedAfter > latestEventSequence) {
-    return corrupt(
+    return corruptRecoveryInspection(
       nextSequence(latestEventSequence),
       'Durable recovery cursor advances beyond the room head',
       latestEventSequence,
@@ -257,14 +292,14 @@ function inspectRecoveryEnvelope(
         ? envelope.nextAfterEventSequence
         : null;
   if (nextAfterEventSequence === null) {
-    return corrupt(
+    return corruptRecoveryInspection(
       nextSequence(requestedAfter),
       'Durable recovery next cursor is invalid',
       latestEventSequence,
     );
   }
   if (nextAfterEventSequence !== undefined && nextAfterEventSequence < requestedAfter) {
-    return corrupt(
+    return corruptRecoveryInspection(
       nextSequence(requestedAfter),
       'Durable recovery cursor moved backwards',
       latestEventSequence,
@@ -275,7 +310,7 @@ function inspectRecoveryEnvelope(
     latestEventSequence !== undefined &&
     nextAfterEventSequence > latestEventSequence
   ) {
-    return corrupt(
+    return corruptRecoveryInspection(
       nextSequence(latestEventSequence),
       'Durable recovery next cursor advances beyond the room head',
       latestEventSequence,
@@ -283,7 +318,7 @@ function inspectRecoveryEnvelope(
   }
 
   if (envelope.events !== undefined && !Array.isArray(envelope.events)) {
-    return corrupt(
+    return corruptRecoveryInspection(
       nextSequence(requestedAfter),
       'Durable recovery events must be an array',
       latestEventSequence,
@@ -291,7 +326,7 @@ function inspectRecoveryEnvelope(
   }
   const events = envelope.events ?? [];
   if (events.length > pageLimit) {
-    return corrupt(
+    return corruptRecoveryInspection(
       nextSequence(requestedAfter),
       `Durable recovery returned ${events.length} events for a page limit of ${pageLimit}`,
       latestEventSequence,
@@ -301,21 +336,21 @@ function inspectRecoveryEnvelope(
   let lastVisibleEventSequence = requestedAfter;
   for (const event of events) {
     if (!isRecord(event) || !isPositiveSafeInteger(event.eventSequence)) {
-      return corrupt(
+      return corruptRecoveryInspection(
         nextSequence(lastVisibleEventSequence),
         'Durable recovery event has an invalid sequence',
         latestEventSequence,
       );
     }
     if (event.eventSequence <= lastVisibleEventSequence) {
-      return corrupt(
+      return corruptRecoveryInspection(
         nextSequence(lastVisibleEventSequence),
         'Durable recovery events are duplicated or out of order',
         latestEventSequence,
       );
     }
     if (latestEventSequence !== undefined && event.eventSequence > latestEventSequence) {
-      return corrupt(
+      return corruptRecoveryInspection(
         event.eventSequence,
         'Durable recovery event advances beyond the room head',
         latestEventSequence,
@@ -326,7 +361,7 @@ function inspectRecoveryEnvelope(
 
   const derivedNext = nextAfterEventSequence ?? lastVisibleEventSequence;
   if (derivedNext < lastVisibleEventSequence) {
-    return corrupt(
+    return corruptRecoveryInspection(
       nextSequence(derivedNext),
       'Durable recovery next cursor does not cover its visible events',
       latestEventSequence,
@@ -340,7 +375,7 @@ function inspectRecoveryEnvelope(
         ? envelope.recoveryBlockedAtEventSequence
         : null;
   if (recoveryBlockedAtEventSequence === null) {
-    return corrupt(
+    return corruptRecoveryInspection(
       nextSequence(requestedAfter),
       'Durable recovery corruption marker is invalid',
       latestEventSequence,
