@@ -39,6 +39,7 @@ import {
   type RoomStateEvent,
   type ServerToClientEvent,
 } from '@draftroll/protocol';
+import { findDurableReplayIssue, sanitizeEventBuffer } from './replay-integrity';
 
 interface Env {
   DICE_ROOMS: DurableObjectNamespace<DiceRoomObject>;
@@ -2027,10 +2028,33 @@ export class DiceRoomObject {
       .bind(roomId)
       .all<RoomEventRow>();
     const latest = await this.getEventSequence();
+    const earliestSequence = earliest.results?.[0]?.event_sequence ?? latest + 1;
+    const rows = query.results ?? [];
+    const replayIssue = findDurableReplayIssue(rows, {
+      roomId,
+      afterEventSequence,
+      earliestEventSequence: earliestSequence,
+    });
+    if (replayIssue?.kind === 'gap') {
+      this.logStructured('room.replay_persistence_stalled', {
+        source: 'd1_replay',
+        roomId,
+        eventSequence: replayIssue.eventSequence,
+      });
+    } else if (replayIssue?.kind === 'corrupt') {
+      this.logStructured('room.event_storage_invalid', {
+        source: 'd1_replay',
+        eventSequence: replayIssue.eventSequence,
+        message: replayIssue.reason,
+      });
+    }
+
+    const trustedRows = replayIssue ? rows.slice(0, replayIssue.rowIndex) : rows;
     const events: RoomReplayEvent[] = [];
     let nextAfterEventSequence = afterEventSequence;
-    let recoveryBlockedAtEventSequence: number | undefined;
-    for (const row of query.results ?? []) {
+    let recoveryBlockedAtEventSequence =
+      replayIssue?.kind === 'corrupt' ? replayIssue.eventSequence : undefined;
+    for (const row of trustedRows) {
       let internal: InternalRoomEvent;
       try {
         // Deserializes rows this Durable Object previously serialized itself.
@@ -2052,14 +2076,16 @@ export class DiceRoomObject {
       const projected = projectInternalEvent(internal, participant, true);
       if (projected) events.push(projected);
     }
-    const earliestSequence = earliest.results?.[0]?.event_sequence ?? latest + 1;
     return {
       roomId,
       afterEventSequence,
       nextAfterEventSequence,
       earliestEventSequence: earliestSequence,
       latestEventSequence: latest,
-      hasMore: recoveryBlockedAtEventSequence !== undefined || nextAfterEventSequence < latest,
+      hasMore:
+        replayIssue !== null ||
+        recoveryBlockedAtEventSequence !== undefined ||
+        nextAfterEventSequence < latest,
       truncated: afterEventSequence > 0 && afterEventSequence < earliestSequence - 1,
       recoveryBlockedAtEventSequence,
       events,
@@ -2450,8 +2476,17 @@ export class DiceRoomObject {
     if (this.eventBufferCache !== null) return [...this.eventBufferCache];
 
     const stored = await this.state.storage.get('eventBuffer');
+    const latestEventSequence = await this.getEventSequence();
     if (stored === undefined) {
-      if ((await this.getEventBufferRecoverySequence()) !== null) {
+      if (latestEventSequence > 0) {
+        const recoverySequence = Math.max(1, latestEventSequence);
+        await this.markEventBufferRecoveryRequired(recoverySequence);
+        this.logStructured('room.event_storage_invalid', {
+          source: 'durable_object_buffer',
+          recoverySequence,
+          message: 'Stored event buffer is missing while the room has retained event history',
+        });
+      } else if ((await this.getEventBufferRecoverySequence()) !== null) {
         this.eventBufferRecoverySequenceCache = null;
         await this.state.storage.delete('eventBufferRecoverySequence');
       }
@@ -2459,20 +2494,24 @@ export class DiceRoomObject {
       return [];
     }
 
-    const latestEventSequence = await this.getEventSequence();
-    if (!Array.isArray(stored)) {
+    const roomId = (await this.state.storage.get<string>('roomId')) ?? this.state.id.toString();
+    const sanitized = sanitizeEventBuffer(stored, roomId, latestEventSequence);
+    if (sanitized.changed && sanitized.recoverySequence !== null) {
+      await this.markEventBufferRecoveryRequired(sanitized.recoverySequence);
       this.logStructured('room.event_storage_invalid', {
         source: 'durable_object_buffer',
-        message: 'Stored event buffer is not an array',
+        recoverySequence: sanitized.recoverySequence,
+        message: sanitized.reason ?? 'Stored event buffer failed replay-integrity checks',
       });
-      await this.markEventBufferRecoveryRequired(Math.max(1, latestEventSequence));
+      // Once continuity is uncertain, quarantine the hot buffer completely. New events rebuild a
+      // contiguous tail while the recovery marker forces clients onto the durable replay path.
+      await this.state.storage.put('eventBuffer', []);
       this.eventBufferCache = [];
       return [];
     }
 
     const events: InternalRoomEvent[] = [];
-    let recoverySequence: number | undefined;
-    for (const [index, event] of stored.entries()) {
+    for (const [index, event] of sanitized.events.entries()) {
       const eventSequence =
         isRecord(event) &&
         typeof event.eventSequence === 'number' &&
@@ -2483,20 +2522,20 @@ export class DiceRoomObject {
       try {
         events.push(migrateStoredInternalEvent(event));
       } catch (error) {
-        const candidate = eventSequence ?? Math.max(1, latestEventSequence);
-        recoverySequence =
-          recoverySequence === undefined ? candidate : Math.min(recoverySequence, candidate);
+        const recoverySequence =
+          eventSequence ?? events.at(-1)?.eventSequence + 1 ?? Math.max(1, latestEventSequence);
+        await this.markEventBufferRecoveryRequired(recoverySequence);
         this.logStructured('room.event_storage_invalid', {
           source: 'durable_object_buffer',
           index,
           eventSequence,
-          recoverySequence: candidate,
+          recoverySequence,
           message: asError(error).message,
         });
+        await this.state.storage.put('eventBuffer', []);
+        this.eventBufferCache = [];
+        return [];
       }
-    }
-    if (recoverySequence !== undefined) {
-      await this.markEventBufferRecoveryRequired(recoverySequence);
     }
     this.eventBufferCache = events;
     return [...events];
@@ -2585,6 +2624,7 @@ export class DiceRoomObject {
     roomId: string,
     sessionId: string,
     requestId: string,
+    expectedEventSequence: number,
   ): InternalRoomEvent {
     const requesterSessionId =
       event.type === 'bulk_rolls_updated'
@@ -2595,6 +2635,7 @@ export class DiceRoomObject {
             (event.type === 'roll_start' ? event.actor.sessionId : undefined));
     if (
       event.roomId === roomId &&
+      event.eventSequence === expectedEventSequence &&
       event.requestId === requestId &&
       requesterSessionId === sessionId
     ) {
@@ -2602,7 +2643,8 @@ export class DiceRoomObject {
     }
 
     this.logStructured('room.idempotency_replay_mismatch', {
-      eventSequence: event.eventSequence,
+      expectedEventSequence,
+      actualEventSequence: event.eventSequence,
       expectedRoomId: roomId,
       actualRoomId: event.roomId,
       expectedRequestId: requestId,
@@ -2629,7 +2671,13 @@ export class DiceRoomObject {
         (event) => event.eventSequence === match.eventSequence,
       );
       if (buffered) {
-        return this.assertIdempotencyReplayMatches(buffered, roomId, sessionId, requestId);
+        return this.assertIdempotencyReplayMatches(
+          buffered,
+          roomId,
+          sessionId,
+          requestId,
+          match.eventSequence,
+        );
       }
     }
 
@@ -2679,7 +2727,13 @@ export class DiceRoomObject {
     try {
       // Deserializes storage this Durable Object previously serialized itself.
       const internal = migrateStoredInternalEvent(JSON.parse(serialized));
-      return this.assertIdempotencyReplayMatches(internal, roomId, sessionId, requestId);
+      return this.assertIdempotencyReplayMatches(
+        internal,
+        roomId,
+        sessionId,
+        requestId,
+        eventSequence,
+      );
     } catch (error) {
       if (error instanceof RoomOperationError) throw error;
       this.logStructured('room.event_storage_invalid', {
