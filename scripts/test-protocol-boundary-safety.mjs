@@ -182,10 +182,24 @@ try {
   assert.equal(getterDecode.success, true);
   assert.equal(getterReads, 1, 'caller-owned accessors must be evaluated at most once');
 
+  const hostileInheritedPrototype = new Proxy(Object.create(null), {
+    ownKeys() {
+      throw new Error('inherited keys must not be enumerated at the public boundary');
+    },
+  });
+  const inheritedVisibility = Object.create(hostileInheritedPrototype);
+  inheritedVisibility.type = 'public';
+  assert.equal(
+    callWithoutThrow(() => protocol.decodeRollVisibility(inheritedVisibility)).success,
+    true,
+    'public boundary traversal must enumerate bounded own keys only',
+  );
+
   const replayWindow = {
     roomId: 'room',
     afterEventSequence: 9,
     earliestEventSequence: 1,
+    latestEventSequence: 12,
   };
 
   const bufferGap = replayIntegrity.sanitizeEventBuffer(
@@ -237,6 +251,20 @@ try {
     null,
     'a missing D1 tail may be asynchronous persistence lag',
   );
+  assert.deepEqual(
+    replayIntegrity.findDurableReplayIssue(
+      [replayRow(13)],
+      { ...replayWindow, afterEventSequence: 12 },
+    ),
+    {
+      kind: 'corrupt',
+      eventSequence: 13,
+      rowIndex: 0,
+      reason: 'D1 replay row advances beyond the room event sequence',
+    },
+    'D1 rows beyond the Durable Object room head must fail closed',
+  );
+
   const stalledReplay = replayIntegrity.stallReplayEnvelope(
     {
       afterEventSequence: 9,
@@ -297,8 +325,9 @@ try {
           'spoofed Symbol.toStringTag values cannot bypass the plain-object boundary',
           'oversized object graphs fail before structured cloning',
           'caller-owned accessors are read at most once before detailed validation',
+          'runtime boundaries enumerate bounded own keys without scanning hostile prototypes',
           'Durable Object replay buffers stop at gaps, room mismatches, and stale tails',
-          'D1 replay gaps stall without advancing while corrupt row identities fail closed',
+          'D1 replay gaps stall without advancing while corrupt row identities and future rows fail closed',
           'parse/type-guard helpers remain non-throwing',
           'successful public boundary decodes return detached data',
         ],
