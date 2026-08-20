@@ -17,8 +17,8 @@ export interface DurableReplayWindow {
 }
 
 export type DurableReplayIssue =
-  | { kind: 'gap'; eventSequence: number }
-  | { kind: 'corrupt'; eventSequence: number; reason: string };
+  | { kind: 'gap'; eventSequence: number; rowIndex: number }
+  | { kind: 'corrupt'; eventSequence: number; rowIndex: number; reason: string };
 
 export interface EventBufferSanitization {
   events: unknown[];
@@ -132,7 +132,9 @@ export function sanitizeEventBuffer(
   if (latestEventSequence > 0 && previousSequence !== latestEventSequence) {
     return failedBuffer(
       [...stored],
-      previousSequence === undefined ? fallbackRecoverySequence(latestEventSequence) : previousSequence + 1,
+      previousSequence === undefined
+        ? fallbackRecoverySequence(latestEventSequence)
+        : previousSequence + 1,
       'Stored event buffer does not reach the room event sequence',
     );
   }
@@ -153,10 +155,11 @@ function parseStoredReplayEvent(row: DurableReplayRow): Record<string, unknown> 
 /**
  * Returns the first D1 replay sequence that is absent or cannot be trusted.
  *
- * A gap before the earliest retained row is expected retention truncation. A gap inside the
- * retained range is treated as a recoverable persistence stall because event writes are
- * asynchronous. Invalid row identities, duplicate/reordered rows, and malformed serialized events
- * are corruption and fail closed.
+ * `rowIndex` is the number of leading rows that are safe to consume before the issue. A gap before
+ * the earliest retained row is expected retention truncation. A gap inside the retained range is
+ * treated as a recoverable persistence stall because event writes are asynchronous. Invalid row
+ * identities, duplicate/reordered rows, and malformed serialized events are corruption and fail
+ * closed.
  */
 export function findDurableReplayIssue(
   rows: readonly DurableReplayRow[],
@@ -169,21 +172,23 @@ export function findDurableReplayIssue(
       ? Math.max(1, window.earliestEventSequence)
       : window.afterEventSequence + 1;
 
-  for (const row of rows) {
+  for (const [rowIndex, row] of rows.entries()) {
     if (!isPositiveSafeInteger(row.event_sequence)) {
       return {
         kind: 'corrupt',
         eventSequence: expectedSequence,
+        rowIndex,
         reason: 'D1 replay row has an invalid event sequence',
       };
     }
     if (row.event_sequence > expectedSequence) {
-      return { kind: 'gap', eventSequence: expectedSequence };
+      return { kind: 'gap', eventSequence: expectedSequence, rowIndex };
     }
     if (row.event_sequence < expectedSequence) {
       return {
         kind: 'corrupt',
         eventSequence: expectedSequence,
+        rowIndex,
         reason: 'D1 replay rows are duplicated or out of order',
       };
     }
@@ -193,6 +198,7 @@ export function findDurableReplayIssue(
       return {
         kind: 'corrupt',
         eventSequence: row.event_sequence,
+        rowIndex,
         reason: 'D1 replay row does not contain a valid serialized event object',
       };
     }
@@ -200,6 +206,7 @@ export function findDurableReplayIssue(
       return {
         kind: 'corrupt',
         eventSequence: row.event_sequence,
+        rowIndex,
         reason: 'D1 replay row room identity does not match its query scope',
       };
     }
@@ -207,6 +214,7 @@ export function findDurableReplayIssue(
       return {
         kind: 'corrupt',
         eventSequence: row.event_sequence,
+        rowIndex,
         reason: 'D1 replay row sequence does not match its serialized event',
       };
     }
