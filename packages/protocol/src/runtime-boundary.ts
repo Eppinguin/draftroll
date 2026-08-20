@@ -7,9 +7,9 @@
  * time-of-check/time-of-use-mutated object graph.
  */
 
-import * as runtime from './runtime';
+import * as runtime from './runtime-internal';
 import type { NormalizedRollResult, RollVisibility, ServerToClientEvent } from './index';
-import type { DecodeOptions, DecodeResult, RuntimeValidationLimits } from './runtime';
+import type { DecodeOptions, DecodeResult, RuntimeValidationLimits } from './runtime-internal';
 
 const BOUNDARY_DEPTH_MARGIN = 16;
 const BOUNDARY_MINIMUM_NODE_BUDGET = 16_384;
@@ -218,7 +218,8 @@ function snapshotBoundaryValue(value: unknown, options: DecodeOptions): DecodeRe
       );
     }
 
-    const target: object = array ? new Array(candidate.length) : {};
+    const target: object = array ? [] : {};
+    if (Array.isArray(target)) target.length = candidate.length;
     snapshots.set(candidate, target);
     active.add(candidate);
     const containerFailure = addBoundaryBytes(budget, 2 + (array ? candidate.length : 0));

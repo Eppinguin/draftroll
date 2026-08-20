@@ -32,6 +32,21 @@ function assertBoundaryFailure(decoded, label) {
   );
 }
 
+function replayEvent(eventSequence, roomId = 'room') {
+  return {
+    roomId,
+    eventSequence,
+    type: 'roll_start',
+  };
+}
+
+function replayRow(eventSequence, body = replayEvent(eventSequence)) {
+  return {
+    event_sequence: eventSequence,
+    event_json: JSON.stringify(body),
+  };
+}
+
 try {
   await writeFile(
     configPath,
@@ -157,15 +172,6 @@ try {
   assert.equal(getterDecode.success, true);
   assert.equal(getterReads, 1, 'caller-owned accessors must be evaluated at most once');
 
-  const replayEvent = (eventSequence, roomId = 'room') => ({
-    roomId,
-    eventSequence,
-    type: 'roll_start',
-  });
-  const replayRow = (eventSequence, body = replayEvent(eventSequence)) => ({
-    event_sequence: eventSequence,
-    event_json: JSON.stringify(body),
-  });
   const replayWindow = {
     roomId: 'room',
     afterEventSequence: 9,
