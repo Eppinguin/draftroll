@@ -596,7 +596,7 @@ export class DiceRoom {
     const event = await this.dispatchRequest(
       requestId,
       {
-        type: 'bulk_rolls_updated',
+        type: 'bulk_update_rolls',
         requestId,
         updates: updates.map((update) => ({ ...update })),
       },
