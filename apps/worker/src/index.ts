@@ -2465,7 +2465,13 @@ export class DiceRoomObject {
     const recoverySequence = await this.getEventBufferRecoverySequence();
     if (recoverySequence === null) return;
     const eventBufferStartSequence = events[0]?.eventSequence;
-    if (eventBufferStartSequence === undefined || eventBufferStartSequence <= recoverySequence) {
+    const eventBufferEndSequence = events.at(-1)?.eventSequence;
+    if (
+      eventBufferStartSequence === undefined ||
+      eventBufferEndSequence === undefined ||
+      eventBufferStartSequence > recoverySequence ||
+      eventBufferEndSequence < recoverySequence
+    ) {
       return;
     }
     this.eventBufferRecoverySequenceCache = null;
@@ -2522,8 +2528,12 @@ export class DiceRoomObject {
       try {
         events.push(migrateStoredInternalEvent(event));
       } catch (error) {
+        const previousEventSequence = events.at(-1)?.eventSequence;
         const recoverySequence =
-          eventSequence ?? events.at(-1)?.eventSequence + 1 ?? Math.max(1, latestEventSequence);
+          eventSequence ??
+          (previousEventSequence === undefined
+            ? Math.max(1, latestEventSequence)
+            : previousEventSequence + 1);
         await this.markEventBufferRecoveryRequired(recoverySequence);
         this.logStructured('room.event_storage_invalid', {
           source: 'durable_object_buffer',
