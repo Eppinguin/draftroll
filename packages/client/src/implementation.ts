@@ -3,8 +3,6 @@
  *
  * @remarks
  * Connects to a Draftroll room, validates protocol messages, recovers missed events, and exposes synchronized roll operations.
- *
- * @packageDocumentation
  */
 
 import {
@@ -598,7 +596,7 @@ export class DiceRoom {
     const event = await this.dispatchRequest(
       requestId,
       {
-        type: 'bulk_update_rolls',
+        type: 'bulk_rolls_updated',
         requestId,
         updates: updates.map((update) => ({ ...update })),
       },
