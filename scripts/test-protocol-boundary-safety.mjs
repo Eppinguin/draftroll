@@ -212,13 +212,14 @@ try {
 
   assert.deepEqual(
     replayIntegrity.findDurableReplayIssue([replayRow(10), replayRow(12)], replayWindow),
-    { kind: 'gap', eventSequence: 11 },
+    { kind: 'gap', eventSequence: 11, rowIndex: 1 },
   );
   assert.deepEqual(
     replayIntegrity.findDurableReplayIssue([replayRow(10, replayEvent(99))], replayWindow),
     {
       kind: 'corrupt',
       eventSequence: 10,
+      rowIndex: 0,
       reason: 'D1 replay row sequence does not match its serialized event',
     },
   );
@@ -227,6 +228,7 @@ try {
     {
       kind: 'corrupt',
       eventSequence: 10,
+      rowIndex: 0,
       reason: 'D1 replay row room identity does not match its query scope',
     },
   );
