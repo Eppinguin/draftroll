@@ -16,7 +16,7 @@ if (compile.status !== 0) {
 
 const packageNames = new Set(await readdir(packagesRoot));
 
-function rewriteSpecifier(specifier, outputExtension, fromPath) {
+function rewriteSpecifier(specifier, fromPath) {
   if (!specifier.startsWith('.')) return specifier;
 
   const resolvedTarget = resolve(dirname(fromPath), specifier);
@@ -31,23 +31,16 @@ function rewriteSpecifier(specifier, outputExtension, fromPath) {
   }
 
   if (extname(specifier)) return specifier;
-  return `${specifier}${outputExtension}`;
+  return `${specifier}.js`;
 }
 
 async function rewriteFile(path) {
-  const outputExtension = path.endsWith('.d.ts') ? '.js' : '.js';
   const source = await readFile(path, 'utf8');
-  const rewritten = source
-    .replace(
-      /(\bfrom\s+|\bimport\s*\(\s*|\bimport\s+)(["'])([^"']+)\2/g,
-      (match, prefix, quote, specifier) =>
-        `${prefix}${quote}${rewriteSpecifier(specifier, outputExtension, path)}${quote}`,
-    )
-    .replace(
-      /(\bexport\s+\*\s+from\s+)(["'])([^"']+)\2/g,
-      (match, prefix, quote, specifier) =>
-        `${prefix}${quote}${rewriteSpecifier(specifier, outputExtension, path)}${quote}`,
-    );
+  const rewritten = source.replace(
+    /(\bfrom\s+|\bimport\s*\(\s*|\bimport\s+)(["'])([^"']+)\2/g,
+    (match, prefix, quote, specifier) =>
+      `${prefix}${quote}${rewriteSpecifier(specifier, path)}${quote}`,
+  );
   await writeFile(path, rewritten);
 }
 

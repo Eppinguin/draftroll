@@ -5,6 +5,9 @@
  * remains the canonical structural decoder for event payloads.
  */
 
+const MAXIMUM_STORED_REPLAY_EVENT_BYTES = 512 * 1024;
+const encoder = new TextEncoder();
+
 export interface DurableReplayRow {
   event_sequence: unknown;
   event_json: unknown;
@@ -54,21 +57,19 @@ function fallbackRecoverySequence(latestEventSequence: number): number {
   return Math.max(1, latestEventSequence);
 }
 
-function failedBuffer(
-  prefix: unknown[],
-  recoverySequence: number,
-  reason: string,
-): EventBufferSanitization {
-  return { events: prefix, recoverySequence, changed: true, reason };
+function failedBuffer(recoverySequence: number, reason: string): EventBufferSanitization {
+  // The Durable Object caller intentionally quarantines the whole hot buffer once continuity is
+  // uncertain. Returning a prefix here suggested a recovery contract the caller could not safely
+  // honor and caused two different notions of "sanitized" state.
+  return { events: [], recoverySequence, changed: true, reason };
 }
 
 /**
- * Keeps only the contiguous, room-correlated prefix of a persisted Durable Object event buffer.
+ * Validates a persisted Durable Object event buffer as one contiguous room-local snapshot.
  *
- * The first invalid slot becomes the recovery marker. Events after that slot are deliberately
- * discarded from the hot buffer so clients can only recover them through the durable replay path.
- * A persisted hot buffer must also reach the current room head; otherwise callers could mistake a
- * stale but internally contiguous snapshot for complete replay coverage.
+ * The hot buffer is all-or-quarantine: if any slot is invalid, discontinuous, belongs to another
+ * room, advances beyond the room head, or fails to reach that head, no prefix is returned. The
+ * first untrusted sequence becomes the durable-recovery marker.
  */
 export function sanitizeEventBuffer(
   stored: unknown,
@@ -78,20 +79,16 @@ export function sanitizeEventBuffer(
   if (stored === undefined) return { events: [], recoverySequence: null, changed: false };
   if (!Array.isArray(stored)) {
     return failedBuffer(
-      [],
       fallbackRecoverySequence(latestEventSequence),
       'Stored event buffer is not an array',
     );
   }
 
-  const prefix: unknown[] = [];
   let previousSequence: number | undefined;
-
   for (const event of stored) {
     const expectedSequence = previousSequence === undefined ? undefined : previousSequence + 1;
     if (!isRecord(event)) {
       return failedBuffer(
-        prefix,
         expectedSequence ?? fallbackRecoverySequence(latestEventSequence),
         'Stored event buffer contains a non-object event',
       );
@@ -100,40 +97,31 @@ export function sanitizeEventBuffer(
     const sequence = event.eventSequence;
     if (!isPositiveSafeInteger(sequence)) {
       return failedBuffer(
-        prefix,
         expectedSequence ?? fallbackRecoverySequence(latestEventSequence),
         'Stored event buffer contains an invalid event sequence',
       );
     }
     if (event.roomId !== roomId) {
-      return failedBuffer(
-        prefix,
-        sequence,
-        'Stored event buffer contains an event for another room',
-      );
+      return failedBuffer(sequence, 'Stored event buffer contains an event for another room');
     }
     if (sequence > latestEventSequence) {
       return failedBuffer(
-        prefix,
         expectedSequence ?? fallbackRecoverySequence(latestEventSequence),
         'Stored event buffer advances beyond the room event sequence',
       );
     }
     if (expectedSequence !== undefined && sequence !== expectedSequence) {
       return failedBuffer(
-        prefix,
         expectedSequence,
         'Stored event buffer contains a sequence gap, duplicate, or reordering',
       );
     }
 
-    prefix.push(event);
     previousSequence = sequence;
   }
 
   if (latestEventSequence > 0 && previousSequence !== latestEventSequence) {
     return failedBuffer(
-      [...stored],
       previousSequence === undefined
         ? fallbackRecoverySequence(latestEventSequence)
         : previousSequence + 1,
@@ -146,6 +134,7 @@ export function sanitizeEventBuffer(
 
 function parseStoredReplayEvent(row: DurableReplayRow): Record<string, unknown> | null {
   if (typeof row.event_json !== 'string') return null;
+  if (encoder.encode(row.event_json).byteLength > MAXIMUM_STORED_REPLAY_EVENT_BYTES) return null;
   try {
     const parsed: unknown = JSON.parse(row.event_json);
     return isRecord(parsed) ? parsed : null;
@@ -160,8 +149,8 @@ function parseStoredReplayEvent(row: DurableReplayRow): Record<string, unknown> 
  * `rowIndex` is the number of leading rows that are safe to consume before the issue. A gap before
  * the earliest retained row is expected retention truncation. A gap inside the retained range is
  * treated as a recoverable persistence stall because event writes are asynchronous. Invalid row
- * identities, duplicate/reordered rows, and malformed serialized events are corruption and fail
- * closed.
+ * identities, duplicate/reordered rows, oversized rows, and malformed serialized events are
+ * corruption and fail closed.
  */
 export function findDurableReplayIssue(
   rows: readonly DurableReplayRow[],
@@ -171,10 +160,7 @@ export function findDurableReplayIssue(
   if (latestEventSequence !== undefined && window.afterEventSequence > latestEventSequence) {
     return {
       kind: 'corrupt',
-      eventSequence:
-        latestEventSequence >= Number.MAX_SAFE_INTEGER
-          ? Number.MAX_SAFE_INTEGER
-          : Math.max(1, latestEventSequence + 1),
+      eventSequence: nextSequence(latestEventSequence),
       rowIndex: 0,
       reason: 'D1 replay cursor advances beyond the room event sequence',
     };
@@ -185,7 +171,7 @@ export function findDurableReplayIssue(
   let expectedSequence =
     window.afterEventSequence === 0 || retentionTruncated
       ? Math.max(1, window.earliestEventSequence)
-      : window.afterEventSequence + 1;
+      : nextSequence(window.afterEventSequence);
 
   for (const [rowIndex, row] of rows.entries()) {
     if (!isPositiveSafeInteger(row.event_sequence)) {
@@ -222,7 +208,7 @@ export function findDurableReplayIssue(
         kind: 'corrupt',
         eventSequence: row.event_sequence,
         rowIndex,
-        reason: 'D1 replay row does not contain a valid serialized event object',
+        reason: 'D1 replay row does not contain a bounded valid serialized event object',
       };
     }
     if (event.roomId !== window.roomId) {
@@ -241,8 +227,16 @@ export function findDurableReplayIssue(
         reason: 'D1 replay row sequence does not match its serialized event',
       };
     }
+    if (row.event_sequence === Number.MAX_SAFE_INTEGER && rowIndex < rows.length - 1) {
+      return {
+        kind: 'corrupt',
+        eventSequence: row.event_sequence,
+        rowIndex: rowIndex + 1,
+        reason: 'D1 replay sequence space is exhausted',
+      };
+    }
 
-    expectedSequence = row.event_sequence + 1;
+    expectedSequence = nextSequence(row.event_sequence);
   }
 
   // A missing tail can be normal persistence lag because D1 writes are asynchronous. Absence at
@@ -304,4 +298,8 @@ export function hardenReplayEnvelope(
     ...hardened,
     recoveryBlockedAtEventSequence: Math.min(existingBlock, blockedAtEventSequence),
   };
+}
+
+function nextSequence(sequence: number): number {
+  return sequence >= Number.MAX_SAFE_INTEGER ? Number.MAX_SAFE_INTEGER : Math.max(1, sequence + 1);
 }
