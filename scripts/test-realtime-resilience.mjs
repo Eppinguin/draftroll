@@ -273,7 +273,9 @@ try {
       latestEventSequence: 7,
       eventBufferStartSequence: 7,
       missedEventsTruncated: true,
-      recentEvents: [makeRollStart({ rollId: 'recent-after-gap-7', eventSequence: 7, replayed: true })],
+      recentEvents: [
+        makeRollStart({ rollId: 'recent-after-gap-7', eventSequence: 7, replayed: true }),
+      ],
     }),
   );
   await waitFor(() => observedErrors.some((error) => error.code === 'long_range_recovery_stalled'));
@@ -299,7 +301,9 @@ try {
       latestEventSequence: 7,
       eventBufferStartSequence: 7,
       missedEventsTruncated: true,
-      recentEvents: [makeRollStart({ rollId: 'recent-after-corrupt-7', eventSequence: 7, replayed: true })],
+      recentEvents: [
+        makeRollStart({ rollId: 'recent-after-corrupt-7', eventSequence: 7, replayed: true }),
+      ],
     }),
   );
   await waitFor(() => observedErrors.some((error) => error.code === 'long_range_recovery_corrupt'));

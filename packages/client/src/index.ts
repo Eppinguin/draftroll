@@ -108,10 +108,7 @@ function createRecoveryWebSocket(
   return RecoveryWebSocket;
 }
 
-function createRecoveryFetch(
-  fetchImpl: typeof fetch,
-  state: RecoveryTransportState,
-): typeof fetch {
+function createRecoveryFetch(fetchImpl: typeof fetch, state: RecoveryTransportState): typeof fetch {
   return async (input, init) => {
     const initialUrl = requestUrl(input);
     if (!initialUrl || !initialUrl.pathname.endsWith('/events')) return fetchImpl(input, init);
@@ -227,7 +224,10 @@ function inspectRecoveryEnvelope(
     (!isNonNegativeSafeInteger(envelope.afterEventSequence) ||
       envelope.afterEventSequence !== requestedAfter)
   ) {
-    return corrupt(nextSequence(requestedAfter), 'Durable recovery cursor does not match the request');
+    return corrupt(
+      nextSequence(requestedAfter),
+      'Durable recovery cursor does not match the request',
+    );
   }
   if (envelope.hasMore !== undefined && typeof envelope.hasMore !== 'boolean') {
     return corrupt(nextSequence(requestedAfter), 'Durable recovery hasMore flag is invalid');
@@ -395,7 +395,8 @@ function corruptRecoveryResponse(
       roomId,
       afterEventSequence,
       nextAfterEventSequence: afterEventSequence,
-      latestEventSequence: latestEventSequence ?? Math.max(afterEventSequence, blockedAtEventSequence),
+      latestEventSequence:
+        latestEventSequence ?? Math.max(afterEventSequence, blockedAtEventSequence),
       hasMore: true,
       recoveryBlockedAtEventSequence: blockedAtEventSequence,
       events: [],

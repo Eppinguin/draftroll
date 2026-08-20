@@ -252,10 +252,10 @@ try {
     'a missing D1 tail may be asynchronous persistence lag',
   );
   assert.deepEqual(
-    replayIntegrity.findDurableReplayIssue(
-      [replayRow(13)],
-      { ...replayWindow, afterEventSequence: 12 },
-    ),
+    replayIntegrity.findDurableReplayIssue([replayRow(13)], {
+      ...replayWindow,
+      afterEventSequence: 12,
+    }),
     {
       kind: 'corrupt',
       eventSequence: 13,

@@ -76,7 +76,10 @@ async function hardenDurableReplayResponse(
   if (!isNonNegativeSafeInteger(envelope.afterEventSequence)) {
     block(nextSequence(requestedAfter), 'Durable replay response has an invalid cursor');
   } else if (afterEventSequence !== requestedAfter) {
-    block(nextSequence(requestedAfter), 'Durable replay response cursor does not match the request');
+    block(
+      nextSequence(requestedAfter),
+      'Durable replay response cursor does not match the request',
+    );
   }
 
   if (latestEventSequence === undefined) {
@@ -89,7 +92,10 @@ async function hardenDurableReplayResponse(
     envelope.earliestEventSequence !== undefined &&
     !isPositiveSafeInteger(envelope.earliestEventSequence)
   ) {
-    block(nextSequence(afterEventSequence), 'Durable replay response has an invalid retention head');
+    block(
+      nextSequence(afterEventSequence),
+      'Durable replay response has an invalid retention head',
+    );
   }
 
   if (!isNonNegativeSafeInteger(envelope.nextAfterEventSequence)) {
@@ -124,7 +130,10 @@ async function hardenDurableReplayResponse(
     envelope.recoveryBlockedAtEventSequence !== undefined &&
     !isPositiveSafeInteger(envelope.recoveryBlockedAtEventSequence)
   ) {
-    block(nextSequence(afterEventSequence), 'Durable replay response has an invalid corruption marker');
+    block(
+      nextSequence(afterEventSequence),
+      'Durable replay response has an invalid corruption marker',
+    );
   }
 
   if (blockedAtEventSequence === undefined) {
@@ -145,10 +154,7 @@ async function hardenDurableReplayResponse(
       message: reason,
     }),
   );
-  return replayResponse(
-    response,
-    hardenReplayEnvelope(envelope, blockedAtEventSequence),
-  );
+  return replayResponse(response, hardenReplayEnvelope(envelope, blockedAtEventSequence));
 }
 
 function blockedReplayResponse(
