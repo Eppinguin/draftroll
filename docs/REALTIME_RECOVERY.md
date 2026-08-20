@@ -33,6 +33,8 @@ const room = await DiceRoom.connect({
 
 Event handling is serialized, de-duplicated by sequence, and ordered before the current room-state tail is applied.
 
+Durable replay uses the current protocol-versioned pagination envelope only. Responses are read through a bounded streaming boundary, and each page must correlate its room, request cursor, next cursor, retained range, and room head. A persistence stall reconnects without advancing the cursor; corrupt data or a retention-truncated gap fails closed. Messages already queued on the affected socket are invalidated before they can cross that gap.
+
 ## Request metrics
 
 ```ts

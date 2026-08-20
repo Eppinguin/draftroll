@@ -223,9 +223,6 @@ export function decodeRollVisibility(
   value: unknown,
   options: DecodeOptions = {},
 ): DecodeResult<RollVisibility> {
-  const cloned = cloneForValidation(value);
-  if (!cloned.success) return cloned;
-  value = cloned.data;
   const context = createContext({ rejectUnknownFields: true, ...options });
   validateRollVisibility(value, '$', context);
   return context.result<RollVisibility>(value, 'Roll visibility is invalid');
@@ -240,9 +237,6 @@ export function decodeRoomPolicy(
   value: unknown,
   options: DecodeOptions = {},
 ): DecodeResult<RoomPolicy> {
-  const cloned = cloneForValidation(value);
-  if (!cloned.success) return cloned;
-  value = cloned.data;
   const context = createContext({ rejectUnknownFields: true, ...options });
   validateRoomPolicy(value, '$', context, false);
   return context.result<RoomPolicy>(value, 'Room policy is invalid');
@@ -257,9 +251,6 @@ export function decodeRoomPolicyPatch(
   value: unknown,
   options: DecodeOptions = {},
 ): DecodeResult<RoomPolicyPatch> {
-  const cloned = cloneForValidation(value);
-  if (!cloned.success) return cloned;
-  value = cloned.data;
   const context = createContext({ rejectUnknownFields: true, ...options });
   validateRoomPolicy(value, '$', context, true);
   return context.result<RoomPolicyPatch>(value, 'Room policy patch is invalid');
@@ -274,9 +265,6 @@ export function decodeParticipantIdentityInput(
   value: unknown,
   options: DecodeOptions = {},
 ): DecodeResult<ParticipantIdentityInput> {
-  const cloned = cloneForValidation(value);
-  if (!cloned.success) return cloned;
-  value = cloned.data;
   const context = createContext({ rejectUnknownFields: true, ...options });
   if (expectRecord(value, '$', context)) {
     unknownFields(value, ['participantId', 'sessionId', 'name', 'metadata'], '$', context);
@@ -297,9 +285,6 @@ export function decodeRoomCapabilityTokenPayload(
   value: unknown,
   options: DecodeOptions = {},
 ): DecodeResult<RoomCapabilityTokenPayload> {
-  const cloned = cloneForValidation(value);
-  if (!cloned.success) return cloned;
-  value = cloned.data;
   const context = createContext({ rejectUnknownFields: true, ...options });
   if (expectRecord(value, '$', context)) {
     unknownFields(
@@ -404,11 +389,9 @@ export function decodeCustomDiceDefinitions(
   value: unknown,
   options: DecodeOptions = {},
 ): DecodeResult<CustomDiceDefinition[]> {
-  const cloned = cloneForValidation(value);
-  if (!cloned.success) return cloned;
   const context = createContext({ rejectUnknownFields: true, ...options });
-  validateCustomDice(cloned.data, '$', context);
-  return context.result<CustomDiceDefinition[]>(cloned.data, 'Invalid custom dice definitions');
+  validateCustomDice(value, '$', context);
+  return context.result<CustomDiceDefinition[]>(value, 'Invalid custom dice definitions');
 }
 
 /**
@@ -420,9 +403,6 @@ export function decodeRollInput(
   value: unknown,
   options: DecodeOptions = {},
 ): DecodeResult<RollInput> {
-  const cloned = cloneForValidation(value);
-  if (!cloned.success) return cloned;
-  value = cloned.data;
   const context = createContext({ rejectUnknownFields: true, ...options });
   validateRollInput(value, '$', context);
   return context.result<RollInput>(value, 'Roll input is invalid');
@@ -437,9 +417,6 @@ export function decodeRollUpdateInput(
   value: unknown,
   options: DecodeOptions = {},
 ): DecodeResult<RollUpdateInput> {
-  const cloned = cloneForValidation(value);
-  if (!cloned.success) return cloned;
-  value = cloned.data;
   const context = createContext({ rejectUnknownFields: true, ...options });
   validateRollUpdate(value, '$', context);
   return context.result<RollUpdateInput>(value, 'Roll update is invalid');
@@ -454,11 +431,9 @@ export function decodeNormalizedRollResult(
   value: unknown,
   options: DecodeOptions = {},
 ): DecodeResult<NormalizedRollResult> {
-  const cloned = cloneForValidation(value);
-  if (!cloned.success) return cloned;
   const context = createContext({ rejectUnknownFields: true, ...options });
-  validateNormalizedResult(cloned.data, '$', context);
-  return context.result<NormalizedRollResult>(cloned.data, 'Normalized roll result is invalid');
+  validateNormalizedResult(value, '$', context);
+  return context.result<NormalizedRollResult>(value, 'Normalized roll result is invalid');
 }
 
 /**
@@ -491,9 +466,6 @@ export function decodeClientToServerEvent(
   value: unknown,
   options: DecodeOptions = {},
 ): DecodeResult<ClientToServerEvent> {
-  const cloned = cloneForValidation(value);
-  if (!cloned.success) return cloned;
-  value = cloned.data;
   const context = createContext({ rejectUnknownFields: true, ...options });
   validateClientEvent(value, '$', context);
   return context.result<ClientToServerEvent>(value, 'Client room event is invalid');
@@ -508,11 +480,9 @@ export function decodeServerToClientEvent(
   value: unknown,
   options: DecodeOptions = {},
 ): DecodeResult<ServerToClientEvent> {
-  const cloned = cloneForValidation(value);
-  if (!cloned.success) return cloned;
   const context = createContext({ rejectUnknownFields: true, ...options });
-  validateServerEvent(cloned.data, '$', context);
-  return context.result<ServerToClientEvent>(cloned.data, 'Server room event is invalid');
+  validateServerEvent(value, '$', context);
+  return context.result<ServerToClientEvent>(value, 'Server room event is invalid');
 }
 
 /**
@@ -3288,22 +3258,6 @@ function summarize(value: unknown): string {
 function byteLength(raw: string | ArrayBuffer | ArrayBufferView): number {
   if (typeof raw === 'string') return new TextEncoder().encode(raw).byteLength;
   return raw.byteLength;
-}
-
-function cloneForValidation<T>(value: T): DecodeResult<T> {
-  try {
-    if (value === null || typeof value !== 'object') return { success: true, data: value };
-    return { success: true, data: structuredClone(value) };
-  } catch {
-    return failure('Value cannot be safely cloned for validation', [
-      {
-        code: 'invalid_value',
-        path: '$',
-        message: 'Value contains data that cannot cross the runtime boundary',
-        expected: 'structured-cloneable data',
-      },
-    ]);
-  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

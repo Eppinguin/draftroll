@@ -207,7 +207,7 @@ try {
     'room',
     13,
   );
-  assert.deepEqual(bufferGap.events, [replayEvent(10)]);
+  assert.deepEqual(bufferGap.events, []);
   assert.equal(bufferGap.recoverySequence, 11);
 
   const staleTail = replayIntegrity.sanitizeEventBuffer(
@@ -215,7 +215,7 @@ try {
     'room',
     100,
   );
-  assert.deepEqual(staleTail.events, [replayEvent(50), replayEvent(51)]);
+  assert.deepEqual(staleTail.events, []);
   assert.equal(staleTail.recoverySequence, 52);
   assert.equal(staleTail.changed, true);
 
@@ -224,21 +224,27 @@ try {
   assert.equal(emptyStaleBuffer.recoverySequence, 100);
   assert.equal(emptyStaleBuffer.changed, true);
 
-  assert.deepEqual(
-    replayIntegrity.findDurableReplayIssue([replayRow(10), replayRow(12)], replayWindow),
-    { kind: 'gap', eventSequence: 11, rowIndex: 1 },
+  const gapScan = replayIntegrity.scanDurableReplayRows(
+    [replayRow(10), replayRow(12)],
+    replayWindow,
   );
+  assert.deepEqual(gapScan.rows, [{ eventSequence: 10, event: replayEvent(10) }]);
+  assert.deepEqual(gapScan.issue, { kind: 'gap', eventSequence: 11, rowIndex: 1 });
   assert.deepEqual(
-    replayIntegrity.findDurableReplayIssue([replayRow(10, replayEvent(99))], replayWindow),
+    replayIntegrity.scanDurableReplayRows([replayRow(10, replayEvent(99))], replayWindow),
     {
-      kind: 'corrupt',
-      eventSequence: 10,
-      rowIndex: 0,
-      reason: 'D1 replay row sequence does not match its serialized event',
+      rows: [],
+      issue: {
+        kind: 'corrupt',
+        eventSequence: 10,
+        rowIndex: 0,
+        reason: 'D1 replay row sequence does not match its serialized event',
+      },
     },
   );
   assert.deepEqual(
-    replayIntegrity.findDurableReplayIssue([replayRow(10, replayEvent(10, 'other'))], replayWindow),
+    replayIntegrity.scanDurableReplayRows([replayRow(10, replayEvent(10, 'other'))], replayWindow)
+      .issue,
     {
       kind: 'corrupt',
       eventSequence: 10,
@@ -246,16 +252,16 @@ try {
       reason: 'D1 replay row room identity does not match its query scope',
     },
   );
-  assert.equal(
-    replayIntegrity.findDurableReplayIssue([replayRow(10)], replayWindow),
-    null,
+  assert.deepEqual(
+    replayIntegrity.scanDurableReplayRows([replayRow(10)], replayWindow),
+    { rows: [{ eventSequence: 10, event: replayEvent(10) }], issue: null },
     'a missing D1 tail may be asynchronous persistence lag',
   );
   assert.deepEqual(
-    replayIntegrity.findDurableReplayIssue([replayRow(13)], {
+    replayIntegrity.scanDurableReplayRows([replayRow(13)], {
       ...replayWindow,
       afterEventSequence: 12,
-    }),
+    }).issue,
     {
       kind: 'corrupt',
       eventSequence: 13,
@@ -263,6 +269,32 @@ try {
       reason: 'D1 replay row advances beyond the room event sequence',
     },
     'D1 rows beyond the Durable Object room head must fail closed',
+  );
+  assert.deepEqual(
+    replayIntegrity.scanDurableReplayRows(
+      [replayRow(Number.MAX_SAFE_INTEGER), replayRow(Number.MAX_SAFE_INTEGER)],
+      {
+        roomId: 'room',
+        afterEventSequence: Number.MAX_SAFE_INTEGER - 1,
+        earliestEventSequence: 1,
+        latestEventSequence: Number.MAX_SAFE_INTEGER,
+      },
+    ),
+    {
+      rows: [
+        {
+          eventSequence: Number.MAX_SAFE_INTEGER,
+          event: replayEvent(Number.MAX_SAFE_INTEGER),
+        },
+      ],
+      issue: {
+        kind: 'corrupt',
+        eventSequence: Number.MAX_SAFE_INTEGER,
+        rowIndex: 1,
+        reason: 'D1 replay sequence space is exhausted',
+      },
+    },
+    'the final representable event remains consumable while impossible trailing rows fail closed',
   );
 
   const stalledReplay = replayIntegrity.stallReplayEnvelope(
@@ -323,7 +355,7 @@ try {
           'throwing getters return structured boundary failures',
           'special structured-clone containers and class instances are rejected instead of flattened',
           'spoofed Symbol.toStringTag values cannot bypass the plain-object boundary',
-          'oversized object graphs fail before structured cloning',
+          'oversized object graphs fail before detailed protocol validation',
           'caller-owned accessors are read at most once before detailed validation',
           'runtime boundaries enumerate bounded own keys without scanning hostile prototypes',
           'Durable Object replay buffers stop at gaps, room mismatches, and stale tails',

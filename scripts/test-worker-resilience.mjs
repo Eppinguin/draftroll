@@ -71,8 +71,13 @@ assert.ok(
 const durableEvents = worker.slice(durableEventsStart, durableEventsEnd);
 assert.match(
   durableEvents,
-  /findDurableReplayIssue\(rows,\s*\{[\s\S]*?latestEventSequence[,\s]/,
+  /scanDurableReplayRows\(rows,\s*\{[\s\S]*?latestEventSequence[,\s]/,
   'durable replay validation must receive the authoritative room event head',
+);
+assert.doesNotMatch(
+  durableEvents,
+  /JSON\.parse\(row\.event_json\)/,
+  'durable replay must consume the event parsed by its integrity scan',
 );
 
 for (const marker of [

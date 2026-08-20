@@ -39,7 +39,7 @@ import {
   type RoomStateEvent,
   type ServerToClientEvent,
 } from '@draftroll/protocol';
-import { findDurableReplayIssue, sanitizeEventBuffer } from './replay-integrity';
+import { sanitizeEventBuffer, scanDurableReplayRows } from './replay-integrity';
 
 interface Env {
   DICE_ROOMS: DurableObjectNamespace<DiceRoomObject>;
@@ -2030,12 +2030,13 @@ export class DiceRoomObject {
     const latestEventSequence = await this.getEventSequence();
     const earliestSequence = earliest.results?.[0]?.event_sequence ?? latestEventSequence + 1;
     const rows = query.results ?? [];
-    const replayIssue = findDurableReplayIssue(rows, {
+    const replayScan = scanDurableReplayRows(rows, {
       roomId,
       afterEventSequence,
       earliestEventSequence: earliestSequence,
       latestEventSequence,
     });
+    const replayIssue = replayScan.issue;
     if (replayIssue?.kind === 'gap') {
       this.logStructured('room.replay_persistence_stalled', {
         source: 'd1_replay',
@@ -2050,21 +2051,19 @@ export class DiceRoomObject {
       });
     }
 
-    const trustedRows = replayIssue ? rows.slice(0, replayIssue.rowIndex) : rows;
     const events: RoomReplayEvent[] = [];
     let nextAfterEventSequence = afterEventSequence;
     let recoveryBlockedAtEventSequence =
       replayIssue?.kind === 'corrupt' ? replayIssue.eventSequence : undefined;
-    for (const row of trustedRows) {
+    for (const row of replayScan.rows) {
       let internal: InternalRoomEvent;
       try {
-        // Deserializes rows this Durable Object previously serialized itself.
-        internal = migrateStoredInternalEvent(JSON.parse(row.event_json));
+        internal = migrateStoredInternalEvent(row.event);
       } catch (error) {
-        recoveryBlockedAtEventSequence = row.event_sequence;
+        recoveryBlockedAtEventSequence = row.eventSequence;
         this.logStructured('room.event_storage_invalid', {
           source: 'd1_replay',
-          eventSequence: row.event_sequence,
+          eventSequence: row.eventSequence,
           message: asError(error).message,
         });
         break;
@@ -2072,12 +2071,13 @@ export class DiceRoomObject {
 
       // Advancing over a validated event is safe even when this participant cannot observe its
       // projection (for example manager-only token revocations or bulk acknowledgements).
-      nextAfterEventSequence = row.event_sequence;
+      nextAfterEventSequence = row.eventSequence;
       if (internal.type === 'bulk_rolls_updated') continue;
       const projected = projectInternalEvent(internal, participant, true);
       if (projected) events.push(projected);
     }
     return {
+      protocolVersion: DRAFTROLL_PROTOCOL_VERSION,
       roomId,
       afterEventSequence,
       nextAfterEventSequence,
@@ -2087,7 +2087,7 @@ export class DiceRoomObject {
         replayIssue !== null ||
         recoveryBlockedAtEventSequence !== undefined ||
         nextAfterEventSequence < latestEventSequence,
-      truncated: afterEventSequence > 0 && afterEventSequence < earliestSequence - 1,
+      truncated: afterEventSequence < earliestSequence - 1,
       recoveryBlockedAtEventSequence,
       events,
     };

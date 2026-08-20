@@ -126,6 +126,19 @@ function faceNormal(
   return normal;
 }
 
+function distinctSupportNormals(
+  vertices: readonly PolyhedronVertex[],
+  faces: readonly number[][],
+): PolyhedronVertex[] {
+  const normals: PolyhedronVertex[] = [];
+  for (const face of faces) {
+    const normal = faceNormal(vertices, face);
+    if (normals.some((candidate) => dot(candidate, normal) > 1 - 1e-6)) continue;
+    normals.push(normal);
+  }
+  return normals;
+}
+
 function generatedSupportFaces(shape: ReadablePolyhedron, outcomeIndex: number): number[] {
   if (shape.family === 'd1-cylinder') return [0, 1];
   if (shape.family === 'd3-cube')
@@ -193,7 +206,10 @@ function canonicalConvexDefinition(
   kind: Exclude<CanonicalDieKind, 'coin' | 'd6'>,
 ): PhysicalDieDefinition {
   const data = COLLIDER_DATA[kind];
-  const normals = data.faces.map((face) => faceNormal(data.vertices, face));
+  // Some canonical colliders triangulate a logical face for Cannon. Outcome slots describe stable
+  // support planes, so coplanar triangles must remain one result (notably 36 triangles -> 12 d12
+  // faces).
+  const normals = distinctSupportNormals(data.vertices, data.faces);
   return {
     id: kind,
     sides: Number(kind.slice(1)),

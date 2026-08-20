@@ -150,7 +150,9 @@ const MAXIMUM_VERTICES_PER_FACE = 256;
 const MAXIMUM_SUPPORT_NORMALS_PER_OUTCOME = 64;
 const MAXIMUM_LABEL_ANCHORS_PER_OUTCOME = 64;
 const MINIMUM_NON_DEGENERATE_AREA_SQUARED = 1e-18;
-const CONVEX_GEOMETRY_EPSILON = 1e-8;
+// Canonical collider coordinates originate as float32 geometry. Coplanar triangles on faces such
+// as the d12 can therefore differ by a few units in the last float32 place after cross products.
+const CONVEX_GEOMETRY_EPSILON = 1e-7;
 
 function cloneDefinitionVertex(value: PolyhedronVertex): PolyhedronVertex {
   return [value[0], value[1], value[2]];

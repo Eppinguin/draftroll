@@ -47,6 +47,25 @@ import {
   type ServerToClientEvent,
 } from '../../protocol/src/index';
 
+const LONG_RANGE_RECOVERY_MAXIMUM_RESPONSE_BYTES = 8 * 1024 * 1024;
+// Stored replay rows are individually bounded to 512 KiB by the Worker. Eight rows leave ample
+// room for the JSON envelope while keeping every response comfortably below the client boundary.
+const LONG_RANGE_RECOVERY_PAGE_LIMIT = 8;
+const LONG_RANGE_RECOVERY_MAXIMUM_PAGES = 10_000;
+
+interface DurableRecoveryEnvelope {
+  protocolVersion: typeof DRAFTROLL_PROTOCOL_VERSION;
+  roomId: string;
+  afterEventSequence: number;
+  nextAfterEventSequence: number;
+  earliestEventSequence: number;
+  latestEventSequence: number;
+  hasMore: boolean;
+  truncated: boolean;
+  recoveryBlockedAtEventSequence?: number;
+  events: unknown[];
+}
+
 /**
  * Configures a realtime room connection, identity, recovery, and request behavior.
  *
@@ -286,6 +305,7 @@ export class DiceRoom {
   };
   private totalRequestLatencyMs = 0;
   private messageQueue: Promise<void> = Promise.resolve();
+  private blockedSocket: WebSocket | null = null;
   private readonly participantIdentity: Required<
     Pick<ParticipantIdentityInput, 'participantId' | 'sessionId' | 'name'>
   > &
@@ -790,12 +810,18 @@ export class DiceRoom {
     signal?.addEventListener('abort', abortSocket, { once: true });
     socket.binaryType = 'arraybuffer';
     this.socket = socket;
+    this.blockedSocket = null;
     socket.addEventListener('message', (event) => {
+      const raw = event.data;
       this.messageQueue = this.messageQueue
-        .then(() => this.handleMessage(event.data))
+        .then(() => {
+          if (this.socket !== socket || this.blockedSocket === socket || this.recoveryFailure)
+            return;
+          return this.handleMessage(raw);
+        })
         .catch((error) => this.emit('error', { error: asError(error) }));
     });
-    socket.addEventListener('close', (event) => this.handleClose(event.code, event.reason));
+    socket.addEventListener('close', (event) => this.handleClose(socket, event.code, event.reason));
     socket.addEventListener('error', () =>
       this.emit('error', { error: new Error('WebSocket error') }),
     );
@@ -964,7 +990,12 @@ export class DiceRoom {
     if (event.type === 'room_state') {
       if (event.missedEventsTruncated) {
         this.metricsState.replayTruncations += 1;
-        await this.recoverLongRangeEvents(this.lastEventSequence);
+        try {
+          await this.recoverLongRangeEvents(this.lastEventSequence);
+        } catch (error) {
+          this.failRecovery(asError(error));
+          throw error;
+        }
       }
       this.participantsBySession.clear();
       event.participants.forEach((participant) =>
@@ -1133,8 +1164,10 @@ export class DiceRoom {
     else this.emit('rollVisibilityUpdate', synchronized);
   }
 
-  private handleClose(code: number, reason: string): void {
+  private handleClose(socket: WebSocket, code: number, reason: string): void {
+    if (this.socket !== socket) return;
     this.socket = null;
+    this.blockedSocket = null;
     const message = `Dice room connection closed (${code}${reason ? `: ${reason}` : ''})`;
     const error = new DiceRoomConnectionError(
       DRAFTROLL_ERROR_CODES.roomConnectionClosed,
@@ -1190,6 +1223,23 @@ export class DiceRoom {
       recoverable: false,
       closeCode: code,
     });
+  }
+
+  private failRecovery(error: Error): void {
+    const socket = this.socket;
+    if (!socket) return;
+    this.blockedSocket = socket;
+    const fatal = error instanceof DiceRoomConnectionError && !error.recoverable;
+    if (fatal) {
+      this.recoveryFailure = error;
+      this.rejectPending(error);
+    }
+    if (socket.readyState < WebSocket.CLOSING) {
+      socket.close(
+        fatal ? 1011 : 1012,
+        fatal ? 'Long-range room recovery is blocked' : 'Long-range room recovery must retry',
+      );
+    }
   }
 
   private send(event: ClientToServerEvent): void {
@@ -1316,10 +1366,8 @@ export class DiceRoom {
     let recoveredCount = 0;
     let pages = 0;
     let complete = false;
-    const maximumPages = 10_000;
-    const pageLimit = 1_000;
 
-    while (pages < maximumPages) {
+    while (pages < LONG_RANGE_RECOVERY_MAXIMUM_PAGES) {
       pages += 1;
       const url = new URL(this.options.url);
       url.protocol = url.protocol === 'wss:' ? 'https:' : 'http:';
@@ -1330,7 +1378,7 @@ export class DiceRoom {
       url.searchParams.set('sessionId', this.participantIdentity.sessionId);
       url.searchParams.set('name', this.participantIdentity.name);
       url.searchParams.set('afterEventSequence', String(cursor));
-      url.searchParams.set('limit', String(pageLimit));
+      url.searchParams.set('limit', String(LONG_RANGE_RECOVERY_PAGE_LIMIT));
       const headers: Record<string, string> = {};
       if (this.options.token) headers.Authorization = `Bearer ${this.options.token}`;
       if (this.options.roomPassword)
@@ -1342,40 +1390,48 @@ export class DiceRoom {
           `Long-range room recovery failed with HTTP ${response.status}`,
           true,
         );
-      // `Response.json` returns `any`. Only the recovery envelope is shaped here, and every
-      // field it exposes is either re-validated below (`events`, through
-      // `decodeServerToClientEvent`) or coerced through a `typeof`/`Number.isFinite` check
-      // before use, so nothing reaches state on the strength of this assertion alone.
-      // oxlint-disable-next-line typescript/no-unsafe-type-assertion
-      const payload = (await response.json()) as {
-        events?: unknown[];
-        nextAfterEventSequence?: number;
-        latestEventSequence?: number;
-        hasMore?: boolean;
-        recoveryBlockedAtEventSequence?: number;
-      };
-      const recoveryBlockedAtEventSequence = isSafeInteger(payload.recoveryBlockedAtEventSequence)
-        ? payload.recoveryBlockedAtEventSequence
-        : undefined;
-      if (recoveryBlockedAtEventSequence !== undefined) {
-        const error = new DiceRoomConnectionError(
-          'long_range_recovery_corrupt',
-          `Long-range room recovery is blocked by corrupt retained event ${recoveryBlockedAtEventSequence}`,
-          false,
-          { eventSequence: recoveryBlockedAtEventSequence },
-        );
-        this.recoveryFailure = error;
-        this.rejectPending(error);
-        this.socket?.close(1011, 'Long-range room recovery is blocked');
-        throw error;
+      let raw: Uint8Array;
+      try {
+        raw = await readBoundedResponseBody(response, LONG_RANGE_RECOVERY_MAXIMUM_RESPONSE_BYTES);
+      } catch (error) {
+        throw corruptRecoveryError(cursor + 1, asError(error).message);
       }
-      for (const rawEvent of payload.events ?? []) {
+      const parsed = parseRuntimeJson(raw, {
+        maximumBytes: LONG_RANGE_RECOVERY_MAXIMUM_RESPONSE_BYTES,
+      });
+      if (!parsed.success) throw corruptRecoveryError(cursor + 1, parsed.error.message);
+      const payload = decodeDurableRecoveryEnvelope(parsed.data, {
+        roomId: this.options.roomId,
+        afterEventSequence: cursor,
+        pageLimit: LONG_RANGE_RECOVERY_PAGE_LIMIT,
+      });
+      const recoveryBlockedAtEventSequence = payload.recoveryBlockedAtEventSequence;
+      if (recoveryBlockedAtEventSequence !== undefined) {
+        throw corruptRecoveryError(
+          recoveryBlockedAtEventSequence,
+          `Long-range room recovery is blocked by corrupt retained event ${recoveryBlockedAtEventSequence}`,
+        );
+      }
+      if (payload.truncated) {
+        throw new DiceRoomConnectionError(
+          'long_range_recovery_truncated',
+          `Long-range room recovery no longer retains event ${cursor + 1}`,
+          false,
+          { eventSequence: cursor + 1, earliestEventSequence: payload.earliestEventSequence },
+        );
+      }
+      for (const rawEvent of payload.events) {
         const decoded = decodeServerToClientEvent(rawEvent, {
           rejectUnknownFields: true,
           allowLegacyResults: true,
         });
-        if (!decoded.success)
-          throw new DiceRoomProtocolError(decoded.error.message, decoded.error.issues);
+        if (!decoded.success) {
+          const sequence =
+            isRecord(rawEvent) && isPositiveSafeInteger(rawEvent.eventSequence)
+              ? rawEvent.eventSequence
+              : cursor + 1;
+          throw corruptRecoveryError(sequence, decoded.error.message);
+        }
         const recovered = decoded.data;
         if (
           recovered.type === 'roll_start' ||
@@ -1392,31 +1448,8 @@ export class DiceRoom {
           recoveredCount += 1;
         }
       }
-      const events = payload.events ?? [];
-      const nextCursor = isSafeInteger(payload.nextAfterEventSequence)
-        ? Math.max(cursor, payload.nextAfterEventSequence)
-        : Math.max(
-            cursor,
-            ...events.map((event) => {
-              const sequence: unknown = isRecord(event) ? event.eventSequence : undefined;
-              return isSafeInteger(sequence) ? sequence : cursor;
-            }),
-          );
-      const latestMetadata = isSafeInteger(payload.latestEventSequence)
-        ? payload.latestEventSequence
-        : undefined;
-      const hasLatestMetadata = latestMetadata !== undefined;
-      const latest = latestMetadata ?? nextCursor;
-      // Older compatible endpoints may not include pagination metadata. In that
-      // case, a full page means there may be another page; one final empty page
-      // safely confirms completion without advancing past unprocessed events.
-      const hasMore =
-        typeof payload.hasMore === 'boolean'
-          ? payload.hasMore
-          : hasLatestMetadata
-            ? nextCursor < latest
-            : events.length >= pageLimit;
-      if (!hasMore || (hasLatestMetadata && nextCursor >= latest)) {
+      const nextCursor = payload.nextAfterEventSequence;
+      if (!payload.hasMore) {
         complete = true;
         break;
       }
@@ -1429,10 +1462,10 @@ export class DiceRoom {
       }
       cursor = nextCursor;
     }
-    if (!complete && pages >= maximumPages) {
+    if (!complete && pages >= LONG_RANGE_RECOVERY_MAXIMUM_PAGES) {
       throw new DiceRoomConnectionError(
         'long_range_recovery_limit',
-        `Long-range recovery exceeded ${maximumPages} pages`,
+        `Long-range recovery exceeded ${LONG_RANGE_RECOVERY_MAXIMUM_PAGES} pages`,
         true,
       );
     }
@@ -1734,6 +1767,150 @@ function createId(prefix: string): string {
   return `${prefix}_${random}`;
 }
 
+function corruptRecoveryError(eventSequence: number, message: string): DiceRoomConnectionError {
+  return new DiceRoomConnectionError('long_range_recovery_corrupt', message, false, {
+    eventSequence,
+  });
+}
+
+function decodeDurableRecoveryEnvelope(
+  value: unknown,
+  expected: { roomId: string; afterEventSequence: number; pageLimit: number },
+): DurableRecoveryEnvelope {
+  const invalid = (message: string): never => {
+    throw corruptRecoveryError(expected.afterEventSequence + 1, message);
+  };
+  if (!isRecord(value)) return invalid('Durable recovery response is not an object');
+
+  const protocolVersion = value.protocolVersion;
+  const roomId = value.roomId;
+  const afterEventSequence = value.afterEventSequence;
+  const nextAfterEventSequence = value.nextAfterEventSequence;
+  const earliestEventSequence = value.earliestEventSequence;
+  const latestEventSequence = value.latestEventSequence;
+  const hasMore = value.hasMore;
+  const truncated = value.truncated;
+  const recoveryBlockedAtEventSequence = value.recoveryBlockedAtEventSequence;
+  const events = value.events;
+
+  if (protocolVersion !== DRAFTROLL_PROTOCOL_VERSION) {
+    return invalid('Durable recovery protocol version does not match');
+  }
+  if (roomId !== expected.roomId) return invalid('Durable recovery room identity does not match');
+  if (afterEventSequence !== expected.afterEventSequence) {
+    return invalid('Durable recovery cursor does not match the request');
+  }
+  if (!isNonNegativeSafeInteger(nextAfterEventSequence)) {
+    return invalid('Durable recovery next cursor is invalid');
+  }
+  if (!isPositiveSafeInteger(earliestEventSequence)) {
+    return invalid('Durable recovery earliest sequence is invalid');
+  }
+  if (!isNonNegativeSafeInteger(latestEventSequence)) {
+    return invalid('Durable recovery room head is invalid');
+  }
+  if (typeof hasMore !== 'boolean' || typeof truncated !== 'boolean') {
+    return invalid('Durable recovery pagination metadata is invalid');
+  }
+  if (!Array.isArray(events) || events.length > expected.pageLimit) {
+    return invalid('Durable recovery events exceed the requested page contract');
+  }
+  if (
+    recoveryBlockedAtEventSequence !== undefined &&
+    !isPositiveSafeInteger(recoveryBlockedAtEventSequence)
+  ) {
+    return invalid('Durable recovery corruption marker is invalid');
+  }
+  if (
+    expected.afterEventSequence > latestEventSequence ||
+    nextAfterEventSequence < expected.afterEventSequence ||
+    nextAfterEventSequence > latestEventSequence
+  ) {
+    return invalid('Durable recovery cursor advances outside the room event range');
+  }
+
+  let lastVisibleEventSequence = expected.afterEventSequence;
+  for (const event of events) {
+    if (!isRecord(event) || !isPositiveSafeInteger(event.eventSequence)) {
+      return invalid('Durable recovery event has an invalid sequence');
+    }
+    if (
+      event.eventSequence <= lastVisibleEventSequence ||
+      event.eventSequence > latestEventSequence
+    ) {
+      return invalid('Durable recovery events are duplicated, reordered, or beyond the room head');
+    }
+    lastVisibleEventSequence = event.eventSequence;
+  }
+  if (nextAfterEventSequence < lastVisibleEventSequence) {
+    return invalid('Durable recovery next cursor does not cover its visible events');
+  }
+  if (!hasMore && nextAfterEventSequence !== latestEventSequence) {
+    return invalid('Durable recovery ended before reaching the room head');
+  }
+
+  return {
+    protocolVersion,
+    roomId,
+    afterEventSequence,
+    nextAfterEventSequence,
+    earliestEventSequence,
+    latestEventSequence,
+    hasMore,
+    truncated,
+    recoveryBlockedAtEventSequence,
+    events,
+  };
+}
+
+async function readBoundedResponseBody(
+  response: Response,
+  maximumBytes: number,
+): Promise<Uint8Array> {
+  const contentLength = response.headers.get('content-length');
+  if (contentLength !== null) {
+    const declaredBytes = Number(contentLength);
+    if (Number.isFinite(declaredBytes) && declaredBytes > maximumBytes) {
+      throw new Error(`Durable recovery response exceeds ${maximumBytes} bytes`);
+    }
+  }
+
+  if (!response.body) {
+    const body = new Uint8Array(await response.arrayBuffer());
+    if (body.byteLength > maximumBytes) {
+      throw new Error(`Durable recovery response exceeds ${maximumBytes} bytes`);
+    }
+    return body;
+  }
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      totalBytes += value.byteLength;
+      if (totalBytes > maximumBytes) {
+        await reader.cancel();
+        throw new Error(`Durable recovery response exceeds ${maximumBytes} bytes`);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const body = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return body;
+}
+
 function asError(value: unknown): Error {
   return value instanceof Error ? value : new Error(String(value));
 }
@@ -1743,7 +1920,15 @@ function isSafeInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value);
 }
 
+function isPositiveSafeInteger(value: unknown): value is number {
+  return isSafeInteger(value) && value >= 1;
+}
+
+function isNonNegativeSafeInteger(value: unknown): value is number {
+  return isSafeInteger(value) && value >= 0;
+}
+
 /** Narrows an unknown value to an indexable object without asserting a shape. */
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

@@ -192,7 +192,11 @@ try {
   assert.match(mainSource, /createLockedTableTrajectory/);
   assert.match(mainSource, /const lockedTrajectory = isRolling/);
   assert.match(mainSource, /Keep the completed plan while the table remains visible/);
-  assert.match(workerSource, /lockedMotion: readLockedMotion\(request, lockedCount\)/);
+  assert.match(
+    workerSource,
+    /const lockedMotion = readLockedMotion\(request, requestedLockedCount\)/,
+  );
+  assert.match(workerSource, /const lockedCount = lockedMotion\?\.count \?\? 0/);
   const plannerSource = await readFile(join(projectRoot, 'src/physical-roll-planner.ts'), 'utf8');
   assert.match(plannerSource, /updateLockedBodies/);
   assert.doesNotMatch(mainSource, /mapLandingFaceToValue/);

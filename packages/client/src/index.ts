@@ -4,11 +4,9 @@
  * @packageDocumentation
  */
 
-import { DiceRoom as CoreDiceRoom, type DiceRoomOptions } from './implementation';
-import { withRecoveryTransportBoundary } from './recovery-transport';
-
 export * from './diagnostics';
 export {
+  DiceRoom,
   DiceRoomConnectionError,
   DiceRoomPasswordError,
   DiceRoomPasswordRequiredError,
@@ -28,11 +26,3 @@ export {
   type SynchronizedRoomRollEvent,
   type SynchronizedRoomEvent,
 } from './implementation';
-
-// Keep the implementation class as the one public DiceRoom identity. Only its static factory is
-// decorated, so consumers do not observe a facade subclass or an unsafe constructor cast.
-const connectCoreDiceRoom = CoreDiceRoom.connect.bind(CoreDiceRoom);
-CoreDiceRoom.connect = async (options: DiceRoomOptions): Promise<CoreDiceRoom> =>
-  connectCoreDiceRoom(withRecoveryTransportBoundary(options));
-
-export { CoreDiceRoom as DiceRoom };

@@ -141,6 +141,10 @@ try {
   const fetchCalls = [];
   let recoveryMode = 'normal';
   let recoveryBlockedAtEventSequence;
+  let releaseBlockedRecovery;
+  const blockedRecoveryGate = new Promise((resolve) => {
+    releaseBlockedRecovery = resolve;
+  });
   const fetchImpl = async (url, init) => {
     const requestUrl = new URL(String(url));
     const afterEventSequence = Number(requestUrl.searchParams.get('afterEventSequence') ?? 0);
@@ -148,28 +152,41 @@ try {
     const payload =
       recoveryMode === 'stalled'
         ? {
+            protocolVersion: 2,
             roomId: 'resilience',
             afterEventSequence,
             nextAfterEventSequence: afterEventSequence,
+            earliestEventSequence: 1,
             latestEventSequence: afterEventSequence + 1,
             hasMore: true,
+            truncated: false,
             events: [],
           }
         : recoveryBlockedAtEventSequence === undefined
           ? {
+              protocolVersion: 2,
               roomId: 'resilience',
               afterEventSequence,
+              nextAfterEventSequence: 3,
+              earliestEventSequence: 1,
+              latestEventSequence: 3,
+              hasMore: false,
+              truncated: false,
               events: durableEvents.filter((event) => event.eventSequence > afterEventSequence),
             }
           : {
+              protocolVersion: 2,
               roomId: 'resilience',
               afterEventSequence,
               nextAfterEventSequence: afterEventSequence,
+              earliestEventSequence: 1,
               latestEventSequence: recoveryBlockedAtEventSequence,
               hasMore: true,
+              truncated: false,
               recoveryBlockedAtEventSequence,
               events: [],
             };
+    if (recoveryBlockedAtEventSequence !== undefined) await blockedRecoveryGate;
     return new Response(JSON.stringify(payload), {
       status: 200,
       headers: { 'content-type': 'application/json' },
@@ -306,6 +323,9 @@ try {
       ],
     }),
   );
+  await waitFor(() => fetchCalls.length >= 3);
+  third.serverSend(makeRollStart({ rollId: 'queued-after-corrupt-8', eventSequence: 8 }));
+  releaseBlockedRecovery();
   await waitFor(() => observedErrors.some((error) => error.code === 'long_range_recovery_corrupt'));
   await waitFor(() => room.connectionDiagnostics.state === 'failed');
   const recoveryError = observedErrors.find(
@@ -325,6 +345,11 @@ try {
   await new Promise((settle) => setTimeout(settle, 20));
   assert.equal(room.getLastEventSequence(), 5, 'events after the corrupt gap must remain blocked');
   assert.equal(observed.includes('after-corrupt-8'), false);
+  assert.equal(
+    observed.includes('queued-after-corrupt-8'),
+    false,
+    'events queued while recovery is pending must be invalidated when recovery fails',
+  );
   assert.equal(
     MockWebSocket.instances.length,
     3,

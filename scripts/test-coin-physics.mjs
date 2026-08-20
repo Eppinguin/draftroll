@@ -62,6 +62,13 @@ try {
     releaseUnstableRestPose,
   } = require(join(outDir, 'src/resting-physics.js'));
 
+  for (const kind of ['coin', 'd4', 'd6', 'd8', 'd10', 'd12', 'd20']) {
+    assert.doesNotThrow(
+      () => createCanonicalPhysicalDieDefinition(kind),
+      `${kind} canonical float32 collider passes shared convexity validation`,
+    );
+  }
+
   const cachedD6 = createCanonicalPhysicalDieDefinition('d6');
   cachedD6.collider.halfExtents[0] = 99;
   cachedD6.outcomes[0].supportNormals[0][0] = 0;

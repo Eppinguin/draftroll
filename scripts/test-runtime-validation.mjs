@@ -482,8 +482,8 @@ try {
         ok: true,
         tested: [
           'normalized-result schema version, strict guards, migration, and combined diagnostics',
-          'non-record inputs, revoked proxies, and clone failures reject without decoder exceptions',
-          'clone-safe custom-dice, normalized-result, and server-event boundaries',
+          'non-record inputs, revoked proxies, and unsafe values reject without decoder exceptions',
+          'detached custom-dice, normalized-result, and server-event boundaries',
           'parsed-expression immutability across advantage and disadvantage evaluation',
           'strict client and server event decoding',
           'legacy result rejection across direct and independent nested room-state events',
