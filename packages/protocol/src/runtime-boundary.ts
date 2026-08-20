@@ -232,18 +232,16 @@ function snapshotBoundaryValue(value: unknown, options: DecodeOptions): DecodeRe
     const containerFailure = addBoundaryBytes(budget, 2 + (array ? candidate.length : 0));
     if (containerFailure) return containerFailure;
 
-    let properties = 0;
-    for (const key in candidate) {
-      if (!Object.prototype.hasOwnProperty.call(candidate, key)) continue;
-      properties += 1;
-      if (properties > budget.maximumProperties) {
-        return boundaryFailure(
-          'limit_exceeded',
-          `Object exceeds the runtime boundary property limit of ${budget.maximumProperties}`,
-          `<= ${budget.maximumProperties} properties`,
-          `> ${budget.maximumProperties} properties`,
-        );
-      }
+    const keys = Object.keys(candidate);
+    if (keys.length > budget.maximumProperties) {
+      return boundaryFailure(
+        'limit_exceeded',
+        `Object exceeds the runtime boundary property limit of ${budget.maximumProperties}`,
+        `<= ${budget.maximumProperties} properties`,
+        `${keys.length} properties`,
+      );
+    }
+    for (const key of keys) {
       if (key.length > budget.maximumStringLength) {
         return boundaryFailure(
           'limit_exceeded',
