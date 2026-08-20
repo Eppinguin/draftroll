@@ -110,10 +110,10 @@ function createRecoveryWebSocket(
 
     override addEventListener(
       type: string,
-      listener: EventListenerOrEventListenerObject | null,
+      listener: EventListenerOrEventListenerObject,
       options?: boolean | AddEventListenerOptions,
     ): void {
-      if (type !== 'message' || listener === null) {
+      if (type !== 'message') {
         super.addEventListener(type, listener, options);
         return;
       }
@@ -194,7 +194,9 @@ function createRecoveryFetch(fetchImpl: typeof fetch, state: RecoveryTransportSt
       if (inspection.recoveryBlockedAtEventSequence !== undefined) state.blocked = true;
       if (inspection.stalled) blockRecoverably(state);
 
-      return new Response(raw, {
+      const responseBody = new ArrayBuffer(raw.byteLength);
+      new Uint8Array(responseBody).set(raw);
+      return new Response(responseBody, {
         status: response.status,
         statusText: response.statusText,
         headers: response.headers,
