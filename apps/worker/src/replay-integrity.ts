@@ -14,7 +14,8 @@ export interface DurableReplayWindow {
   roomId: string;
   afterEventSequence: number;
   earliestEventSequence: number;
-  latestEventSequence: number;
+  /** Authoritative Durable Object event head when available. */
+  latestEventSequence?: number;
 }
 
 export type DurableReplayIssue =
@@ -166,13 +167,14 @@ export function findDurableReplayIssue(
   rows: readonly DurableReplayRow[],
   window: DurableReplayWindow,
 ): DurableReplayIssue | null {
-  if (window.afterEventSequence > window.latestEventSequence) {
+  const latestEventSequence = window.latestEventSequence;
+  if (latestEventSequence !== undefined && window.afterEventSequence > latestEventSequence) {
     return {
       kind: 'corrupt',
       eventSequence:
-        window.latestEventSequence >= Number.MAX_SAFE_INTEGER
+        latestEventSequence >= Number.MAX_SAFE_INTEGER
           ? Number.MAX_SAFE_INTEGER
-          : Math.max(1, window.latestEventSequence + 1),
+          : Math.max(1, latestEventSequence + 1),
       rowIndex: 0,
       reason: 'D1 replay cursor advances beyond the room event sequence',
     };
@@ -194,7 +196,7 @@ export function findDurableReplayIssue(
         reason: 'D1 replay row has an invalid event sequence',
       };
     }
-    if (row.event_sequence > window.latestEventSequence) {
+    if (latestEventSequence !== undefined && row.event_sequence > latestEventSequence) {
       return {
         kind: 'corrupt',
         eventSequence: row.event_sequence,
