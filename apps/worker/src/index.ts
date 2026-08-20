@@ -2027,13 +2027,14 @@ export class DiceRoomObject {
     `)
       .bind(roomId)
       .all<RoomEventRow>();
-    const latest = await this.getEventSequence();
-    const earliestSequence = earliest.results?.[0]?.event_sequence ?? latest + 1;
+    const latestEventSequence = await this.getEventSequence();
+    const earliestSequence = earliest.results?.[0]?.event_sequence ?? latestEventSequence + 1;
     const rows = query.results ?? [];
     const replayIssue = findDurableReplayIssue(rows, {
       roomId,
       afterEventSequence,
       earliestEventSequence: earliestSequence,
+      latestEventSequence,
     });
     if (replayIssue?.kind === 'gap') {
       this.logStructured('room.replay_persistence_stalled', {
@@ -2081,11 +2082,11 @@ export class DiceRoomObject {
       afterEventSequence,
       nextAfterEventSequence,
       earliestEventSequence: earliestSequence,
-      latestEventSequence: latest,
+      latestEventSequence,
       hasMore:
         replayIssue !== null ||
         recoveryBlockedAtEventSequence !== undefined ||
-        nextAfterEventSequence < latest,
+        nextAfterEventSequence < latestEventSequence,
       truncated: afterEventSequence > 0 && afterEventSequence < earliestSequence - 1,
       recoveryBlockedAtEventSequence,
       events,
