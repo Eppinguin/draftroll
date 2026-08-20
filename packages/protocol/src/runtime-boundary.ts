@@ -109,6 +109,17 @@ function defineSnapshotProperty(target: object, key: string, value: unknown): vo
   });
 }
 
+/**
+ * Accepts ordinary records from this or another realm, plus null-prototype records.
+ *
+ * Looking at the actual prototype chain avoids `Symbol.toStringTag` spoofing and rejects class
+ * instances without coupling validation to this realm's `Object.prototype` identity.
+ */
+function isPlainRecord(value: object): boolean {
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === null || Object.getPrototypeOf(prototype) === null;
+}
+
 function snapshotBoundaryValue(value: unknown, options: DecodeOptions): DecodeResult<unknown> {
   const budget = createSnapshotBudget(options);
   const active = new WeakSet<object>();
@@ -197,16 +208,12 @@ function snapshotBoundaryValue(value: unknown, options: DecodeOptions): DecodeRe
     }
 
     const array = Array.isArray(candidate);
-    const containerTag = Object.prototype.toString.call(candidate);
-    if (
-      (array && containerTag !== '[object Array]') ||
-      (!array && containerTag !== '[object Object]')
-    ) {
+    if (!array && !isPlainRecord(candidate)) {
       return boundaryFailure(
         'invalid_value',
         'Protocol object boundaries accept plain objects and arrays only',
         'plain object | array',
-        containerTag,
+        'special object container',
       );
     }
     if (array && candidate.length > budget.maximumCollectionLength) {
